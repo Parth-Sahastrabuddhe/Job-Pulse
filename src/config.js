@@ -90,6 +90,10 @@ export function getConfig() {
     maxJobsPerSource: parseNumber(process.env.MAX_JOBS_PER_SOURCE, 60),
     retentionDays: parseNumber(process.env.STATE_RETENTION_DAYS, 45),
     pollIntervalSeconds: parseNumber(process.env.POLL_INTERVAL_SECONDS, 15),
+    batchSize: parseNumber(process.env.BATCH_SIZE, 20),
+    batchDelayMs: parseNumber(process.env.BATCH_DELAY_MS, 3000),
+    slowCycleMinutes: parseNumber(process.env.SLOW_CYCLE_MINUTES, 5),
+    fastTrackCompanies: parseList(process.env.FAST_TRACK_COMPANIES, ["microsoft", "amazon"]),
     maxPostAgeMinutes: parseNumber(process.env.MAX_POST_AGE_MINUTES, 180),
     maxDateOnlyAgeDays: parseNumber(process.env.MAX_DATE_ONLY_AGE_DAYS, 1),
     maxNewJobsPerNotify: parseNumber(process.env.MAX_NEW_JOBS_PER_NOTIFY, 10),
@@ -361,6 +365,36 @@ export function getConfig() {
       apiUrl: "https://api.ashbyhq.com/posting-api/job-board/vanta",
       boardSlug: "vanta"
     },
+    docker: {
+      sourceKey: "docker",
+      sourceLabel: "Docker",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/docker",
+      boardSlug: "docker"
+    },
+    zapier: {
+      sourceKey: "zapier",
+      sourceLabel: "Zapier",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/zapier",
+      boardSlug: "zapier"
+    },
+    sentry: {
+      sourceKey: "sentry",
+      sourceLabel: "Sentry",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/sentry",
+      boardSlug: "sentry"
+    },
+    mapbox: {
+      sourceKey: "mapbox",
+      sourceLabel: "Mapbox",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/mapbox",
+      boardSlug: "mapbox"
+    },
+    lambdalabs: {
+      sourceKey: "lambdalabs",
+      sourceLabel: "Lambda",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/lambda",
+      boardSlug: "lambda"
+    },
     // --- New Greenhouse companies ---
     block: {
       sourceKey: "block",
@@ -411,6 +445,114 @@ export function getConfig() {
       apiUrl: "https://broadcom.wd1.myworkdayjobs.com/wday/cxs/broadcom/External_Career/jobs",
       baseUrl: "https://broadcom.wd1.myworkdayjobs.com/External_Career"
     },
+    nike: {
+      sourceKey: "nike",
+      sourceLabel: "Nike",
+      apiUrl: "https://nike.wd1.myworkdayjobs.com/wday/cxs/nike/nke/jobs",
+      baseUrl: "https://nike.wd1.myworkdayjobs.com/nke"
+    },
+    fidelity: {
+      sourceKey: "fidelity",
+      sourceLabel: "Fidelity",
+      apiUrl: "https://fmr.wd1.myworkdayjobs.com/wday/cxs/fmr/fidelitycareers/jobs",
+      baseUrl: "https://fmr.wd1.myworkdayjobs.com/fidelitycareers"
+    },
+    wellsfargo: {
+      sourceKey: "wellsfargo",
+      sourceLabel: "Wells Fargo",
+      apiUrl: "https://wf.wd1.myworkdayjobs.com/wday/cxs/wf/wellsfargojobs/jobs",
+      baseUrl: "https://wf.wd1.myworkdayjobs.com/wellsfargojobs"
+    },
+    bankofamerica: {
+      sourceKey: "bankofamerica",
+      sourceLabel: "Bank of America",
+      apiUrl: "https://ghr.wd1.myworkdayjobs.com/wday/cxs/ghr/lateral-us/jobs",
+      baseUrl: "https://ghr.wd1.myworkdayjobs.com/lateral-us"
+    },
+    usbank: {
+      sourceKey: "usbank",
+      sourceLabel: "U.S. Bank",
+      apiUrl: "https://usbank.wd1.myworkdayjobs.com/wday/cxs/usbank/us_bank_careers/jobs",
+      baseUrl: "https://usbank.wd1.myworkdayjobs.com/us_bank_careers"
+    },
+    threeM: {
+      sourceKey: "threeM",
+      sourceLabel: "3M",
+      apiUrl: "https://3m.wd1.myworkdayjobs.com/wday/cxs/3m/search/jobs",
+      baseUrl: "https://3m.wd1.myworkdayjobs.com/search"
+    },
+    boeing: {
+      sourceKey: "boeing",
+      sourceLabel: "Boeing",
+      apiUrl: "https://boeing.wd1.myworkdayjobs.com/wday/cxs/boeing/external_careers/jobs",
+      baseUrl: "https://boeing.wd1.myworkdayjobs.com/external_careers"
+    },
+    disney: {
+      sourceKey: "disney",
+      sourceLabel: "Disney",
+      apiUrl: "https://disney.wd5.myworkdayjobs.com/wday/cxs/disney/disneycareer/jobs",
+      baseUrl: "https://disney.wd5.myworkdayjobs.com/disneycareer"
+    },
+    amgen: {
+      sourceKey: "amgen",
+      sourceLabel: "Amgen",
+      apiUrl: "https://amgen.wd1.myworkdayjobs.com/wday/cxs/amgen/careers/jobs",
+      baseUrl: "https://amgen.wd1.myworkdayjobs.com/careers"
+    },
+    accenture: {
+      sourceKey: "accenture",
+      sourceLabel: "Accenture",
+      apiUrl: "https://accenture.wd103.myworkdayjobs.com/wday/cxs/accenture/accenturecareers/jobs",
+      baseUrl: "https://accenture.wd103.myworkdayjobs.com/accenturecareers"
+    },
+    // --- New Greenhouse companies ---
+    spacex: {
+      sourceKey: "spacex",
+      sourceLabel: "SpaceX",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/spacex/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/spacex/jobs/"
+    },
+    okta: {
+      sourceKey: "okta",
+      sourceLabel: "Okta",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/okta/jobs",
+      jobUrlBase: "https://www.okta.com/company/careers/?gh_jid="
+    },
+    deepmind: {
+      sourceKey: "deepmind",
+      sourceLabel: "DeepMind",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/deepmind/jobs",
+      jobUrlBase: "https://www.deepmind.com/careers/?gh_jid="
+    },
+    waymo: {
+      sourceKey: "waymo",
+      sourceLabel: "Waymo",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/waymo/jobs",
+      jobUrlBase: "https://waymo.com/careers/?gh_jid="
+    },
+    rubrik: {
+      sourceKey: "rubrik",
+      sourceLabel: "Rubrik",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/rubrik/jobs",
+      jobUrlBase: "https://www.rubrik.com/company/careers/?gh_jid="
+    },
+    dropbox: {
+      sourceKey: "dropbox",
+      sourceLabel: "Dropbox",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs",
+      jobUrlBase: "https://jobs.dropbox.com/listing/?gh_jid="
+    },
+    // --- New Lever companies ---
+    binance: {
+      sourceKey: "binance",
+      sourceLabel: "Binance",
+      apiUrl: "https://api.lever.co/v0/postings/binance?mode=json"
+    },
+    zoox: {
+      sourceKey: "zoox",
+      sourceLabel: "Zoox",
+      apiUrl: "https://api.lever.co/v0/postings/zoox?mode=json"
+    },
     // --- SmartRecruiters companies ---
     servicenow: {
       sourceKey: "servicenow",
@@ -421,6 +563,11 @@ export function getConfig() {
       sourceKey: "visa",
       sourceLabel: "Visa",
       companySlug: "Visa"
+    },
+    aristanetworks: {
+      sourceKey: "aristanetworks",
+      sourceLabel: "Arista Networks",
+      companySlug: "AristaNetworks"
     }
   };
 }

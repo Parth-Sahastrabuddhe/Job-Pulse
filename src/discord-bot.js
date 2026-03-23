@@ -267,7 +267,33 @@ const JOB_URL_PATTERNS = [
   { source: "visa", sourceLabel: "Visa", regex: /jobs\.smartrecruiters\.com\/Visa\/([a-f0-9-]+)/i },
   { source: "goldmansachs", sourceLabel: "Goldman Sachs", regex: /higher\.gs\.com\/roles\/(\d+)/i },
   { source: "uber", sourceLabel: "Uber", regex: /uber\.com\/.*?careers\/list\/(\d+)/i },
-  { source: "confluent", sourceLabel: "Confluent", regex: /careers\.confluent\.io\/jobs\/job\/([a-f0-9-]+)/i }
+  { source: "confluent", sourceLabel: "Confluent", regex: /careers\.confluent\.io\/jobs\/job\/([a-f0-9-]+)/i },
+  { source: "waymo", sourceLabel: "Waymo", regex: /(?:waymo\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { source: "rubrik", sourceLabel: "Rubrik", regex: /(?:rubrik\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { source: "dropbox", sourceLabel: "Dropbox", regex: /(?:dropbox\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { source: "zoox", sourceLabel: "Zoox", regex: /jobs\.lever\.co\/zoox\/([a-f0-9-]+)/i },
+  { source: "nike", sourceLabel: "Nike", regex: /nike\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { source: "usbank", sourceLabel: "U.S. Bank", regex: /usbank\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { source: "ford", sourceLabel: "Ford Motor", regex: /efds\.fa\.em5\.oraclecloud\.com\/.*?job\/(\d+)/i },
+  { source: "aristanetworks", sourceLabel: "Arista Networks", regex: /jobs\.smartrecruiters\.com\/AristaNetworks\/([a-f0-9-]+)/i },
+  { source: "fidelity", sourceLabel: "Fidelity", regex: /fmr\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { source: "wellsfargo", sourceLabel: "Wells Fargo", regex: /wf\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { source: "bankofamerica", sourceLabel: "Bank of America", regex: /ghr\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { source: "citi", sourceLabel: "Citi", regex: /jobs\.citi\.com\/job\/[^/]+\/[^/]+\/287\/(\d+)/i },
+  { source: "spacex", sourceLabel: "SpaceX", regex: /(?:spacex\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { source: "okta", sourceLabel: "Okta", regex: /(?:okta\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { source: "deepmind", sourceLabel: "DeepMind", regex: /(?:deepmind\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { source: "binance", sourceLabel: "Binance", regex: /jobs\.lever\.co\/binance\/([a-f0-9-]+)/i },
+  { source: "docker", sourceLabel: "Docker", regex: /jobs\.ashbyhq\.com\/docker\/([a-f0-9-]+)/i },
+  { source: "zapier", sourceLabel: "Zapier", regex: /jobs\.ashbyhq\.com\/zapier\/([a-f0-9-]+)/i },
+  { source: "sentry", sourceLabel: "Sentry", regex: /jobs\.ashbyhq\.com\/sentry\/([a-f0-9-]+)/i },
+  { source: "mapbox", sourceLabel: "Mapbox", regex: /jobs\.ashbyhq\.com\/mapbox\/([a-f0-9-]+)/i },
+  { source: "lambdalabs", sourceLabel: "Lambda", regex: /jobs\.ashbyhq\.com\/lambda\/([a-f0-9-]+)/i },
+  { source: "threeM", sourceLabel: "3M", regex: /3m\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { source: "boeing", sourceLabel: "Boeing", regex: /boeing\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { source: "disney", sourceLabel: "Disney", regex: /disney\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { source: "amgen", sourceLabel: "Amgen", regex: /amgen\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { source: "accenture", sourceLabel: "Accenture", regex: /accenture\.wd103\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i }
 ];
 
 function extractJobFromMessage(urlOrText) {
@@ -287,25 +313,69 @@ async function handleFitCheck(interaction, hash) {
   const jobUrl = getJobUrlFromMessage(interaction.message);
   const jobInfo = extractJobFromMessage(jobUrl);
 
-  if (!jobInfo) {
-    await thread.send("Could not find a job URL in this message.");
+  // Extract job details from embed for fallback description
+  const embedDetails = extractJobInfoFromMessage(interaction.message);
+
+  // Look up the actual job from DB
+  const db = getDb();
+  let sourceKey = jobInfo?.sourceKey || "";
+  let jobId = jobInfo?.id || "";
+  let jobTitle = embedDetails.role || "";
+  let jobCompany = embedDetails.company || "";
+  let jobLocation = "";
+
+  if (db) {
+    const jobKey = findJobKeyByMessageId(interaction.message.id);
+    if (jobKey) {
+      const row = db.prepare("SELECT source_key, source_label, id, title, location, url FROM seen_jobs WHERE key = ?").get(jobKey);
+      if (row) {
+        sourceKey = row.source_key;
+        jobId = row.id;
+        jobTitle = row.title;
+        jobCompany = row.source_label;
+        jobLocation = row.location;
+      }
+    }
+  }
+
+  if (!sourceKey || !jobId) {
+    await thread.send("Could not identify this job. Try using View Job instead.");
     return;
   }
 
-  const dirId = `${jobInfo.sourceKey}-${jobInfo.id}`;
+  const dirId = `${sourceKey}-${jobId}`.replace(/[^a-zA-Z0-9_-]/g, "_");
   await thread.send("Running fit check... This may take 20-40 seconds.");
 
-  let hasDescription = false;
   try {
-    await fs.access(`data/jobs/${dirId}/description.txt`);
-    hasDescription = true;
-  } catch {}
+    // Try to fetch job description if we don't have one
+    let hasDescription = false;
+    try {
+      await fs.access(`data/jobs/${dirId}/description.txt`);
+      const stat = await fs.stat(`data/jobs/${dirId}/description.txt`);
+      hasDescription = stat.size > 50; // Must have meaningful content
+    } catch {}
 
-  try {
     if (!hasDescription) {
       console.log(`[fit-check] Fetching job description for ${dirId}...`);
-      const description = await fetchJobDescription(jobInfo);
-      await saveJobData(jobInfo, description || "");
+      const jobForFetch = {
+        sourceKey,
+        id: jobId,
+        url: jobUrl || embedDetails.url || "",
+        sourceLabel: jobCompany
+      };
+      let description = null;
+      try {
+        description = await fetchJobDescription(jobForFetch);
+      } catch (fetchErr) {
+        console.log(`[fit-check] Description fetch failed for ${dirId}: ${fetchErr.message}`);
+      }
+
+      if (!description || description.length < 50) {
+        await thread.send(`Could not fetch job description for **${jobCompany} — ${jobTitle}**.\nUse the View Job button to check the listing directly.`);
+        return;
+      }
+
+      await saveJobData({ sourceKey, id: jobId }, description);
     }
 
     const result = await fitCheckResume(dirId, (msg) => console.log(`[fit-check] ${msg}`));
@@ -325,9 +395,8 @@ async function handleFitCheck(interaction, hash) {
       await interaction.message.edit({ components: [updatedRow] });
     }
   } catch (error) {
-    console.error(`[fit-check] Error: ${error.message}`);
-    const errMsg = error.message.length > 500 ? error.message.slice(0, 500) + "..." : error.message;
-    await thread.send(`Fit check failed: ${errMsg}`);
+    console.error(`[fit-check] Error for ${sourceKey}-${jobId}: ${error.message}`);
+    await thread.send(`Could not complete fit check for **${jobCompany} — ${jobTitle}**.\nUse the View Job button to check the listing directly.`);
   }
 }
 

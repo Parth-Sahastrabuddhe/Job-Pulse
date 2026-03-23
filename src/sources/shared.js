@@ -487,6 +487,8 @@ export function guessPostedFromCardText(cardText) {
   return null;
 }
 
+const NON_US_CITIES = /\b(Bengaluru|Bangalore|Hyderabad|Mumbai|Pune|Chennai|Delhi|Gurgaon|Noida|Kolkata|Amsterdam|London|Berlin|Munich|Frankfurt|Paris|Dublin|Tokyo|Singapore|Toronto|Vancouver|Montreal|Sydney|Melbourne|Shanghai|Beijing|Shenzhen|Seoul|Zurich|Stockholm|Warsaw|Prague|Lisbon|Madrid|Milan|Rome|Barcelona|Brussels|Vienna|Copenhagen|Oslo|Helsinki|Bucharest|Budapest|Krakow|Tel Aviv|Sao Paulo|Mexico City|Bogota|Manila|Kuala Lumpur|Jakarta|Bangkok|Ho Chi Minh|Cairo|Lagos|Nairobi|Johannesburg|Cape Town|Dubai|Riyadh|Hong Kong|Luxembourg|Zagreb|Belgrade|Tallinn|Riga|Vilnius|Kyiv|Minsk|Moscow|Istanbul|Karachi|Lahore|Dhaka|Colombo|Auckland|Wellington|Oxford|Cambridge|Edinburgh|Manchester|Birmingham UK|Bristol|Leeds|Glasgow|Hamburg|Cologne|Stuttgart|Lyon|Marseille|Toulouse|Osaka|Nagoya|Taipei|Hsinchu|Mississauga|Ottawa|Calgary|Edmonton|Brisbane|Perth|Adelaide|Guelph|Waterloo ON|Belfast|Cork|Limerick|Gothenburg|Malmo|Rotterdam|The Hague|Eindhoven)\b/i;
+
 export function inferCountryCodeFromLocation(location) {
   const text = normalizeWhitespace(location);
 
@@ -505,6 +507,11 @@ export function inferCountryCodeFromLocation(location) {
 
   if (US_CITY_STATE_CODE_PATTERN.test(text) || US_STATE_NAME_PATTERN.test(text)) {
     return "US";
+  }
+
+  // Detect known non-US locations
+  if (NON_US_COUNTRIES.test(text) || NON_US_CITIES.test(text)) {
+    return "NON-US";
   }
 
   return "";
@@ -583,7 +590,7 @@ export function jobIsFresh(job, referenceTime, config) {
     return true;
   }
 
-  if (job.postedPrecision === "date") {
+  if (job.postedPrecision === "date" || job.postedPrecision === "day") {
     const jobDateStamp = getUtcDateStamp(job.postedAt);
     const referenceDateStamp = getUtcDateStamp(referenceMs);
 

@@ -28,7 +28,14 @@ export function getJobDir(job) {
 
 async function fetchMicrosoftDescription(job) {
   const url = `https://apply.careers.microsoft.com/api/pcsx/position_details?position_id=${job.id}&domain=microsoft.com`;
-  const resp = await fetch(url, { headers: { accept: "application/json" } });
+  const resp = await fetch(url, {
+    headers: {
+      "accept": "application/json",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      "referer": `https://apply.careers.microsoft.com/careers/job/${job.id}`,
+      "origin": "https://apply.careers.microsoft.com"
+    }
+  });
   if (!resp.ok) return null;
 
   const data = await resp.json();
@@ -195,7 +202,9 @@ const GREENHOUSE_BOARDS = {
   discord: "discord", twilio: "twilio", cloudflare: "cloudflare", coinbase: "coinbase",
   roblox: "roblox", anthropic: "anthropic", airbnb: "airbnb", doordash: "doordashusa",
   reddit: "reddit", pinterest: "pinterest", datadog: "datadog", mongodb: "mongodb",
-  robinhood: "robinhood", hubspot: "hubspot", instacart: "instacart", samsara: "samsara"
+  robinhood: "robinhood", hubspot: "hubspot", instacart: "instacart", samsara: "samsara",
+  block: "block", elastic: "elastic", waymo: "waymo", rubrik: "rubrik",
+  dropbox: "dropbox", spacex: "spacex", okta: "okta", deepmind: "deepmind"
 };
 
 async function fetchGreenhouseDescription(job) {
@@ -239,6 +248,181 @@ async function fetchLeverDescription(job) {
     else if (data.description) parts.push(`\nDescription:\n${stripHtml(data.description)}`);
     if (data.additionalPlain) parts.push(`\nAdditional:\n${data.additionalPlain}`);
     return parts.length > 1 ? parts.join("\n") : null;
+  } catch {
+    return null;
+  }
+}
+
+const SMARTRECRUITERS_SLUGS = { visa: "Visa", servicenow: "ServiceNow", aristanetworks: "AristaNetworks" };
+
+async function fetchConfluentDescription(job) {
+  try {
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.goto(`https://careers.confluent.io/jobs/job/${job.id}`, { waitUntil: "networkidle", timeout: 30000 });
+      await page.waitForTimeout(3000);
+      const desc = await page.evaluate(() => {
+        const el = document.querySelector("[class*=description], [class*=detail], article, main");
+        return el?.textContent?.trim() || "";
+      });
+      return desc.length > 50 ? desc : null;
+    } finally { await browser.close(); }
+  } catch { return null; }
+}
+
+async function fetchOracleDescription(job) {
+  try {
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.goto(`https://careers.oracle.com/jobs/#en/sites/jobsearch/job/${job.id}`, { timeout: 60000 });
+      try { await page.waitForSelector(".job-details__body", { timeout: 15000 }); } catch {}
+      await page.waitForTimeout(5000);
+      const desc = await page.evaluate(() => {
+        const el = document.querySelector(".job-details__body");
+        if (el && el.textContent.trim().length > 50) return el.textContent.trim();
+        const blocks = Array.from(document.querySelectorAll("div, section"))
+          .filter((e) => { const t = e.textContent.trim(); return t.length > 200 && t.length < 10000 && !t.includes(".component-styling"); })
+          .sort((a, b) => b.textContent.length - a.textContent.length);
+        return blocks[0]?.textContent?.trim() || "";
+      });
+      return desc.length > 50 ? desc : null;
+    } finally { await browser.close(); }
+  } catch { return null; }
+}
+
+async function fetchOracleHCMDescription(job) {
+  // JPMorgan and Ford use Oracle HCM - same Playwright approach
+  try {
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.goto(job.url, { timeout: 60000 });
+      try { await page.waitForSelector(".job-details__body, [class*=requisition]", { timeout: 15000 }); } catch {}
+      await page.waitForTimeout(5000);
+      const desc = await page.evaluate(() => {
+        for (const sel of [".job-details__body", "[class*=requisition-description]", "[class*=job-detail]"]) {
+          const el = document.querySelector(sel);
+          if (el && el.textContent.trim().length > 50) return el.textContent.trim();
+        }
+        const blocks = Array.from(document.querySelectorAll("div, section"))
+          .filter((e) => { const t = e.textContent.trim(); return t.length > 200 && t.length < 10000; })
+          .sort((a, b) => b.textContent.length - a.textContent.length);
+        return blocks[0]?.textContent?.trim() || "";
+      });
+      return desc.length > 50 ? desc : null;
+    } finally { await browser.close(); }
+  } catch { return null; }
+}
+
+async function fetchUberDescription(job) {
+  // Uber's detail page doesn't work. Fetch via the search API which includes descriptions.
+  try {
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      let jobsData = null;
+      page.on("response", async (resp) => {
+        if (resp.url().includes("loadSearchJobsResults")) {
+          try { jobsData = await resp.json(); } catch {}
+        }
+      });
+      await page.goto("https://www.uber.com/us/en/careers/list/", { waitUntil: "networkidle", timeout: 30000 });
+      await page.waitForTimeout(3000);
+
+      const match = jobsData?.data?.results?.find((j) => String(j.id) === String(job.id));
+      if (match?.description) {
+        return `Title: ${match.title}\n\n${match.description}`;
+      }
+      return null;
+    } finally { await browser.close(); }
+  } catch { return null; }
+}
+
+async function fetchGoldmanSachsDescription(job) {
+  try {
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.goto(job.url, { waitUntil: "networkidle", timeout: 30000 });
+      await page.waitForTimeout(3000);
+
+      const description = await page.evaluate(() => {
+        const el = document.querySelector(".job-description, [class*=job-description]");
+        return el?.textContent?.trim() || "";
+      });
+
+      return description.length > 50 ? description : null;
+    } finally {
+      await browser.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+async function fetchSmartRecruitersDescription(job) {
+  try {
+    const companySlug = SMARTRECRUITERS_SLUGS[job.sourceKey];
+    if (!companySlug) return null;
+
+    const response = await fetch(`https://api.smartrecruiters.com/v1/companies/${companySlug}/postings/${job.id}`, {
+      headers: { "accept": "application/json" }
+    });
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const sections = data.jobAd?.sections || {};
+
+    const parts = [
+      data.name && `Title: ${data.name}`,
+      data.location?.city && `Location: ${[data.location.city, data.location.region, data.location.country].filter(Boolean).join(", ")}`,
+      sections.jobDescription?.text && `Job Description:\n${stripHtml(sections.jobDescription.text)}`,
+      sections.qualifications?.text && `Qualifications:\n${stripHtml(sections.qualifications.text)}`,
+      sections.additionalInformation?.text && `Additional Information:\n${stripHtml(sections.additionalInformation.text)}`
+    ].filter(Boolean);
+
+    return parts.join("\n\n") || null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchAppleDescription(job) {
+  try {
+    const response = await fetch(job.url, {
+      headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+    });
+    if (!response.ok) return null;
+
+    const html = await response.text();
+    const match = html.match(/__staticRouterHydrationData\s*=\s*JSON\.parse\("(.+?)"\);/);
+    if (!match) return null;
+
+    const raw = match[1].replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\');
+
+    const data = JSON.parse(raw);
+    const jd = data?.loaderData?.jobDetails?.jobsData;
+    if (!jd) return null;
+
+    const parts = [
+      jd.postingTitle && `Title: ${jd.postingTitle}`,
+      jd.jobSummary && `Summary:\n${jd.jobSummary}`,
+      jd.description && `Description:\n${jd.description}`,
+      jd.minimumQualifications && `Minimum Qualifications:\n${jd.minimumQualifications}`,
+      jd.preferredQualifications && `Preferred Qualifications:\n${jd.preferredQualifications}`
+    ].filter(Boolean);
+
+    return parts.join("\n\n") || null;
   } catch {
     return null;
   }
@@ -316,7 +500,7 @@ async function fetchDescriptionFallback(job) {
   return null;
 }
 
-const WORKDAY_SOURCES = ["nvidia", "salesforce", "adobe", "cisco", "netflix", "snap"];
+const WORKDAY_SOURCES = ["nvidia", "salesforce", "adobe", "cisco", "netflix", "snap", "intel", "paypal", "capitalone", "walmartglobaltech", "samsung", "broadcom", "nike", "usbank", "fidelity", "wellsfargo", "bankofamerica", "threeM", "boeing", "disney", "amgen", "accenture"];
 
 function workdayApiUrl(jobUrl) {
   // Convert public URL to API URL by inserting /wday/cxs/{company}/ after the domain
@@ -353,11 +537,12 @@ async function fetchWorkdayDescription(job) {
   return null;
 }
 
-const ASHBY_SOURCES = ["openai", "notion", "ramp", "snowflake", "cursor", "airtable", "vanta"];
+const ASHBY_SOURCES = ["openai", "notion", "ramp", "snowflake", "cursor", "airtable", "vanta", "docker", "zapier", "sentry", "mapbox", "lambdalabs"];
 
 const ASHBY_BOARDS = {
   openai: "openai", notion: "notion", ramp: "ramp",
-  snowflake: "snowflake", cursor: "cursor", airtable: "airtable", vanta: "vanta"
+  snowflake: "snowflake", cursor: "cursor", airtable: "airtable", vanta: "vanta",
+  docker: "docker", zapier: "zapier", sentry: "sentry", mapbox: "mapbox", lambdalabs: "lambda"
 };
 
 async function fetchAshbyDescription(job) {
@@ -366,23 +551,33 @@ async function fetchAshbyDescription(job) {
   const board = ASHBY_BOARDS[job.sourceKey];
   if (!board) return null;
 
+  // Use Ashby GraphQL API for full description
   try {
-    const resp = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${board}`, {
-      headers: { accept: "application/json" }
+    const resp = await fetch("https://jobs.ashbyhq.com/api/non-user-graphql", {
+      method: "POST",
+      headers: { "content-type": "application/json", "user-agent": "Mozilla/5.0" },
+      body: JSON.stringify({
+        operationName: "ApiJobPosting",
+        variables: { organizationHostedJobsPageName: board, jobPostingId: job.id },
+        query: `query ApiJobPosting($organizationHostedJobsPageName: String!, $jobPostingId: String!) {
+          jobPosting(organizationHostedJobsPageName: $organizationHostedJobsPageName, jobPostingId: $jobPostingId) {
+            title descriptionHtml locationName departmentName
+          }
+        }`
+      })
     });
     if (!resp.ok) return null;
 
     const data = await resp.json();
-    const posting = data.jobs?.find(j => j.id === job.id);
+    const posting = data?.data?.jobPosting;
     if (!posting) return null;
 
-    const parts = [];
-    if (posting.title) parts.push(`Title: ${posting.title}`);
-    if (posting.location) parts.push(`Location: ${posting.location}`);
-    if (posting.department) parts.push(`Department: ${posting.department}`);
-    if (posting.team) parts.push(`Team: ${posting.team}`);
-    if (posting.descriptionPlain) parts.push(`\nDescription:\n${posting.descriptionPlain}`);
-    else if (posting.descriptionHtml) parts.push(`\nDescription:\n${stripHtml(posting.descriptionHtml)}`);
+    const parts = [
+      posting.title && `Title: ${posting.title}`,
+      posting.locationName && `Location: ${posting.locationName}`,
+      posting.departmentName && `Department: ${posting.departmentName}`,
+      posting.descriptionHtml && `\nDescription:\n${stripHtml(posting.descriptionHtml)}`
+    ].filter(Boolean);
     return parts.length > 1 ? parts.join("\n") : null;
   } catch {}
 
@@ -414,7 +609,7 @@ export async function fetchJobDescription(job, rawJobData) {
   }
 
   // Lever API fallback
-  if (!description && (job.url?.includes("lever.co") || ["palantir", "plaid", "spotify", "creditkarma", "quora"].includes(job.sourceKey))) {
+  if (!description && (job.url?.includes("lever.co") || ["palantir", "plaid", "spotify", "creditkarma", "quora", "zoox", "binance"].includes(job.sourceKey))) {
     description = await fetchLeverDescription(job);
   }
 
@@ -426,6 +621,41 @@ export async function fetchJobDescription(job, rawJobData) {
   // Workday HTML fallback
   if (!description && WORKDAY_SOURCES.includes(job.sourceKey)) {
     description = await fetchWorkdayDescription(job);
+  }
+
+  // Oracle (HCM SPA, needs Playwright to render)
+  if (!description && job.sourceKey === "oracle") {
+    description = await fetchOracleDescription(job);
+  }
+
+  // Uber (description available from search API, but detail page doesn't exist)
+  if (!description && job.sourceKey === "uber") {
+    description = await fetchUberDescription(job);
+  }
+
+  // JPMorgan / Ford (Oracle HCM - same approach)
+  if (!description && (job.sourceKey === "jpmorgan" || job.sourceKey === "ford")) {
+    description = await fetchOracleHCMDescription(job);
+  }
+
+  // Confluent (Vercel bot protection, needs Playwright)
+  if (!description && job.sourceKey === "confluent") {
+    description = await fetchConfluentDescription(job);
+  }
+
+  // Goldman Sachs (Contentful CMS, needs Playwright to render)
+  if (!description && job.sourceKey === "goldmansachs") {
+    description = await fetchGoldmanSachsDescription(job);
+  }
+
+  // SmartRecruiters (Visa, ServiceNow, Arista Networks)
+  if (!description && ["visa", "servicenow", "aristanetworks"].includes(job.sourceKey)) {
+    description = await fetchSmartRecruitersDescription(job);
+  }
+
+  // Apple SSR hydration data
+  if (!description && job.sourceKey === "apple") {
+    description = await fetchAppleDescription(job);
   }
 
   // Universal HTML fallback for any company

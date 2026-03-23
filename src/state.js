@@ -1,7 +1,6 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
-import { sameLogicalJob } from "./sources/shared.js";
 
 let db = null;
 
@@ -128,21 +127,31 @@ export function hasSeenJobs() {
   return row.cnt > 0;
 }
 
+// SQL-indexed dedup — O(1) per job instead of O(n)
+const _stmtByKey = () => db.prepare("SELECT 1 FROM seen_jobs WHERE key = ?");
+const _stmtBySourceId = () => db.prepare("SELECT 1 FROM seen_jobs WHERE source_key = ? AND id = ?");
+
 export function getNewJobs(jobs) {
-  const allSeen = db.prepare("SELECT * FROM seen_jobs").all();
-  const seenMap = new Map(allSeen.map((r) => [r.key, r]));
+  const byKey = _stmtByKey();
+  const bySourceId = _stmtBySourceId();
 
   return jobs.filter((job) => {
-    if (seenMap.has(job.key)) return false;
-    for (const seen of allSeen) {
-      if (sameLogicalJob(rowToJob(seen), job)) return false;
-    }
+    // Primary check: exact key match (indexed)
+    if (byKey.get(job.key)) return false;
+    // Fallback: same source + same ID but different key hash
+    if (bySourceId.get(job.sourceKey, String(job.id))) return false;
     return true;
   });
 }
 
+// SQL-indexed upsert — no full table scan
+const _stmtGetFirstSeen = () => db.prepare("SELECT first_seen_at FROM seen_jobs WHERE key = ?");
+const _stmtGetBySourceId = () => db.prepare("SELECT key, first_seen_at FROM seen_jobs WHERE source_key = ? AND id = ? AND key != ?");
+
 export function upsertJobs(jobs, seenAt) {
-  const allSeen = db.prepare("SELECT * FROM seen_jobs").all();
+  const getFirstSeen = _stmtGetFirstSeen();
+  const getBySourceId = _stmtGetBySourceId();
+  const deleteStmt = db.prepare("DELETE FROM seen_jobs WHERE key = ?");
 
   const upsert = db.prepare(`
     INSERT INTO seen_jobs
@@ -157,24 +166,21 @@ export function upsertJobs(jobs, seenAt) {
       last_seen_at = @lastSeenAt
   `);
 
-  const deleteStmt = db.prepare("DELETE FROM seen_jobs WHERE key = ?");
-
   const run = db.transaction(() => {
     for (const job of jobs) {
-      // Check if this job exists under a different key (sameLogicalJob match)
       let existingFirstSeen = null;
-      for (const seen of allSeen) {
-        if (seen.key !== job.key && sameLogicalJob(rowToJob(seen), job)) {
-          existingFirstSeen = seen.first_seen_at;
-          deleteStmt.run(seen.key);
-          break;
-        }
+
+      // Check if same source+id exists under a different key (re-keyed job)
+      const altRow = getBySourceId.get(job.sourceKey, String(job.id), job.key);
+      if (altRow) {
+        existingFirstSeen = altRow.first_seen_at;
+        deleteStmt.run(altRow.key);
       }
 
-      // Check if already exists under same key
+      // Check if exists under same key
       if (!existingFirstSeen) {
-        const existing = allSeen.find((s) => s.key === job.key);
-        if (existing) existingFirstSeen = existing.first_seen_at;
+        const sameRow = getFirstSeen.get(job.key);
+        if (sameRow) existingFirstSeen = sameRow.first_seen_at;
       }
 
       upsert.run({
@@ -235,20 +241,4 @@ export function getPendingCompanies() {
 
 export function updateCompanyQueueStatus(id, status, notes) {
   db.prepare("UPDATE company_queue SET status = ?, notes = ? WHERE id = ?").run(status, notes || "", id);
-}
-
-function rowToJob(row) {
-  return {
-    key: row.key,
-    sourceKey: row.source_key,
-    sourceLabel: row.source_label,
-    id: row.id,
-    title: row.title,
-    location: row.location,
-    url: row.url,
-    postedText: row.posted_text,
-    postedAt: row.posted_at,
-    postedPrecision: row.posted_precision,
-    countryCode: row.country_code
-  };
 }

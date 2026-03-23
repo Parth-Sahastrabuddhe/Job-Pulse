@@ -71,7 +71,7 @@ function parseWorkdayJob(raw, companyConfig) {
   if (!title || !titleFilter(title)) return null;
 
   const id = raw.bulletFields?.[0] || "";
-  const location = raw.locationsText || "";
+  const location = raw.locationsText || raw.bulletFields?.[1] || "";
   const countryCode = inferCountry(location);
   const posted = parseRelativeDate(raw.postedOn);
   const url = `${companyConfig.baseUrl}${raw.externalPath}`;
