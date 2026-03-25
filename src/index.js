@@ -303,10 +303,13 @@ async function runBatchLoop(config, flags, registry) {
     // --- Slow lane: runs on its own timer ---
     if (slowEntries.length > 0 && (Date.now() - lastSlowRun) >= slowCycleMs) {
       log(`Running slow lane (${slowEntries.length} sources)...`);
-      // Run slow entries sequentially to avoid multiple browser instances
+      // Run slow entries sequentially with a 60-second timeout each
       for (const entry of slowEntries) {
         try {
-          const jobs = await entry.collect(config);
+          const jobs = await Promise.race([
+            entry.collect(config),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout after 60s")), 60000))
+          ]);
           await processBatchResults(config, flags, jobs, `slow:${entry.key}`);
         } catch (error) {
           log(`[slow:${entry.key}] Error: ${error.message}`);
