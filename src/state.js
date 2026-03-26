@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 let db = null;
+let _hasSeenJobsCached = false;
 
 export function initDb(dbFile) {
   fs.mkdirSync(path.dirname(dbFile), { recursive: true });
@@ -123,8 +124,13 @@ export function migrateFromJson(jsonFile) {
 }
 
 export function hasSeenJobs() {
+  if (_hasSeenJobsCached) return true;
   const row = db.prepare("SELECT COUNT(*) as cnt FROM seen_jobs").get();
-  return row.cnt > 0;
+  if (row.cnt > 0) {
+    _hasSeenJobsCached = true;
+    return true;
+  }
+  return false;
 }
 
 // SQL-indexed dedup — O(1) per job instead of O(n)
@@ -149,6 +155,7 @@ const _stmtGetFirstSeen = () => db.prepare("SELECT first_seen_at FROM seen_jobs 
 const _stmtGetBySourceId = () => db.prepare("SELECT key, first_seen_at FROM seen_jobs WHERE source_key = ? AND id = ? AND key != ?");
 
 export function upsertJobs(jobs, seenAt) {
+  _hasSeenJobsCached = true;
   const getFirstSeen = _stmtGetFirstSeen();
   const getBySourceId = _stmtGetBySourceId();
   const deleteStmt = db.prepare("DELETE FROM seen_jobs WHERE key = ?");

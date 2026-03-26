@@ -29,7 +29,7 @@ function parseSmartRecruitersJob(raw, companyConfig) {
   const loc = raw.location || {};
   const locationParts = [loc.city, loc.region, loc.country].filter(Boolean);
   const location = locationParts.join(", ");
-  const countryCode = loc.country === "United States" || loc.countryCode === "us"
+  const countryCode = loc.country === "United States" || loc.countryCode?.toUpperCase() === "US"
     ? "US"
     : inferCountry(location);
 

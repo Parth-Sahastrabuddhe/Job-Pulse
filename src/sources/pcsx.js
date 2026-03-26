@@ -2,7 +2,7 @@ import { dedupeJobs, finalizeJob } from "./shared.js";
 
 function isEntryMidLevelSwe(title) {
   const t = title.trim();
-  if (!/software\s+engineer/i.test(t)) {
+  if (!/software\s+(engineer|develop)/i.test(t)) {
     return false;
   }
   if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execSync } from "node:child_process";
 import { getConfig, PROJECT_ROOT } from "./config.js";
 import { sendDiscordBotNotification, startDiscordBot, stopDiscordBot } from "./discord-bot.js";
 import { fetchJobDescription, jobDirId, saveJobData } from "./job-description.js";
@@ -212,10 +213,16 @@ async function processBatchResults(config, flags, jobs, batchLabel) {
 // --- Batch Collection ---
 
 async function collectBatch(config, entries) {
+  const COLLECTOR_TIMEOUT_MS = 30_000;
   const results = await Promise.all(
     entries.map(async (entry) => {
       try {
-        return await entry.collect(config);
+        return await Promise.race([
+          entry.collect(config),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Collector timed out after 30s')), COLLECTOR_TIMEOUT_MS)
+          ),
+        ]);
       } catch (error) {
         log(`[${entry.key}] Collection error: ${error.message}`);
         return [];
@@ -278,44 +285,52 @@ async function runBatchLoop(config, flags, registry) {
   while (true) {
     const cycleStart = Date.now();
 
-    // --- Fast lane: always runs ---
-    const fastJobs = await collectBatch(config, fastEntries);
-    await processBatchResults(config, flags, fastJobs, "fast");
+    try {
+      // --- Fast lane: always runs ---
+      try {
+        const fastJobs = await collectBatch(config, fastEntries);
+        await processBatchResults(config, flags, fastJobs, "fast");
+      } catch (fastError) {
+        log(`[fast lane] Error: ${fastError.message}`);
+      }
 
-    // --- Normal lane: current batch ---
-    if (batches.length > 0) {
-      const currentBatch = batches[batchIndex];
-      const batchLabel = `batch ${batchIndex + 1}/${totalBatches}`;
-      log(`[${batchLabel}] Running ${currentBatch.length} companies: ${currentBatch.map((e) => e.key).join(", ")}`);
-      const normalJobs = await collectBatch(config, currentBatch);
-      await processBatchResults(config, flags, normalJobs, batchLabel);
+      // --- Normal lane: current batch ---
+      if (batches.length > 0) {
+        const currentBatch = batches[batchIndex];
+        const batchLabel = `batch ${batchIndex + 1}/${totalBatches}`;
+        log(`[${batchLabel}] Running ${currentBatch.length} companies: ${currentBatch.map((e) => e.key).join(", ")}`);
+        const normalJobs = await collectBatch(config, currentBatch);
+        await processBatchResults(config, flags, normalJobs, batchLabel);
 
-      batchIndex = (batchIndex + 1) % totalBatches;
-      if (batchIndex === 0) {
-        rotationCount++;
-        pruneState(config.retentionDays);
-        if (rotationCount % 10 === 0) {
-          log(`Completed ${rotationCount} full rotations.`);
+        batchIndex = (batchIndex + 1) % totalBatches;
+        if (batchIndex === 0) {
+          rotationCount++;
+          pruneState(config.retentionDays);
+          if (rotationCount % 10 === 0) {
+            log(`Completed ${rotationCount} full rotations.`);
+          }
         }
       }
-    }
 
-    // --- Slow lane: runs on its own timer ---
-    if (slowEntries.length > 0 && (Date.now() - lastSlowRun) >= slowCycleMs) {
-      log(`Running slow lane (${slowEntries.length} sources)...`);
-      // Run slow entries sequentially with a 60-second timeout each
-      for (const entry of slowEntries) {
-        try {
-          const jobs = await Promise.race([
-            entry.collect(config),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout after 60s")), 60000))
-          ]);
-          await processBatchResults(config, flags, jobs, `slow:${entry.key}`);
-        } catch (error) {
-          log(`[slow:${entry.key}] Error: ${error.message}`);
+      // --- Slow lane: runs on its own timer ---
+      if (slowEntries.length > 0 && (Date.now() - lastSlowRun) >= slowCycleMs) {
+        log(`Running slow lane (${slowEntries.length} sources)...`);
+        // Run slow entries sequentially with a 60-second timeout each
+        for (const entry of slowEntries) {
+          try {
+            const jobs = await Promise.race([
+              entry.collect(config),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout after 60s")), 60000))
+            ]);
+            await processBatchResults(config, flags, jobs, `slow:${entry.key}`);
+          } catch (error) {
+            log(`[slow:${entry.key}] Error: ${error.message}`);
+          }
         }
+        lastSlowRun = Date.now();
       }
-      lastSlowRun = Date.now();
+    } catch (cycleError) {
+      log(`[cycle] Unhandled error: ${cycleError.message}`);
     }
 
     if (!flags.watch) break;
@@ -405,7 +420,6 @@ function killOldProcess() {
         try { process.kill(pid, "SIGKILL"); } catch {}
         // Windows fallback: taskkill force-kills the process tree
         try {
-          const { execSync } = require("node:child_process");
           execSync(`taskkill /F /T /PID ${pid}`, { stdio: "ignore", timeout: 5000 });
         } catch {}
       }

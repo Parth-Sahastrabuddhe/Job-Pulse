@@ -5,7 +5,8 @@ function isEntryMidLevelSwe(title) {
   if (!/software\s+(engineer|develop)/i.test(t)) {
     return false;
   }
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {
+  // Standard filter + banking titles (VP/SVP are senior at banks)
+  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|vice\s+president|VP|SVP|AVP|managing\s+director|MD)\b/i.test(t)) {
     return false;
   }
   return true;

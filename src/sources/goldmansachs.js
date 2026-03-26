@@ -18,6 +18,9 @@ const GET_ROLES_QUERY = `query GetRoles($searchQueryInput: RoleSearchQueryInput!
       }
       status
       division
+      externalSource {
+        sourceId
+      }
     }
   }
 }`;

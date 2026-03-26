@@ -77,7 +77,7 @@ async function fetchAmazonDescription(job, rawJobData) {
     });
     if (apiResp.ok) {
       const apiData = await apiResp.json();
-      const apiJob = apiData.jobs?.[0];
+      const apiJob = apiData.jobs?.find((j) => String(j.id_icims ?? j.id) === String(job.id));
       if (apiJob?.description) {
         const parts = [];
         if (apiJob.title) parts.push(`Title: ${apiJob.title}`);

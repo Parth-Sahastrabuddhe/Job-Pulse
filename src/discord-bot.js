@@ -123,6 +123,14 @@ export async function startDiscordBot(config) {
 
   await client.login(token);
 
+  client.on("error", (error) => {
+    console.error(`[discord-bot] Client error: ${error.message}`);
+  });
+
+  client.on("disconnect", () => {
+    console.log("[discord-bot] Disconnected. Attempting reconnect...");
+  });
+
   // Register slash commands after login (need client.user.id)
   try {
     const rest = new REST().setToken(token);
@@ -184,8 +192,13 @@ async function getOrCreateThread(interaction) {
   }
   threadName = threadName.slice(0, 100);
 
-  const thread = await message.startThread({ name: threadName });
-  return thread;
+  try {
+    const thread = await message.startThread({ name: threadName });
+    return thread;
+  } catch {
+    // Thread may already exist but couldn't be fetched — return null safely
+    return null;
+  }
 }
 
 function extractJobInfoFromMessage(message) {
@@ -239,6 +252,8 @@ const JOB_URL_PATTERNS = [
   { source: "spotify", sourceLabel: "Spotify", regex: /jobs\.lever\.co\/spotify\/([a-f0-9-]+)/i },
   { source: "creditkarma", sourceLabel: "Credit Karma", regex: /jobs\.lever\.co\/creditkarma\/([a-f0-9-]+)/i },
   { source: "quora", sourceLabel: "Quora", regex: /jobs\.lever\.co\/quora\/([a-f0-9-]+)/i },
+  { source: "palantir", sourceLabel: "Palantir", regex: /jobs\.lever\.co\/palantir\/([a-f0-9-]+)/i },
+  { source: "qualcomm", sourceLabel: "Qualcomm", regex: /careers\.qualcomm\.com\/.*?jobs\/(\d+)/i },
   { source: "openai", sourceLabel: "OpenAI", regex: /jobs\.ashbyhq\.com\/openai\/([a-f0-9-]+)/i },
   { source: "notion", sourceLabel: "Notion", regex: /jobs\.ashbyhq\.com\/notion\/([a-f0-9-]+)/i },
   { source: "ramp", sourceLabel: "Ramp", regex: /jobs\.ashbyhq\.com\/ramp\/([a-f0-9-]+)/i },
@@ -310,6 +325,9 @@ async function handleFitCheck(interaction, hash) {
   await interaction.deferUpdate();
 
   const thread = await getOrCreateThread(interaction);
+  if (!thread) {
+    return;
+  }
   const jobUrl = getJobUrlFromMessage(interaction.message);
   const jobInfo = extractJobFromMessage(jobUrl);
 
@@ -404,6 +422,9 @@ async function handleApplied(interaction, hash) {
   await interaction.deferUpdate();
 
   const thread = await getOrCreateThread(interaction);
+  if (!thread) {
+    return;
+  }
   const details = extractJobInfoFromMessage(interaction.message);
 
   if (!details.company || !details.role || !details.url) {
@@ -539,6 +560,9 @@ async function handleSkip(interaction, hash) {
   await interaction.deferUpdate();
 
   const thread = await getOrCreateThread(interaction);
+  if (!thread) {
+    return;
+  }
   await thread.send("❌ **Skipped**");
 
   try {
