@@ -15,9 +15,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { fetchJobDescription, jobDirId, saveJobData } from "./job-description.js";
+import { fetchJobDescription, saveJobData } from "./job-description.js";
 import { fitCheckResume } from "./tailor.js";
-import { upsertJobPost, getJobPost, updateJobPostStatus, getDb, addToCompanyQueue, getPendingCompanies } from "./state.js";
+import { upsertJobPost, updateJobPostStatus, getDb, addToCompanyQueue, getPendingCompanies } from "./state.js";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -272,7 +272,7 @@ const JOB_URL_PATTERNS = [
   { source: "samsung", sourceLabel: "Samsung", regex: /sec\.wd3\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
   // Custom scraper companies
   { source: "apple", sourceLabel: "Apple", regex: /jobs\.apple\.com\/.*?details\/([a-zA-Z0-9-]+)/i },
-  { source: "oracle", sourceLabel: "Oracle", regex: /careers\.oracle\.com\/.*?job\/(\d+)/i },
+  { source: "oracle", sourceLabel: "Oracle", regex: /oraclecloud\.com\/.*?job\/(\d+)/i },
   { source: "linkedin", sourceLabel: "LinkedIn", regex: /linkedin\.com\/jobs\/view\/(?:[^/]*-)?(\d+)/i },
   { source: "jpmorgan", sourceLabel: "JPMorgan Chase", regex: /jpmc\.fa\.oraclecloud\.com\/.*?job\/(\d+)/i },
   { source: "intuit", sourceLabel: "Intuit", regex: /jobs\.intuit\.com\/job\/[^/]+\/[^/]+\/27595\/(\d+)/i },
@@ -308,7 +308,26 @@ const JOB_URL_PATTERNS = [
   { source: "boeing", sourceLabel: "Boeing", regex: /boeing\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
   { source: "disney", sourceLabel: "Disney", regex: /disney\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
   { source: "amgen", sourceLabel: "Amgen", regex: /amgen\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "accenture", sourceLabel: "Accenture", regex: /accenture\.wd103\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i }
+  { source: "accenture", sourceLabel: "Accenture", regex: /accenture\.wd103\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  // Batch 2 additions
+  { source: "duolingo", sourceLabel: "Duolingo", regex: /(?:duolingo\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { source: "thumbtack", sourceLabel: "Thumbtack", regex: /(?:thumbtack\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { source: "hackerrank", sourceLabel: "HackerRank", regex: /(?:hackerrank\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { source: "zoominfo", sourceLabel: "ZoomInfo", regex: /(?:zoominfo\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { source: "verisign", sourceLabel: "Verisign", regex: /(?:verisign\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { source: "fanduel", sourceLabel: "FanDuel", regex: /(?:fanduel\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { source: "onepassword", sourceLabel: "1Password", regex: /jobs\.ashbyhq\.com\/1password\/([a-f0-9-]+)/i },
+  { source: "supabase", sourceLabel: "Supabase", regex: /jobs\.ashbyhq\.com\/supabase\/([a-f0-9-]+)/i },
+  { source: "replit", sourceLabel: "Replit", regex: /jobs\.ashbyhq\.com\/replit\/([a-f0-9-]+)/i },
+  { source: "elevenlabs", sourceLabel: "ElevenLabs", regex: /jobs\.ashbyhq\.com\/elevenlabs\/([a-f0-9-]+)/i },
+  { source: "runway", sourceLabel: "Runway", regex: /jobs\.ashbyhq\.com\/runway\/([a-f0-9-]+)/i },
+  { source: "anchorage", sourceLabel: "Anchorage Digital", regex: /jobs\.lever\.co\/anchorage\/([a-f0-9-]+)/i },
+  { source: "attentive", sourceLabel: "Attentive", regex: /jobs\.lever\.co\/attentive\/([a-f0-9-]+)/i },
+  { source: "jumpcloud", sourceLabel: "JumpCloud", regex: /jobs\.lever\.co\/jumpcloud\/([a-f0-9-]+)/i },
+  { source: "dell", sourceLabel: "Dell", regex: /dell\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { source: "bosch", sourceLabel: "Bosch", regex: /jobs\.smartrecruiters\.com\/BoschGroup\/([a-f0-9-]+)/i },
+  { source: "creditgenie", sourceLabel: "Credit Genie", regex: /jobs\.ashbyhq\.com\/creditgenie\/([a-f0-9-]+)/i },
+  { source: "veeva", sourceLabel: "Veeva Systems", regex: /jobs\.lever\.co\/veeva\/([a-f0-9-]+)/i }
 ];
 
 function extractJobFromMessage(urlOrText) {
@@ -398,7 +417,7 @@ async function handleFitCheck(interaction, hash) {
 
     const result = await fitCheckResume(dirId, (msg) => console.log(`[fit-check] ${msg}`));
     const fitEmoji = result.shouldApply === "YES" ? "✅" : result.shouldApply === "STRETCH" ? "⚠️" : "❌";
-    let assessmentMsg = `${fitEmoji} **Fit Assessment: ${result.shouldApply}**`;
+    let assessmentMsg = `${fitEmoji} **Fit Assessment: ${result.shouldApply}**\n*Powered by ${result.engine || "unknown"}*`;
     if (result.fitAssessment) {
       const trimmed = result.fitAssessment.length > 1500
         ? result.fitAssessment.slice(0, 1500) + "..."

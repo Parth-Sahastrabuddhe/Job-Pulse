@@ -1,24 +1,4 @@
-import { dedupeJobs, finalizeJob } from "./shared.js";
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+(engineer|develop)/i.test(t)) {
-    return false;
-  }
-  // Standard filter + banking titles (VP/SVP are senior at banks)
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|vice\s+president|VP|SVP|AVP|managing\s+director|MD)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
-
-function inferCountry(location) {
-  if (!location) return "";
-  const US_STATE_NAMES = /\b(Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)\b/i;
-  if (US_STATE_NAMES.test(location)) return "US";
-  if (/United States/i.test(location)) return "US";
-  return "";
-}
+import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 function parseCitiJobs(html) {
   const jobs = [];
@@ -32,7 +12,7 @@ function parseCitiJobs(html) {
     if (seen.has(id)) continue;
     seen.add(id);
 
-    if (!isEntryMidLevelSwe(title)) continue;
+    if (!isTargetRole(title, { banking: true })) continue;
 
     // Find location near this job ID
     const locPattern = new RegExp(`job-${id}"[\\s\\S]{0,500}?sr-job-item__location[^>]*>([^<]+)`, 'i');
@@ -51,7 +31,7 @@ function parseCitiJobs(html) {
       postedAt: "",
       postedPrecision: "",
       url,
-      countryCode: inferCountry(location)
+      countryCode: ""
     }));
   }
 

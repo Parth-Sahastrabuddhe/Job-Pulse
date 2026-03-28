@@ -1,23 +1,4 @@
-import { dedupeJobs, finalizeJob } from "./shared.js";
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+(engineer|develop)/i.test(t)) {
-    return false;
-  }
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
-
-function inferCountry(location) {
-  if (!location) return "";
-  const US_STATES = /\b(AL|AK|AZ|AR|CA|CO|CT|DC|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY)\b/;
-  if (US_STATES.test(location)) return "US";
-  if (/United States/i.test(location)) return "US";
-  return "";
-}
+import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 function parseLinkedInCards(html) {
   const jobs = [];
@@ -30,7 +11,7 @@ function parseLinkedInCards(html) {
     const id = idMatch[1];
     const titleMatch = card.match(/base-search-card__title[^>]*>\s*(.+?)\s*</);
     const title = titleMatch ? titleMatch[1].trim() : "";
-    if (!title || !isEntryMidLevelSwe(title)) continue;
+    if (!title || !isTargetRole(title)) continue;
 
     const locationMatch = card.match(/job-search-card__location[^>]*>\s*(.+?)\s*</);
     const location = locationMatch ? locationMatch[1].trim() : "";
@@ -57,7 +38,7 @@ function parseLinkedInCards(html) {
       postedAt,
       postedPrecision,
       url,
-      countryCode: inferCountry(location)
+      countryCode: ""
     }));
   }
 

@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 const META_CAREERS_URL = "https://www.metacareers.com";
 const META_GRAPHQL_URL = "https://www.metacareers.com/graphql";
@@ -8,17 +8,6 @@ const META_SEARCH_DOC_ID = "29615178951461218";
 let cachedLsdToken = null;
 let cachedLsdTokenAt = 0;
 const LSD_TOKEN_TTL_MS = 15 * 60 * 1000;
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+engineer/i.test(t)) {
-    return false;
-  }
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
 
 async function getLsdToken() {
   if (cachedLsdToken && Date.now() - cachedLsdTokenAt < LSD_TOKEN_TTL_MS) {
@@ -44,7 +33,7 @@ function parseMetaJob(raw, config) {
   if (!raw || !raw.title) return null;
 
   const title = raw.title.trim();
-  if (!isEntryMidLevelSwe(title)) {
+  if (!isTargetRole(title)) {
     return null;
   }
 

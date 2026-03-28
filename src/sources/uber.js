@@ -1,28 +1,9 @@
 import { chromium } from "playwright";
-import { dedupeJobs, finalizeJob } from "./shared.js";
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+(engineer|develop)/i.test(t)) {
-    return false;
-  }
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
-
-function inferCountry(locations) {
-  if (!Array.isArray(locations)) return "";
-  for (const loc of locations) {
-    if (/United States|USA/i.test(loc.country || loc)) return "US";
-  }
-  return "";
-}
+import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 function parseUberJob(raw) {
   const title = raw.title?.trim();
-  if (!title || !isEntryMidLevelSwe(title)) return null;
+  if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.id || "");
   const allLocations = raw.allLocations || [];
@@ -30,7 +11,7 @@ function parseUberJob(raw) {
     .filter((l) => /United States|USA/i.test(l.country || ""))
     .map((l) => [l.city, l.state].filter(Boolean).join(", "))
     .join(" | ");
-  const countryCode = inferCountry(allLocations);
+  const countryCode = "";
 
   const url = `https://www.uber.com/us/en/careers/list/${id}/`;
 

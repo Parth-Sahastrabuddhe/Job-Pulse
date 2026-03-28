@@ -1,16 +1,5 @@
 import { chromium } from "playwright";
-import { dedupeJobs, finalizeJob } from "./shared.js";
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+(engineer|develop)/i.test(t)) {
-    return false;
-  }
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
+import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 export async function collectConfluentJobs(_unused, config, log) {
   let browser;
@@ -63,7 +52,7 @@ export async function collectConfluentJobs(_unused, config, log) {
     });
 
     const jobs = rawJobs
-      .filter((raw) => isEntryMidLevelSwe(raw.title))
+      .filter((raw) => isTargetRole(raw.title))
       .map((raw) => {
         const countryCode = /United States|US Remote/i.test(raw.location) ? "US" : "";
         return finalizeJob({

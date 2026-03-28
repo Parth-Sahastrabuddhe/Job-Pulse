@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 const GS_GRAPHQL_URL = "https://api-higher.gs.com/gateway/api/v1/graphql";
 
@@ -25,23 +25,9 @@ const GET_ROLES_QUERY = `query GetRoles($searchQueryInput: RoleSearchQueryInput!
   }
 }`;
 
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+(engineer|develop)/i.test(t)) {
-    return false;
-  }
-  // Standard seniority filter + Goldman-specific titles
-  // Goldman hierarchy: Analyst → Associate → Vice President → Managing Director
-  // Analyst and Associate are entry/mid-level; VP and MD are senior
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|vice\s+president|VP|managing\s+director|MD)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
-
 function parseGSJob(raw) {
   const title = raw.jobTitle?.trim();
-  if (!title || !isEntryMidLevelSwe(title)) return null;
+  if (!title || !isTargetRole(title, { banking: true })) return null;
 
   const roleId = raw.externalSource?.sourceId || raw.roleId?.replace(/_.*/, "") || "";
   const id = String(roleId);

@@ -1,22 +1,4 @@
-import { dedupeJobs, finalizeJob } from "./shared.js";
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+(engineer|develop)/i.test(t)) {
-    return false;
-  }
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
-
-function inferCountry(location) {
-  if (!location) return "";
-  const US_STATES = /\b(Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)\b/i;
-  if (US_STATES.test(location)) return "US";
-  return "";
-}
+import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 function parseIntuitJobs(html) {
   const jobs = [];
@@ -37,7 +19,7 @@ function parseIntuitJobs(html) {
 
     const titleMatch = card.match(/<h2>([^<]+)<\/h2>/);
     const title = titleMatch ? titleMatch[1].trim() : "";
-    if (!title || !isEntryMidLevelSwe(title)) continue;
+    if (!title || !isTargetRole(title)) continue;
 
     const locationMatch = card.match(/job-location[^>]*>([^<]+)/);
     const location = locationMatch ? locationMatch[1].trim() : "";
@@ -58,7 +40,7 @@ function parseIntuitJobs(html) {
       postedAt: "",
       postedPrecision: "",
       url,
-      countryCode: inferCountry(location)
+      countryCode: ""
     }));
   }
 

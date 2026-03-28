@@ -568,6 +568,113 @@ export function getConfig() {
       sourceKey: "aristanetworks",
       sourceLabel: "Arista Networks",
       companySlug: "AristaNetworks"
+    },
+    bosch: {
+      sourceKey: "bosch",
+      sourceLabel: "Bosch",
+      companySlug: "BoschGroup"
+    },
+    // --- New Greenhouse companies (batch 2) ---
+    duolingo: {
+      sourceKey: "duolingo",
+      sourceLabel: "Duolingo",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/duolingo/jobs/"
+    },
+    thumbtack: {
+      sourceKey: "thumbtack",
+      sourceLabel: "Thumbtack",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/thumbtack/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/thumbtack/jobs/"
+    },
+    hackerrank: {
+      sourceKey: "hackerrank",
+      sourceLabel: "HackerRank",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/hackerrank/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/hackerrank/jobs/"
+    },
+    zoominfo: {
+      sourceKey: "zoominfo",
+      sourceLabel: "ZoomInfo",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/zoominfo/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/zoominfo/jobs/"
+    },
+    verisign: {
+      sourceKey: "verisign",
+      sourceLabel: "Verisign",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/verisign/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/verisign/jobs/"
+    },
+    fanduel: {
+      sourceKey: "fanduel",
+      sourceLabel: "FanDuel",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/fanduel/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/fanduel/jobs/"
+    },
+    // --- New Ashby companies (batch 2) ---
+    onepassword: {
+      sourceKey: "onepassword",
+      sourceLabel: "1Password",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/1password",
+      boardSlug: "1password"
+    },
+    supabase: {
+      sourceKey: "supabase",
+      sourceLabel: "Supabase",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/supabase",
+      boardSlug: "supabase"
+    },
+    replit: {
+      sourceKey: "replit",
+      sourceLabel: "Replit",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/replit",
+      boardSlug: "replit"
+    },
+    elevenlabs: {
+      sourceKey: "elevenlabs",
+      sourceLabel: "ElevenLabs",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/elevenlabs",
+      boardSlug: "elevenlabs"
+    },
+    runway: {
+      sourceKey: "runway",
+      sourceLabel: "Runway",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/runway",
+      boardSlug: "runway"
+    },
+    creditgenie: {
+      sourceKey: "creditgenie",
+      sourceLabel: "Credit Genie",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/creditgenie",
+      boardSlug: "creditgenie"
+    },
+    // --- New Lever companies (batch 2) ---
+    veeva: {
+      sourceKey: "veeva",
+      sourceLabel: "Veeva Systems",
+      apiUrl: "https://api.lever.co/v0/postings/veeva?mode=json"
+    },
+    anchorage: {
+      sourceKey: "anchorage",
+      sourceLabel: "Anchorage Digital",
+      apiUrl: "https://api.lever.co/v0/postings/anchorage?mode=json"
+    },
+    attentive: {
+      sourceKey: "attentive",
+      sourceLabel: "Attentive",
+      apiUrl: "https://api.lever.co/v0/postings/attentive?mode=json"
+    },
+    jumpcloud: {
+      sourceKey: "jumpcloud",
+      sourceLabel: "JumpCloud",
+      apiUrl: "https://api.lever.co/v0/postings/jumpcloud?mode=json"
+    },
+    // --- New Workday companies (batch 2) ---
+    dell: {
+      sourceKey: "dell",
+      sourceLabel: "Dell",
+      apiUrl: "https://dell.wd1.myworkdayjobs.com/wday/cxs/dell/External/jobs",
+      baseUrl: "https://dell.wd1.myworkdayjobs.com/External"
     }
   };
 }

@@ -1,18 +1,7 @@
-import { dedupeJobs, finalizeJob } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 const GOOGLE_RPC_URL =
   "https://www.google.com/about/careers/applications/_/HiringCportalFrontendUi/data/batchexecute";
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+engineer/i.test(t)) {
-    return false;
-  }
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
 
 function buildRequestBody(query, location, sortByDate, page) {
   // Inner payload: [query, null, null, null, lang, null, [[location]], sort, null, null, page]
@@ -57,7 +46,7 @@ function parseGoogleJob(raw, config) {
 
   const id = raw[0];
   const title = raw[1];
-  if (!id || !title || !isEntryMidLevelSwe(title)) {
+  if (!id || !title || !isTargetRole(title)) {
     return null;
   }
 

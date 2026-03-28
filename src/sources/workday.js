@@ -1,15 +1,4 @@
-import { dedupeJobs, finalizeJob } from "./shared.js";
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+(engineer|develop)/i.test(t)) {
-    return false;
-  }
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
+import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 function isSalesforceSwe(title) {
   const t = title.trim();
@@ -21,7 +10,7 @@ function isSalesforceSwe(title) {
     }
     return true;
   }
-  return isEntryMidLevelSwe(t);
+  return isTargetRole(t);
 }
 
 const TITLE_FILTERS = {
@@ -57,22 +46,14 @@ function parseRelativeDate(postedOn) {
   return { postedText: text, postedAt: "", postedPrecision: "" };
 }
 
-function inferCountry(locationsText) {
-  if (!locationsText) return "";
-  if (/\bUS\b|\bUnited States\b/i.test(locationsText)) return "US";
-  const US_STATES = /\b(Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)\b/i;
-  if (US_STATES.test(locationsText)) return "US";
-  return "";
-}
-
 function parseWorkdayJob(raw, companyConfig) {
   const title = raw.title?.trim();
-  const titleFilter = TITLE_FILTERS[companyConfig.sourceKey] || isEntryMidLevelSwe;
+  const titleFilter = TITLE_FILTERS[companyConfig.sourceKey] || isTargetRole;
   if (!title || !titleFilter(title)) return null;
 
   const id = raw.bulletFields?.[0] || "";
   const location = raw.locationsText || raw.bulletFields?.[1] || "";
-  const countryCode = inferCountry(location);
+  const countryCode = "";
   const posted = parseRelativeDate(raw.postedOn);
   const url = `${companyConfig.baseUrl}${raw.externalPath}`;
 

@@ -1,20 +1,8 @@
-import { dedupeJobs, finalizeJob } from "./shared.js";
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+(engineer|develop)/i.test(t)) {
-    return false;
-  }
-  // Standard filter + banking titles (VP/SVP are senior at banks)
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|vice\s+president|VP|SVP|AVP|managing\s+director|MD)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
+import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 function parseJPMorganJob(raw) {
   const title = raw.Title?.trim();
-  if (!title || !isEntryMidLevelSwe(title)) return null;
+  if (!title || !isTargetRole(title, { banking: true })) return null;
 
   const id = String(raw.Id || "");
   const location = raw.PrimaryLocation || "";

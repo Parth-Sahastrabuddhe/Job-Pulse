@@ -204,7 +204,9 @@ const GREENHOUSE_BOARDS = {
   reddit: "reddit", pinterest: "pinterest", datadog: "datadog", mongodb: "mongodb",
   robinhood: "robinhood", hubspot: "hubspot", instacart: "instacart", samsara: "samsara",
   block: "block", elastic: "elastic", waymo: "waymo", rubrik: "rubrik",
-  dropbox: "dropbox", spacex: "spacex", okta: "okta", deepmind: "deepmind"
+  dropbox: "dropbox", spacex: "spacex", okta: "okta", deepmind: "deepmind",
+  duolingo: "duolingo", thumbtack: "thumbtack", hackerrank: "hackerrank",
+  zoominfo: "zoominfo", verisign: "verisign", fanduel: "fanduel"
 };
 
 async function fetchGreenhouseDescription(job) {
@@ -253,7 +255,7 @@ async function fetchLeverDescription(job) {
   }
 }
 
-const SMARTRECRUITERS_SLUGS = { visa: "Visa", servicenow: "ServiceNow", aristanetworks: "AristaNetworks" };
+const SMARTRECRUITERS_SLUGS = { visa: "Visa", servicenow: "ServiceNow", aristanetworks: "AristaNetworks", bosch: "BoschGroup" };
 
 async function fetchConfluentDescription(job) {
   try {
@@ -500,7 +502,7 @@ async function fetchDescriptionFallback(job) {
   return null;
 }
 
-const WORKDAY_SOURCES = ["nvidia", "salesforce", "adobe", "cisco", "netflix", "snap", "intel", "paypal", "capitalone", "walmartglobaltech", "samsung", "broadcom", "nike", "usbank", "fidelity", "wellsfargo", "bankofamerica", "threeM", "boeing", "disney", "amgen", "accenture"];
+const WORKDAY_SOURCES = ["nvidia", "salesforce", "adobe", "cisco", "netflix", "snap", "intel", "paypal", "capitalone", "walmartglobaltech", "samsung", "broadcom", "nike", "usbank", "fidelity", "wellsfargo", "bankofamerica", "threeM", "boeing", "disney", "amgen", "accenture", "dell"];
 
 function workdayApiUrl(jobUrl) {
   // Convert public URL to API URL by inserting /wday/cxs/{company}/ after the domain
@@ -537,12 +539,14 @@ async function fetchWorkdayDescription(job) {
   return null;
 }
 
-const ASHBY_SOURCES = ["openai", "notion", "ramp", "snowflake", "cursor", "airtable", "vanta", "docker", "zapier", "sentry", "mapbox", "lambdalabs"];
+const ASHBY_SOURCES = ["openai", "notion", "ramp", "snowflake", "cursor", "airtable", "vanta", "docker", "zapier", "sentry", "mapbox", "lambdalabs", "onepassword", "supabase", "replit", "elevenlabs", "runway", "creditgenie"];
 
 const ASHBY_BOARDS = {
   openai: "openai", notion: "notion", ramp: "ramp",
   snowflake: "snowflake", cursor: "cursor", airtable: "airtable", vanta: "vanta",
-  docker: "docker", zapier: "zapier", sentry: "sentry", mapbox: "mapbox", lambdalabs: "lambda"
+  docker: "docker", zapier: "zapier", sentry: "sentry", mapbox: "mapbox", lambdalabs: "lambda",
+  onepassword: "1password", supabase: "supabase", replit: "replit", elevenlabs: "elevenlabs", runway: "runway",
+  creditgenie: "creditgenie"
 };
 
 async function fetchAshbyDescription(job) {
@@ -609,7 +613,7 @@ export async function fetchJobDescription(job, rawJobData) {
   }
 
   // Lever API fallback
-  if (!description && (job.url?.includes("lever.co") || ["palantir", "plaid", "spotify", "creditkarma", "quora", "zoox", "binance"].includes(job.sourceKey))) {
+  if (!description && (job.url?.includes("lever.co") || ["palantir", "plaid", "spotify", "creditkarma", "quora", "zoox", "binance", "anchorage", "attentive", "jumpcloud", "veeva"].includes(job.sourceKey))) {
     description = await fetchLeverDescription(job);
   }
 
@@ -649,7 +653,7 @@ export async function fetchJobDescription(job, rawJobData) {
   }
 
   // SmartRecruiters (Visa, ServiceNow, Arista Networks)
-  if (!description && ["visa", "servicenow", "aristanetworks"].includes(job.sourceKey)) {
+  if (!description && ["visa", "servicenow", "aristanetworks", "bosch"].includes(job.sourceKey)) {
     description = await fetchSmartRecruitersDescription(job);
   }
 

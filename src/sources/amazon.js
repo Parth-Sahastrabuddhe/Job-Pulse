@@ -1,19 +1,9 @@
 import {
   dedupeJobs,
   finalizeJob,
+  isTargetRole,
   normalizeUrl
 } from "./shared.js";
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+(engineer|develop)/i.test(t)) {
-    return false;
-  }
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
 
 const AMAZON_BASE_URL = "https://www.amazon.jobs";
 
@@ -38,7 +28,7 @@ function normalizeAmazonUrl(rawPath, fallbackId) {
 
 function parseAmazonJob(raw, config) {
   const title = raw.title?.trim();
-  if (!title || !isEntryMidLevelSwe(title)) {
+  if (!title || !isTargetRole(title)) {
     return null;
   }
 

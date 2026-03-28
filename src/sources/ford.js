@@ -1,19 +1,8 @@
-import { dedupeJobs, finalizeJob } from "./shared.js";
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+(engineer|develop)/i.test(t)) {
-    return false;
-  }
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
+import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 function parseFordJob(raw) {
   const title = raw.Title?.trim();
-  if (!title || !isEntryMidLevelSwe(title)) return null;
+  if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.Id || "");
   const location = raw.PrimaryLocation || "";

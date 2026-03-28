@@ -1,23 +1,4 @@
-import { dedupeJobs, finalizeJob } from "./shared.js";
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  if (!/software\s+(engineer|develop)/i.test(t)) {
-    return false;
-  }
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
-
-function inferCountry(location) {
-  if (!location) return "";
-  if (/United States of America|United States/i.test(location)) return "US";
-  const US_STATES = /\b(Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)\b/i;
-  if (US_STATES.test(location)) return "US";
-  return "";
-}
+import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 function parseBloombergJobs(html) {
   const jobs = [];
@@ -35,7 +16,7 @@ function parseBloombergJobs(html) {
     // Extract title — it's the text content of the <a> tag
     const titleMatch = section.match(/>\s*([^<]+?)\s*<\/a>/);
     const title = titleMatch ? titleMatch[1].trim() : "";
-    if (!title || title === "Apply" || title === "Save" || !isEntryMidLevelSwe(title)) continue;
+    if (!title || title === "Apply" || title === "Save" || !isTargetRole(title)) continue;
 
     // Extract location from list-item-location span
     const locationMatch = section.match(/list-item-location[^>]*>([^<]+)/);
@@ -53,7 +34,7 @@ function parseBloombergJobs(html) {
       postedAt: "",
       postedPrecision: "",
       url,
-      countryCode: inferCountry(location)
+      countryCode: ""
     }));
   }
 

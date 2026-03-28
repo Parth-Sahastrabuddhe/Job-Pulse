@@ -1,20 +1,8 @@
 import {
   dedupeJobs,
-  finalizeJob
+  finalizeJob,
+  isTargetRole
 } from "./shared.js";
-
-function isEntryMidLevelSwe(title) {
-  const t = title.trim();
-  // Must contain "software engineer" or "software engineering"
-  if (!/software\s+engineer/i.test(t)) {
-    return false;
-  }
-  // Reject senior, principal, staff, lead, manager, director, distinguished
-  if (/\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i.test(t)) {
-    return false;
-  }
-  return true;
-}
 
 const MICROSOFT_BASE_URL = "https://apply.careers.microsoft.com";
 
@@ -24,7 +12,7 @@ const MICROSOFT_API_URL =
 
 function parseMicrosoftJob(raw, config) {
   const title = raw.name?.trim();
-  if (!title || !isEntryMidLevelSwe(title)) {
+  if (!title || !isTargetRole(title)) {
     return null;
   }
 

@@ -157,21 +157,26 @@ export async function fitCheckResume(jobDirId, log = console.log) {
 
   // Try Gemini first, fall back to Claude CLI
   let output;
+  let engine = "unknown";
   const geminiKey = await getGeminiApiKey();
   if (geminiKey) {
     try {
       log(`Running fit check via Gemini API...`);
       output = await runGemini(fitOnlyPrompt);
+      engine = "Gemini 2.5 Flash";
     } catch (geminiError) {
       log(`Gemini failed (${geminiError.message.slice(0, 80)}), falling back to Claude CLI...`);
       output = await runClaude(fitOnlyPrompt);
+      engine = "Claude (fallback)";
     }
   } else {
     log(`Running fit check via Claude CLI (set GEMINI_API_KEY in .env for faster checks)...`);
     output = await runClaude(fitOnlyPrompt);
+    engine = "Claude CLI";
   }
 
   const result = parseFitCheckOutput(output);
+  result.engine = engine;
   result.dir = dir;
   result.meta = meta;
   return result;

@@ -16,7 +16,6 @@ import { collectPcsxJobs } from "./sources/pcsx.js";
 import { dedupeJobs, delay, jobIsFresh, jobMatchesCountryFilter } from "./sources/shared.js";
 import { collectWorkdayJobs } from "./sources/workday.js";
 import { collectAshbyJobs } from "./sources/ashby.js";
-import { collectAppleJobs } from "./sources/apple.js";
 import { collectOracleJobs } from "./sources/oracle.js";
 import { collectLinkedInJobs } from "./sources/linkedin.js";
 import { collectJPMorganJobs } from "./sources/jpmorgan.js";
@@ -76,28 +75,27 @@ function buildRegistry(config) {
   // Slow lane — Playwright/HTML scrapers (run sequentially, less frequently)
   solo("uber", collectUberJobs, "slow");
   solo("confluent", collectConfluentJobs, "slow");
-  solo("apple", collectAppleJobs, "slow");
   solo("linkedin", collectLinkedInJobs, "slow");
   solo("intuit", collectIntuitJobs, "slow");
   solo("bloomberg", collectBloombergJobs, "slow");
 
   // Normal lane — parameterized ATS collectors
-  for (const key of ["nvidia", "adobe", "cisco", "salesforce", "netflix", "snap", "intel", "paypal", "capitalone", "walmartglobaltech", "samsung", "broadcom", "nike", "usbank", "fidelity", "wellsfargo", "bankofamerica", "threeM", "boeing", "disney", "amgen", "accenture"]) {
+  for (const key of ["nvidia", "adobe", "cisco", "salesforce", "netflix", "snap", "intel", "paypal", "capitalone", "walmartglobaltech", "samsung", "broadcom", "nike", "usbank", "fidelity", "wellsfargo", "bankofamerica", "threeM", "boeing", "disney", "amgen", "accenture", "dell"]) {
     param(key, collectWorkdayJobs, "normal");
   }
-  for (const key of ["stripe", "databricks", "figma", "lyft", "discord", "twilio", "cloudflare", "coinbase", "roblox", "anthropic", "airbnb", "doordash", "reddit", "pinterest", "datadog", "mongodb", "robinhood", "hubspot", "instacart", "samsara", "block", "elastic", "waymo", "rubrik", "dropbox", "spacex", "okta", "deepmind"]) {
+  for (const key of ["stripe", "databricks", "figma", "lyft", "discord", "twilio", "cloudflare", "coinbase", "roblox", "anthropic", "airbnb", "doordash", "reddit", "pinterest", "datadog", "mongodb", "robinhood", "hubspot", "instacart", "samsara", "block", "elastic", "waymo", "rubrik", "dropbox", "spacex", "okta", "deepmind", "duolingo", "thumbtack", "hackerrank", "zoominfo", "verisign", "fanduel"]) {
     param(key, collectGreenhouseJobs, "normal");
   }
   for (const key of ["qualcomm"]) {
     param(key, collectPcsxJobs, "normal");
   }
-  for (const key of ["palantir", "plaid", "spotify", "creditkarma", "quora", "zoox", "binance"]) {
+  for (const key of ["palantir", "plaid", "spotify", "creditkarma", "quora", "zoox", "binance", "anchorage", "attentive", "jumpcloud", "veeva"]) {
     param(key, collectLeverJobs, "normal");
   }
-  for (const key of ["openai", "notion", "ramp", "snowflake", "cursor", "airtable", "vanta", "docker", "zapier", "sentry", "mapbox", "lambdalabs"]) {
+  for (const key of ["openai", "notion", "ramp", "snowflake", "cursor", "airtable", "vanta", "docker", "zapier", "sentry", "mapbox", "lambdalabs", "onepassword", "supabase", "replit", "elevenlabs", "runway", "creditgenie"]) {
     param(key, collectAshbyJobs, "normal");
   }
-  for (const key of ["servicenow", "visa", "aristanetworks"]) {
+  for (const key of ["servicenow", "visa", "aristanetworks", "bosch"]) {
     param(key, collectSmartRecruitersJobs, "normal");
   }
 
