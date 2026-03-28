@@ -15,8 +15,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { fetchJobDescription, saveJobData } from "./job-description.js";
-import { fitCheckResume } from "./tailor.js";
+import { fetchJobDescription, saveJobData, jobDirId } from "./job-description.js";
+import { fitCheckResume, tailorResume, tailorFromUrl } from "./tailor.js";
 import { upsertJobPost, updateJobPostStatus, getDb, addToCompanyQueue, getPendingCompanies } from "./state.js";
 
 const execFileAsync = promisify(execFile);
@@ -30,12 +30,12 @@ function jobButtonId(job) {
   return hash;
 }
 
-function buildButtonRow(hash, jobUrl, status) {
+function buildButtonRows(hash, jobUrl, status) {
   // status: "pending" | "fitchecked" | "applied" | "skipped"
   // Applied is truly final. Skip is reversible — Applied stays active.
   const isApplied = status === "applied";
 
-  return new ActionRowBuilder().addComponents(
+  const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setLabel("View Job")
       .setStyle(ButtonStyle.Link)
@@ -45,6 +45,14 @@ function buildButtonRow(hash, jobUrl, status) {
       .setLabel(status === "fitchecked" ? "\u2714 Fit Check" : "Fit Check")
       .setStyle(status === "fitchecked" ? ButtonStyle.Success : ButtonStyle.Primary)
       .setDisabled(isApplied),
+    new ButtonBuilder()
+      .setCustomId(`tailor:${hash}`)
+      .setLabel("Tailor Resume")
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(isApplied)
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`applied:${hash}`)
       .setLabel(status === "applied" ? "\u2705 Applied" : "Applied")
@@ -56,6 +64,8 @@ function buildButtonRow(hash, jobUrl, status) {
       .setStyle(status === "skipped" ? ButtonStyle.Danger : ButtonStyle.Secondary)
       .setDisabled(isApplied)
   );
+
+  return [row1, row2];
 }
 
 function getJobUrlFromMessage(message) {
@@ -90,6 +100,8 @@ export async function startDiscordBot(config) {
         await handleAddCompany(interaction);
       } else if (interaction.commandName === "queue") {
         await handleShowQueue(interaction);
+      } else if (interaction.commandName === "tailor") {
+        await handleTailorCommand(interaction);
       }
       return;
     }
@@ -106,6 +118,8 @@ export async function startDiscordBot(config) {
         await handleApplied(interaction, hash);
       } else if (action === "skip") {
         await handleSkip(interaction, hash);
+      } else if (action === "tailor") {
+        await handleTailor(interaction, hash);
       } else if (action === "confirmapply") {
         await handleConfirmApply(interaction, hash);
       } else if (action === "cancelapply") {
@@ -143,12 +157,19 @@ export async function startDiscordBot(config) {
         ),
       new SlashCommandBuilder()
         .setName("queue")
-        .setDescription("Show pending companies in the integration queue")
+        .setDescription("Show pending companies in the integration queue"),
+      new SlashCommandBuilder()
+        .setName("tailor")
+        .setDescription("Tailor your resume for a specific job posting")
+        .addStringOption((opt) =>
+          opt.setName("url").setDescription("Job posting URL").setRequired(true)
+        )
     ].map((c) => c.toJSON());
 
     const channel = await client.channels.fetch(channelId);
     await rest.put(Routes.applicationGuildCommands(client.user.id, channel.guildId), { body: commands });
-    console.log("[discord-bot] Slash commands registered: /add, /queue");
+    const commandNames = commands.map((c) => `/${c.name}`).join(", ");
+    console.log(`[discord-bot] Slash commands registered: ${commandNames}`);
   } catch (err) {
     console.error(`[discord-bot] Failed to register slash commands: ${err.message}`);
   }
@@ -216,119 +237,9 @@ function extractJobInfoFromMessage(message) {
   return { company, role, url };
 }
 
-// URL patterns to extract source + job ID from message text
-const JOB_URL_PATTERNS = [
-  { source: "microsoft", sourceLabel: "Microsoft", regex: /apply\.careers\.microsoft\.com\/careers\/job\/(\d+)/i },
-  { source: "amazon", sourceLabel: "Amazon", regex: /amazon\.jobs\/(?:[a-z]{2}\/)?jobs\/(\d+)/i },
-  { source: "google", sourceLabel: "Google", regex: /google\.com\/about\/careers\/applications\/jobs\/results\/(\d+)/i },
-  { source: "meta", sourceLabel: "Meta", regex: /metacareers\.com\/jobs\/(\d+)/i },
-  { source: "nvidia", sourceLabel: "Nvidia", regex: /nvidia\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "salesforce", sourceLabel: "Salesforce", regex: /salesforce\.wd12\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "adobe", sourceLabel: "Adobe", regex: /adobe\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "cisco", sourceLabel: "Cisco", regex: /cisco\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "stripe", sourceLabel: "Stripe", regex: /(?:stripe\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "databricks", sourceLabel: "Databricks", regex: /(?:databricks\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "figma", sourceLabel: "Figma", regex: /(?:figma\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "lyft", sourceLabel: "Lyft", regex: /(?:lyft\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "discord", sourceLabel: "Discord", regex: /(?:discord\.com\/careers|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "twilio", sourceLabel: "Twilio", regex: /(?:twilio\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "cloudflare", sourceLabel: "Cloudflare", regex: /(?:cloudflare\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "coinbase", sourceLabel: "Coinbase", regex: /(?:coinbase\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "roblox", sourceLabel: "Roblox", regex: /(?:roblox\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "anthropic", sourceLabel: "Anthropic", regex: /(?:anthropic\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "airbnb", sourceLabel: "Airbnb", regex: /(?:airbnb\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "doordash", sourceLabel: "DoorDash", regex: /(?:doordash\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "reddit", sourceLabel: "Reddit", regex: /(?:reddit\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "pinterest", sourceLabel: "Pinterest", regex: /(?:pinterest\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "datadog", sourceLabel: "Datadog", regex: /(?:datadoghq\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "mongodb", sourceLabel: "MongoDB", regex: /(?:mongodb\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "robinhood", sourceLabel: "Robinhood", regex: /(?:robinhood\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "hubspot", sourceLabel: "HubSpot", regex: /(?:hubspot\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "instacart", sourceLabel: "Instacart", regex: /(?:instacart\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "samsara", sourceLabel: "Samsara", regex: /(?:samsara\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "netflix", sourceLabel: "Netflix", regex: /netflix\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "snap", sourceLabel: "Snap", regex: /snapchat\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "plaid", sourceLabel: "Plaid", regex: /jobs\.lever\.co\/plaid\/([a-f0-9-]+)/i },
-  { source: "spotify", sourceLabel: "Spotify", regex: /jobs\.lever\.co\/spotify\/([a-f0-9-]+)/i },
-  { source: "creditkarma", sourceLabel: "Credit Karma", regex: /jobs\.lever\.co\/creditkarma\/([a-f0-9-]+)/i },
-  { source: "quora", sourceLabel: "Quora", regex: /jobs\.lever\.co\/quora\/([a-f0-9-]+)/i },
-  { source: "palantir", sourceLabel: "Palantir", regex: /jobs\.lever\.co\/palantir\/([a-f0-9-]+)/i },
-  { source: "qualcomm", sourceLabel: "Qualcomm", regex: /careers\.qualcomm\.com\/.*?jobs\/(\d+)/i },
-  { source: "openai", sourceLabel: "OpenAI", regex: /jobs\.ashbyhq\.com\/openai\/([a-f0-9-]+)/i },
-  { source: "notion", sourceLabel: "Notion", regex: /jobs\.ashbyhq\.com\/notion\/([a-f0-9-]+)/i },
-  { source: "ramp", sourceLabel: "Ramp", regex: /jobs\.ashbyhq\.com\/ramp\/([a-f0-9-]+)/i },
-  { source: "snowflake", sourceLabel: "Snowflake", regex: /jobs\.ashbyhq\.com\/snowflake\/([a-f0-9-]+)/i },
-  { source: "cursor", sourceLabel: "Cursor", regex: /jobs\.ashbyhq\.com\/cursor\/([a-f0-9-]+)/i },
-  { source: "airtable", sourceLabel: "Airtable", regex: /jobs\.ashbyhq\.com\/airtable\/([a-f0-9-]+)/i },
-  { source: "vanta", sourceLabel: "Vanta", regex: /jobs\.ashbyhq\.com\/vanta\/([a-f0-9-]+)/i },
-  // New Greenhouse companies
-  { source: "block", sourceLabel: "Block", regex: /(?:block\.xyz|squareup\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "elastic", sourceLabel: "Elastic", regex: /(?:elastic\.co|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  // New Workday companies
-  { source: "intel", sourceLabel: "Intel", regex: /intel\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "paypal", sourceLabel: "PayPal", regex: /paypal\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "capitalone", sourceLabel: "Capital One", regex: /capitalone\.wd12\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "walmartglobaltech", sourceLabel: "Walmart Global Tech", regex: /walmart\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "samsung", sourceLabel: "Samsung", regex: /sec\.wd3\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  // Custom scraper companies
-  { source: "apple", sourceLabel: "Apple", regex: /jobs\.apple\.com\/.*?details\/([a-zA-Z0-9-]+)/i },
-  { source: "oracle", sourceLabel: "Oracle", regex: /oraclecloud\.com\/.*?job\/(\d+)/i },
-  { source: "linkedin", sourceLabel: "LinkedIn", regex: /linkedin\.com\/jobs\/view\/(?:[^/]*-)?(\d+)/i },
-  { source: "jpmorgan", sourceLabel: "JPMorgan Chase", regex: /jpmc\.fa\.oraclecloud\.com\/.*?job\/(\d+)/i },
-  { source: "intuit", sourceLabel: "Intuit", regex: /jobs\.intuit\.com\/job\/[^/]+\/[^/]+\/27595\/(\d+)/i },
-  { source: "bloomberg", sourceLabel: "Bloomberg", regex: /bloomberg\.avature\.net\/careers\/JobDetail\/[^/]+\/(\d+)/i },
-  { source: "broadcom", sourceLabel: "Broadcom", regex: /broadcom\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "servicenow", sourceLabel: "ServiceNow", regex: /jobs\.smartrecruiters\.com\/ServiceNow\/([a-f0-9-]+)/i },
-  { source: "visa", sourceLabel: "Visa", regex: /jobs\.smartrecruiters\.com\/Visa\/([a-f0-9-]+)/i },
-  { source: "goldmansachs", sourceLabel: "Goldman Sachs", regex: /higher\.gs\.com\/roles\/(\d+)/i },
-  { source: "uber", sourceLabel: "Uber", regex: /uber\.com\/.*?careers\/list\/(\d+)/i },
-  { source: "confluent", sourceLabel: "Confluent", regex: /careers\.confluent\.io\/jobs\/job\/([a-f0-9-]+)/i },
-  { source: "waymo", sourceLabel: "Waymo", regex: /(?:waymo\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "rubrik", sourceLabel: "Rubrik", regex: /(?:rubrik\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "dropbox", sourceLabel: "Dropbox", regex: /(?:dropbox\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "zoox", sourceLabel: "Zoox", regex: /jobs\.lever\.co\/zoox\/([a-f0-9-]+)/i },
-  { source: "nike", sourceLabel: "Nike", regex: /nike\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "usbank", sourceLabel: "U.S. Bank", regex: /usbank\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "ford", sourceLabel: "Ford Motor", regex: /efds\.fa\.em5\.oraclecloud\.com\/.*?job\/(\d+)/i },
-  { source: "aristanetworks", sourceLabel: "Arista Networks", regex: /jobs\.smartrecruiters\.com\/AristaNetworks\/([a-f0-9-]+)/i },
-  { source: "fidelity", sourceLabel: "Fidelity", regex: /fmr\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "wellsfargo", sourceLabel: "Wells Fargo", regex: /wf\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "bankofamerica", sourceLabel: "Bank of America", regex: /ghr\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "citi", sourceLabel: "Citi", regex: /jobs\.citi\.com\/job\/[^/]+\/[^/]+\/287\/(\d+)/i },
-  { source: "spacex", sourceLabel: "SpaceX", regex: /(?:spacex\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "okta", sourceLabel: "Okta", regex: /(?:okta\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "deepmind", sourceLabel: "DeepMind", regex: /(?:deepmind\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "binance", sourceLabel: "Binance", regex: /jobs\.lever\.co\/binance\/([a-f0-9-]+)/i },
-  { source: "docker", sourceLabel: "Docker", regex: /jobs\.ashbyhq\.com\/docker\/([a-f0-9-]+)/i },
-  { source: "zapier", sourceLabel: "Zapier", regex: /jobs\.ashbyhq\.com\/zapier\/([a-f0-9-]+)/i },
-  { source: "sentry", sourceLabel: "Sentry", regex: /jobs\.ashbyhq\.com\/sentry\/([a-f0-9-]+)/i },
-  { source: "mapbox", sourceLabel: "Mapbox", regex: /jobs\.ashbyhq\.com\/mapbox\/([a-f0-9-]+)/i },
-  { source: "lambdalabs", sourceLabel: "Lambda", regex: /jobs\.ashbyhq\.com\/lambda\/([a-f0-9-]+)/i },
-  { source: "threeM", sourceLabel: "3M", regex: /3m\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "boeing", sourceLabel: "Boeing", regex: /boeing\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "disney", sourceLabel: "Disney", regex: /disney\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "amgen", sourceLabel: "Amgen", regex: /amgen\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "accenture", sourceLabel: "Accenture", regex: /accenture\.wd103\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  // Batch 2 additions
-  { source: "duolingo", sourceLabel: "Duolingo", regex: /(?:duolingo\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "thumbtack", sourceLabel: "Thumbtack", regex: /(?:thumbtack\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "hackerrank", sourceLabel: "HackerRank", regex: /(?:hackerrank\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "zoominfo", sourceLabel: "ZoomInfo", regex: /(?:zoominfo\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "verisign", sourceLabel: "Verisign", regex: /(?:verisign\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "fanduel", sourceLabel: "FanDuel", regex: /(?:fanduel\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { source: "onepassword", sourceLabel: "1Password", regex: /jobs\.ashbyhq\.com\/1password\/([a-f0-9-]+)/i },
-  { source: "supabase", sourceLabel: "Supabase", regex: /jobs\.ashbyhq\.com\/supabase\/([a-f0-9-]+)/i },
-  { source: "replit", sourceLabel: "Replit", regex: /jobs\.ashbyhq\.com\/replit\/([a-f0-9-]+)/i },
-  { source: "elevenlabs", sourceLabel: "ElevenLabs", regex: /jobs\.ashbyhq\.com\/elevenlabs\/([a-f0-9-]+)/i },
-  { source: "runway", sourceLabel: "Runway", regex: /jobs\.ashbyhq\.com\/runway\/([a-f0-9-]+)/i },
-  { source: "anchorage", sourceLabel: "Anchorage Digital", regex: /jobs\.lever\.co\/anchorage\/([a-f0-9-]+)/i },
-  { source: "attentive", sourceLabel: "Attentive", regex: /jobs\.lever\.co\/attentive\/([a-f0-9-]+)/i },
-  { source: "jumpcloud", sourceLabel: "JumpCloud", regex: /jobs\.lever\.co\/jumpcloud\/([a-f0-9-]+)/i },
-  { source: "dell", sourceLabel: "Dell", regex: /dell\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { source: "bosch", sourceLabel: "Bosch", regex: /jobs\.smartrecruiters\.com\/BoschGroup\/([a-f0-9-]+)/i },
-  { source: "creditgenie", sourceLabel: "Credit Genie", regex: /jobs\.ashbyhq\.com\/creditgenie\/([a-f0-9-]+)/i },
-  { source: "veeva", sourceLabel: "Veeva Systems", regex: /jobs\.lever\.co\/veeva\/([a-f0-9-]+)/i }
-];
+// URL patterns — imported from central registry (companies.js)
+import { JOB_URL_PATTERNS } from "./companies.js";
+
 
 function extractJobFromMessage(urlOrText) {
   for (const { source, sourceLabel, regex } of JOB_URL_PATTERNS) {
@@ -428,8 +339,8 @@ async function handleFitCheck(interaction, hash) {
 
     // Update buttons to show fit check was done
     if (jobUrl) {
-      const updatedRow = buildButtonRow(hash, jobUrl, "fitchecked");
-      await interaction.message.edit({ components: [updatedRow] });
+      const updatedRows = buildButtonRows(hash, jobUrl, "fitchecked");
+      await interaction.message.edit({ components: updatedRows });
     }
   } catch (error) {
     console.error(`[fit-check] Error for ${sourceKey}-${jobId}: ${error.message}`);
@@ -504,8 +415,8 @@ async function handleConfirmApply(interaction, hash) {
     // Update buttons on the original message
     const jobUrl = getJobUrlFromMessage(parentMessage);
     if (jobUrl) {
-      const updatedRow = buildButtonRow(hash, jobUrl, "applied");
-      await parentMessage.edit({ components: [updatedRow] });
+      const updatedRows = buildButtonRows(hash, jobUrl, "applied");
+      await parentMessage.edit({ components: updatedRows });
     }
 
     // Remove the confirmation buttons
@@ -575,6 +486,114 @@ async function handleShowQueue(interaction) {
   }
 }
 
+async function handleTailor(interaction, hash) {
+  await interaction.deferUpdate();
+
+  const thread = await getOrCreateThread(interaction);
+  if (!thread) return;
+
+  const jobUrl = getJobUrlFromMessage(interaction.message);
+  const embedDetails = extractJobInfoFromMessage(interaction.message);
+
+  // Look up actual job from DB
+  const db = getDb();
+  let sourceKey = "";
+  let jobId = "";
+  let jobTitle = embedDetails.role || "";
+  let jobCompany = embedDetails.company || "";
+
+  if (db) {
+    const jobKey = findJobKeyByMessageId(interaction.message.id);
+    if (jobKey) {
+      const row = db.prepare("SELECT source_key, source_label, id, title, location, url FROM seen_jobs WHERE key = ?").get(jobKey);
+      if (row) {
+        sourceKey = row.source_key;
+        jobId = row.id;
+        jobTitle = row.title;
+        jobCompany = row.source_label;
+      }
+    }
+  }
+
+  if (!sourceKey || !jobId) {
+    await thread.send("Could not identify this job for tailoring.");
+    return;
+  }
+
+  const dirId = `${sourceKey}-${jobId}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+  await thread.send(`Tailoring resume for **${jobCompany} — ${jobTitle}**...\nThis takes 1-2 minutes (Claude is rewriting your resume).`);
+
+  try {
+    // Ensure description exists
+    const descPath = `data/jobs/${dirId}/description.txt`;
+    try {
+      await fs.access(descPath);
+    } catch {
+      const jobForFetch = { sourceKey, id: jobId, url: jobUrl || "", sourceLabel: jobCompany };
+      const description = await fetchJobDescription(jobForFetch);
+      if (description) await saveJobData(jobForFetch, description);
+    }
+
+    const result = await tailorResume(dirId, (msg) => console.log(`[tailor] ${msg}`));
+
+    // Send the PDF
+    const { AttachmentBuilder } = await import("discord.js");
+    const attachment = new AttachmentBuilder(result.pdfPath, { name: `${result.safeName}.pdf` });
+
+    const fitEmoji = result.shouldApply === "YES" ? "✅" : result.shouldApply === "STRETCH" ? "⚠️" : "❌";
+    await thread.send({
+      content: `${fitEmoji} **Tailored resume ready** (${result.pageCount} page${result.pageCount > 1 ? "s" : ""})\n*${jobCompany} — ${jobTitle}*`,
+      files: [attachment]
+    });
+
+    if (result.fitAssessment) {
+      const trimmed = result.fitAssessment.length > 1500
+        ? result.fitAssessment.slice(0, 1500) + "..."
+        : result.fitAssessment;
+      await thread.send(`\`\`\`\n${trimmed}\n\`\`\``);
+    }
+  } catch (error) {
+    console.error(`[tailor] Error: ${error.message}`);
+    await thread.send(`Resume tailoring failed: ${error.message.slice(0, 200)}\nTry using the Fit Check button instead.`);
+  }
+}
+
+async function handleTailorCommand(interaction) {
+  const jobUrl = interaction.options.getString("url");
+
+  await interaction.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0x5865F2)
+        .setTitle("Tailoring Resume")
+        .setDescription(`Fetching job description and tailoring your resume...\nThis takes 1-2 minutes.\n\nURL: ${jobUrl}`)
+    ]
+  });
+
+  try {
+    const result = await tailorFromUrl(jobUrl, (msg) => console.log(`[tailor] ${msg}`));
+
+    const { AttachmentBuilder } = await import("discord.js");
+    const attachment = new AttachmentBuilder(result.pdfPath, { name: `${result.safeName}.pdf` });
+
+    const fitEmoji = result.shouldApply === "YES" ? "✅" : result.shouldApply === "STRETCH" ? "⚠️" : "❌";
+    await interaction.followUp({
+      content: `${fitEmoji} **Tailored resume ready** (${result.pageCount} page${result.pageCount > 1 ? "s" : ""})`,
+      files: [attachment]
+    });
+
+    if (result.fitAssessment) {
+      const trimmed = result.fitAssessment.length > 1500
+        ? result.fitAssessment.slice(0, 1500) + "..."
+        : result.fitAssessment;
+      await interaction.followUp(`\`\`\`\n${trimmed}\n\`\`\``);
+    }
+  } catch (error) {
+    console.error(`[tailor] Error: ${error.message}`);
+    await interaction.followUp(`Resume tailoring failed: ${error.message.slice(0, 200)}`);
+  }
+}
+
 async function handleSkip(interaction, hash) {
   await interaction.deferUpdate();
 
@@ -591,8 +610,8 @@ async function handleSkip(interaction, hash) {
   // Update buttons to show skipped state
   const jobUrl = getJobUrlFromMessage(interaction.message);
   if (jobUrl) {
-    const updatedRow = buildButtonRow(hash, jobUrl, "skipped");
-    await interaction.message.edit({ components: [updatedRow] });
+    const updatedRows = buildButtonRows(hash, jobUrl, "skipped");
+    await interaction.message.edit({ components: updatedRows });
   }
 }
 
@@ -640,12 +659,12 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
       embed.setDescription(descParts.join("\n"));
     }
 
-    const row = buildButtonRow(hash, job.url, "pending");
+    const rows = buildButtonRows(hash, job.url, "pending");
 
     try {
       const message = await channel.send({
         embeds: [embed],
-        components: [row]
+        components: rows
       });
 
       // Auto-create thread

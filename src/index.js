@@ -14,6 +14,7 @@ import { collectMetaJobs } from "./sources/meta.js";
 import { collectMicrosoftJobs } from "./sources/microsoft.js";
 import { collectPcsxJobs } from "./sources/pcsx.js";
 import { dedupeJobs, delay, jobIsFresh, jobMatchesCountryFilter } from "./sources/shared.js";
+import { COMPANIES } from "./companies.js";
 import { collectWorkdayJobs } from "./sources/workday.js";
 import { collectAshbyJobs } from "./sources/ashby.js";
 import { collectOracleJobs } from "./sources/oracle.js";
@@ -79,24 +80,20 @@ function buildRegistry(config) {
   solo("intuit", collectIntuitJobs, "slow");
   solo("bloomberg", collectBloombergJobs, "slow");
 
-  // Normal lane — parameterized ATS collectors
-  for (const key of ["nvidia", "adobe", "cisco", "salesforce", "netflix", "snap", "intel", "paypal", "capitalone", "walmartglobaltech", "samsung", "broadcom", "nike", "usbank", "fidelity", "wellsfargo", "bankofamerica", "threeM", "boeing", "disney", "amgen", "accenture", "dell"]) {
-    param(key, collectWorkdayJobs, "normal");
-  }
-  for (const key of ["stripe", "databricks", "figma", "lyft", "discord", "twilio", "cloudflare", "coinbase", "roblox", "anthropic", "airbnb", "doordash", "reddit", "pinterest", "datadog", "mongodb", "robinhood", "hubspot", "instacart", "samsara", "block", "elastic", "waymo", "rubrik", "dropbox", "spacex", "okta", "deepmind", "duolingo", "thumbtack", "hackerrank", "zoominfo", "verisign", "fanduel"]) {
-    param(key, collectGreenhouseJobs, "normal");
-  }
-  for (const key of ["qualcomm"]) {
-    param(key, collectPcsxJobs, "normal");
-  }
-  for (const key of ["palantir", "plaid", "spotify", "creditkarma", "quora", "zoox", "binance", "anchorage", "attentive", "jumpcloud", "veeva"]) {
-    param(key, collectLeverJobs, "normal");
-  }
-  for (const key of ["openai", "notion", "ramp", "snowflake", "cursor", "airtable", "vanta", "docker", "zapier", "sentry", "mapbox", "lambdalabs", "onepassword", "supabase", "replit", "elevenlabs", "runway", "creditgenie"]) {
-    param(key, collectAshbyJobs, "normal");
-  }
-  for (const key of ["servicenow", "visa", "aristanetworks", "bosch"]) {
-    param(key, collectSmartRecruitersJobs, "normal");
+  // Normal lane — parameterized ATS collectors (derived from central registry)
+  const atsCollectors = {
+    workday: collectWorkdayJobs,
+    greenhouse: collectGreenhouseJobs,
+    pcsx: collectPcsxJobs,
+    lever: collectLeverJobs,
+    ashby: collectAshbyJobs,
+    smartrecruiters: collectSmartRecruitersJobs
+  };
+
+  for (const company of COMPANIES) {
+    if (company.ats !== "solo" && atsCollectors[company.ats]) {
+      param(company.key, atsCollectors[company.ats], company.lane);
+    }
   }
 
   // Override lane for any companies in config.fastTrackCompanies

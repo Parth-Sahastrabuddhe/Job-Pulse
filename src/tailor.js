@@ -206,6 +206,210 @@ function parseFitCheckOutput(output) {
   return result;
 }
 
+const TAILOR_SUFFIX = `
+
+---
+
+## IMPORTANT: FULL TAILORING MODE
+
+Run ALL three steps: Fit Assessment (Step 1), Change Decision (Step 2), and Output (Step 3).
+
+Output the COMPLETE modified LaTeX resume — not just changed sections. I need the full .tex file content so it can be compiled directly to PDF. Output it inside a single \`\`\`latex code block.
+
+If the fit assessment is NO (ATS < 70% or sponsorship blocked), still output the best possible tailored resume — the candidate will decide whether to apply.
+
+After outputting the full LaTeX, output the fit assessment block as well.
+`;
+
+export async function tailorResume(jobDirId, log = console.log) {
+  log(`Loading job data for: ${jobDirId}`);
+  const { meta, description, dir } = await loadJobData(jobDirId);
+
+  if (!description) {
+    throw new Error(`No job description found in ${dir}/description.txt`);
+  }
+
+  log(`Loading resume files...`);
+  const { baseResume, skills, prompt } = await readResumeFiles();
+
+  log(`Assembling tailor prompt for: ${meta.title} @ ${meta.sourceLabel}`);
+  const filledPrompt = prompt
+    .replace("{{BASE_RESUME}}", baseResume)
+    .replace("{{SKILLS}}", skills)
+    .replace("{{JOB_DESCRIPTION}}", description)
+    .replace("{{JOB_TITLE}}", meta.title || "")
+    .replace("{{COMPANY}}", meta.sourceLabel || "")
+    .replace("{{LOCATION}}", meta.location || "")
+    .replace("{{JOB_URL}}", meta.url || "");
+
+  const fullPrompt = filledPrompt + TAILOR_SUFFIX;
+
+  // Always use Claude CLI for tailoring — needs high quality
+  log(`Running full resume tailoring via Claude CLI...`);
+  const output = await runClaude(fullPrompt);
+
+  // Extract the full LaTeX from the output
+  const latexMatch = output.match(/```latex\s*([\s\S]*?)```/);
+  if (!latexMatch) {
+    throw new Error("Claude did not output a LaTeX code block");
+  }
+
+  const tailoredLatex = latexMatch[1].trim();
+
+  // Also extract fit assessment
+  const fitResult = parseFitCheckOutput(output);
+
+  // Write the tailored LaTeX to a temp file
+  const outputDir = path.join(PROJECT_ROOT, "data", "tailored");
+  await fs.mkdir(outputDir, { recursive: true });
+
+  const safeName = `${meta.sourceLabel}-${meta.title}`.replace(/[^a-zA-Z0-9-]/g, "_").slice(0, 60);
+  const texFile = path.join(outputDir, `${safeName}.tex`);
+  await fs.writeFile(texFile, tailoredLatex, "utf8");
+
+  // Compile to PDF
+  log(`Compiling tailored resume to PDF...`);
+  const pdfPath = await compileLaTeX(texFile, outputDir, log);
+
+  // Check page count
+  const pageCount = await getPdfPageCount(pdfPath);
+  if (pageCount > 1) {
+    log(`WARNING: Resume is ${pageCount} pages. Needs trimming.`);
+  }
+
+  return {
+    pdfPath,
+    texFile,
+    pageCount,
+    fitAssessment: fitResult.fitAssessment,
+    shouldApply: fitResult.shouldApply,
+    meta,
+    safeName
+  };
+}
+
+async function compileLaTeX(texFile, outputDir, log) {
+  const { execSync } = childProcess;
+  const texDir = path.dirname(texFile);
+  const texName = path.basename(texFile);
+
+  try {
+    execSync(
+      `pdflatex -interaction=nonstopmode -output-directory="${outputDir}" "${texFile}"`,
+      { cwd: texDir, stdio: "pipe", timeout: 30000 }
+    );
+  } catch (error) {
+    // pdflatex returns non-zero on warnings too — check if PDF was created
+    const pdfName = texName.replace(".tex", ".pdf");
+    const pdfPath = path.join(outputDir, pdfName);
+    try {
+      await fs.access(pdfPath);
+      log("LaTeX compiled with warnings (PDF created)");
+      return pdfPath;
+    } catch {
+      throw new Error(`LaTeX compilation failed: ${error.message.slice(0, 300)}`);
+    }
+  }
+
+  const pdfName = path.basename(texFile).replace(".tex", ".pdf");
+  return path.join(outputDir, pdfName);
+}
+
+async function getPdfPageCount(pdfPath) {
+  try {
+    const content = await fs.readFile(pdfPath);
+    // Count /Type /Page entries in PDF (rough but works)
+    const matches = content.toString("latin1").match(/\/Type\s*\/Page[^s]/g);
+    return matches ? matches.length : 1;
+  } catch {
+    return 1;
+  }
+}
+
+// Tailor from a URL (for /tailor command)
+export async function tailorFromUrl(jobUrl, log = console.log) {
+  // Import dynamically to avoid circular deps
+  const { fetchJobDescription } = await import("./job-description.js");
+
+  log(`Fetching job description from: ${jobUrl}`);
+
+  // Identify company from URL using the same patterns as Discord bot
+  let sourceKey = "unknown";
+  let sourceLabel = "Unknown";
+  let jobId = "";
+
+  // Dynamic: import JOB_URL_PATTERNS from discord-bot to match against all 100+ companies
+  try {
+    const discordBot = await import("./discord-bot.js");
+    // discord-bot.js doesn't export JOB_URL_PATTERNS, so fall back to regex matching
+  } catch {}
+
+  // Match against known ATS URL patterns
+  const urlPatterns = [
+    { key: "microsoft", label: "Microsoft", test: /apply\.careers\.microsoft\.com/i },
+    { key: "amazon", label: "Amazon", test: /amazon\.jobs/i },
+    { key: "google", label: "Google", test: /google\.com\/.*careers/i },
+    { key: "meta", label: "Meta", test: /metacareers\.com/i },
+    { key: "greenhouse", label: "Company", test: /greenhouse\.io|boards-api\.greenhouse/i },
+    { key: "lever", label: "Company", test: /lever\.co/i },
+    { key: "ashby", label: "Company", test: /ashbyhq\.com/i },
+    { key: "workday", label: "Company", test: /myworkdayjobs\.com/i },
+    { key: "smartrecruiters", label: "Company", test: /smartrecruiters\.com/i },
+    { key: "oraclecloud", label: "Company", test: /oraclecloud\.com/i },
+  ];
+
+  for (const { key, label, test } of urlPatterns) {
+    if (test.test(jobUrl)) {
+      sourceKey = key;
+      sourceLabel = label;
+      // Try to extract company name from URL for better labeling
+      if (key === "greenhouse") {
+        const slugMatch = jobUrl.match(/boards\.greenhouse\.io\/(\w+)/i);
+        if (slugMatch) sourceLabel = slugMatch[1].charAt(0).toUpperCase() + slugMatch[1].slice(1);
+      } else if (key === "lever") {
+        const slugMatch = jobUrl.match(/lever\.co\/(\w+)/i);
+        if (slugMatch) sourceLabel = slugMatch[1].charAt(0).toUpperCase() + slugMatch[1].slice(1);
+      } else if (key === "ashby") {
+        const slugMatch = jobUrl.match(/ashbyhq\.com\/(\w+)/i);
+        if (slugMatch) sourceLabel = slugMatch[1].charAt(0).toUpperCase() + slugMatch[1].slice(1);
+      } else if (key === "workday") {
+        const slugMatch = jobUrl.match(/(\w+)\.wd\d+\.myworkdayjobs/i);
+        if (slugMatch) sourceLabel = slugMatch[1].charAt(0).toUpperCase() + slugMatch[1].slice(1);
+      }
+      break;
+    }
+  }
+
+  // Extract job ID from URL
+  const idMatch = jobUrl.match(/(\d{5,})|([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
+  jobId = idMatch ? idMatch[0] : "unknown";
+
+  const description = await fetchJobDescription({ sourceKey, id: jobId, url: jobUrl, sourceLabel });
+  if (!description || description.length < 50) {
+    throw new Error("Could not fetch job description from the provided URL");
+  }
+
+  // Save job data
+  const dirId = `${sourceKey}-${jobId}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const jobDir = path.join(PROJECT_ROOT, "data", "jobs", dirId);
+  await fs.mkdir(jobDir, { recursive: true });
+  await fs.writeFile(path.join(jobDir, "description.txt"), description, "utf8");
+  await fs.writeFile(path.join(jobDir, "meta.json"), JSON.stringify({
+    id: jobId, sourceKey, sourceLabel, title: "Unknown", location: "", url: jobUrl
+  }), "utf8");
+
+  // Extract title from description
+  const titleMatch = description.match(/Title:\s*(.+)/);
+  const title = titleMatch ? titleMatch[1].trim() : "Software Engineer";
+
+  // Update meta with real title
+  await fs.writeFile(path.join(jobDir, "meta.json"), JSON.stringify({
+    id: jobId, sourceKey, sourceLabel, title, location: "", url: jobUrl
+  }), "utf8");
+
+  return tailorResume(dirId, log);
+}
+
 // CLI entry point
 const isDirectRun = process.argv[1]?.endsWith("tailor.js");
 
