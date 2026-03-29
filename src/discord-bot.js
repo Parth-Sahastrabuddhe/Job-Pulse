@@ -399,7 +399,9 @@ async function handleConfirmApply(interaction, hash) {
 
   try {
     const scriptPath = path.resolve(__dirname, "..", "scripts", "add_application.py");
-    const { stdout } = await execFileAsync("python", [
+    const isLinux = process.platform === "linux";
+    const pythonCmd = isLinux ? path.resolve(process.env.HOME, "venv", "bin", "python") : "python";
+    const { stdout } = await execFileAsync(pythonCmd, [
       scriptPath, details.company, details.role, details.url
     ]);
 

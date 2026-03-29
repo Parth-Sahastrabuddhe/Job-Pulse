@@ -5,3 +5,4 @@ data/
 *.migrated
 docs/
 resume/
+google-credentials.json

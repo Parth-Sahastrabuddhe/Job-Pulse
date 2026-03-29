@@ -1,49 +1,57 @@
-"""Add a job application entry to the Excel tracker."""
+"""Add a job application entry to the Google Sheets tracker."""
 import sys
-import shutil
+import json
 from datetime import date
 from pathlib import Path
-from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Alignment
 
-TRACKER_PATH = Path(r"C:/Users/sahas/OneDrive/Desktop/Resume/Full_time/Application - full time (new).xlsm")
-BACKUP_PATH = TRACKER_PATH.with_suffix(".xlsm.bak")
+import gspread
+from google.oauth2.service_account import Credentials
 
-STATUS_COLORS = {
-    "Applied": "FFFFFF00",
-    "Rejected": "FFFF0000",
-    "Referral": "FFCCFFFF",
-    "Interview": "FFADD8E6",
-    "Assessment": "FFFFCC99",
-    "Offer Letter": "FF90EE90",
-}
+SHEET_ID = "1cBerym6t8Ws_SxWQCX06BbWVOCK3oQnxh9lqc8WTDVw"
+TAB_NAME = "Sheet1"
+CREDS_PATH = Path(__file__).resolve().parent.parent / "data" / "google-credentials.json"
+
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+]
+
+
+def get_sheet():
+    creds = Credentials.from_service_account_file(str(CREDS_PATH), scopes=SCOPES)
+    gc = gspread.authorize(creds)
+    return gc.open_by_key(SHEET_ID).worksheet(TAB_NAME)
+
 
 def add_application(company, role, url):
-    shutil.copy2(TRACKER_PATH, BACKUP_PATH)
-
-    wb = load_workbook(TRACKER_PATH, keep_vba=True)
-    ws = wb["Sheet1"]
+    ws = get_sheet()
 
     # Find next empty row (check column A)
-    row = 1
-    while ws.cell(row=row, column=1).value is not None:
-        row += 1
+    col_a = ws.col_values(1)
+    next_row = len(col_a) + 1
 
-    ws.cell(row=row, column=1, value=company)      # A: Company
-    ws.cell(row=row, column=2, value=role)         # B: Role
-    ws.cell(row=row, column=4, value=date.today().strftime("%#m/%d/%Y")) # D: Date Applied (e.g. 3/20/2026)
-    ws.cell(row=row, column=5, value="Applied")    # E: Status
-    ws.cell(row=row, column=7, value=url)          # G: URL
+    d = date.today()
+    today = f"{d.month}/{d.day}/{d.year}"
 
-    # Apply formatting
-    ws.cell(row=row, column=5).fill = PatternFill(patternType="solid", fgColor=STATUS_COLORS["Applied"])
-    center = Alignment(horizontal="center", vertical="center")
-    for col in range(1, 7):  # A-F centered
-        ws.cell(row=row, column=col).alignment = center
-    ws.cell(row=row, column=7).alignment = Alignment(horizontal="left", vertical="center")
+    # Update row: A=Company, B=Role, D=Date Applied, E=Status, G=URL
+    ws.update(values=[[company]], range_name=f"A{next_row}")
+    ws.update(values=[[role]], range_name=f"B{next_row}")
+    ws.update(values=[[today]], range_name=f"D{next_row}")
+    ws.update(values=[["Applied"]], range_name=f"E{next_row}")
+    ws.update(values=[[url]], range_name=f"G{next_row}")
 
-    wb.save(TRACKER_PATH)
-    print(f"OK|{row}")
+    # Apply yellow background to Status cell (E)
+    ws.format(f"E{next_row}", {
+        "backgroundColor": {"red": 1, "green": 1, "blue": 0}
+    })
+
+    # Center align A-F
+    ws.format(f"A{next_row}:F{next_row}", {
+        "horizontalAlignment": "CENTER",
+        "verticalAlignment": "MIDDLE"
+    })
+
+    print(f"OK|{next_row}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
