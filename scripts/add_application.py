@@ -1,6 +1,5 @@
 """Add a job application entry to the Google Sheets tracker."""
 import sys
-import json
 from datetime import date
 from pathlib import Path
 

@@ -1,9 +1,10 @@
 # JobPulse
 
 ## Project Overview
-Real-time job aggregation engine monitoring 88+ companies across 8 ATS platforms with Discord notifications.
+Real-time job aggregation engine monitoring 105+ companies across 8 ATS platforms with Discord notifications.
 
 ## Key Files
+- `src/companies.js` — **Central registry** (single source of truth for all companies, URL patterns, fetcher lists)
 - `src/index.js` — Main loop with batch rotation, company registry (`buildRegistry()`)
 - `src/config.js` — All company configs and env var parsing
 - `src/discord-bot.js` — Discord buttons, threads, slash commands, URL patterns (`JOB_URL_PATTERNS`)
@@ -17,11 +18,11 @@ Real-time job aggregation engine monitoring 88+ companies across 8 ATS platforms
 - **Normal lane**: API companies in batches of 20 (Greenhouse, Workday, Ashby, Lever, SmartRecruiters, Oracle HCM, custom APIs)
 - **Slow lane**: Playwright/HTML scrapers every 5 minutes (Uber, Confluent, Apple, LinkedIn, Intuit, Bloomberg)
 
-## Bot Management
-- PID stored in `data/bot.pid`, lock in `data/bot.lock`
-- Always ask user before restarting
-- When restarting: read PID from `data/bot.pid`, kill only that PID, clean up, start fresh
-- Start command: `nohup node src/index.js --watch > data/bot.log 2>&1 &`
+## Bot Management — RUNS ON AWS EC2
+- **The bot runs on AWS EC2, NOT locally.** Never start the bot locally unless explicitly asked as a fallback.
+- Managed by pm2: `pm2 restart jobpulse` on the EC2 instance
+- After code changes: push to GitHub, then SSH into EC2 and `cd ~/Job-Pulse && git pull && pm2 restart jobpulse`
+- SSH: `ssh -i <key.pem> ubuntu@<elastic-ip>`
 - Check company queue on conversation start: `SELECT * FROM company_queue WHERE status = 'pending'`
 - User runs another bot on the same machine — NEVER kill all node processes, only kill the PID from bot.pid
 

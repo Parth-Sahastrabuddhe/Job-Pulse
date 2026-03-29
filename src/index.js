@@ -188,6 +188,12 @@ async function processBatchResults(config, flags, jobs, batchLabel) {
     log(`[${batchLabel}] Suppressed ${staleJobs.length} stale jobs.`);
   }
 
+  // Upsert BEFORE notifying — prevents duplicate notifications if the next batch
+  // cycle runs before notifications finish sending
+  if (!flags.dryRun) {
+    upsertJobs(filtered, now);
+  }
+
   if (freshJobs.length > 0) {
     const jobsToNotify = freshJobs.slice(0, config.maxNewJobsPerNotify);
     const filteredJobs = await fetchDescriptionsAndFilter(jobsToNotify);
@@ -198,10 +204,6 @@ async function processBatchResults(config, flags, jobs, batchLabel) {
     }
 
     await sendNotifications(config, filteredJobs.map((r) => r.job), filteredJobs, { dryRun: flags.dryRun });
-  }
-
-  if (!flags.dryRun) {
-    upsertJobs(filtered, now);
   }
 }
 
