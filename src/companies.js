@@ -55,6 +55,8 @@ export const COMPANIES = [
   { key: "amgen", label: "Amgen", ats: "workday", lane: "normal", urlPattern: /amgen\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
   { key: "accenture", label: "Accenture", ats: "workday", lane: "normal", urlPattern: /accenture\.wd103\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
   { key: "dell", label: "Dell", ats: "workday", lane: "normal", urlPattern: /dell\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { key: "comcast", label: "Comcast", ats: "workday", lane: "normal", urlPattern: /comcast\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { key: "target", label: "Target", ats: "workday", lane: "normal", urlPattern: /target\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
 
   // === Greenhouse companies ===
   { key: "stripe", label: "Stripe", ats: "greenhouse", lane: "normal", board: "stripe", urlPattern: /(?:stripe\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
@@ -91,6 +93,9 @@ export const COMPANIES = [
   { key: "zoominfo", label: "ZoomInfo", ats: "greenhouse", lane: "normal", board: "zoominfo", urlPattern: /(?:zoominfo\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
   { key: "verisign", label: "Verisign", ats: "greenhouse", lane: "normal", board: "verisign", urlPattern: /(?:verisign\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
   { key: "fanduel", label: "FanDuel", ats: "greenhouse", lane: "normal", board: "fanduel", urlPattern: /(?:fanduel\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { key: "polyai", label: "PolyAI", ats: "greenhouse", lane: "normal", board: "polyai", urlPattern: /(?:poly\.ai|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { key: "addepar", label: "Addepar", ats: "greenhouse", lane: "normal", board: "addepar1", urlPattern: /(?:addepar\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  { key: "hudl", label: "Hudl", ats: "greenhouse", lane: "normal", board: "hudl", urlPattern: /(?:hudl\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
 
   // === PCSX companies ===
   { key: "qualcomm", label: "Qualcomm", ats: "pcsx", lane: "normal", urlPattern: /careers\.qualcomm\.com\/.*?jobs\/(\d+)/i },
@@ -107,6 +112,9 @@ export const COMPANIES = [
   { key: "attentive", label: "Attentive", ats: "lever", lane: "normal", urlPattern: /jobs\.lever\.co\/attentive\/([a-f0-9-]+)/i },
   { key: "jumpcloud", label: "JumpCloud", ats: "lever", lane: "normal", urlPattern: /jobs\.lever\.co\/jumpcloud\/([a-f0-9-]+)/i },
   { key: "veeva", label: "Veeva Systems", ats: "lever", lane: "normal", urlPattern: /jobs\.lever\.co\/veeva\/([a-f0-9-]+)/i },
+  { key: "floqast", label: "FloQast", ats: "lever", lane: "normal", urlPattern: /jobs\.lever\.co\/floqast\/([a-f0-9-]+)/i },
+  { key: "gopuff", label: "GoPuff", ats: "lever", lane: "normal", urlPattern: /jobs\.lever\.co\/gopuff\/([a-f0-9-]+)/i },
+  { key: "highspot", label: "Highspot", ats: "lever", lane: "normal", urlPattern: /jobs\.lever\.co\/highspot\/([a-f0-9-]+)/i },
 
   // === Ashby companies ===
   { key: "openai", label: "OpenAI", ats: "ashby", lane: "normal", board: "openai", urlPattern: /jobs\.ashbyhq\.com\/openai\/([a-f0-9-]+)/i },
@@ -127,12 +135,19 @@ export const COMPANIES = [
   { key: "elevenlabs", label: "ElevenLabs", ats: "ashby", lane: "normal", board: "elevenlabs", urlPattern: /jobs\.ashbyhq\.com\/elevenlabs\/([a-f0-9-]+)/i },
   { key: "runway", label: "Runway", ats: "ashby", lane: "normal", board: "runway", urlPattern: /jobs\.ashbyhq\.com\/runway\/([a-f0-9-]+)/i },
   { key: "creditgenie", label: "Credit Genie", ats: "ashby", lane: "normal", board: "creditgenie", urlPattern: /jobs\.ashbyhq\.com\/creditgenie\/([a-f0-9-]+)/i },
+  { key: "deel", label: "Deel", ats: "ashby", lane: "normal", board: "deel", urlPattern: /jobs\.ashbyhq\.com\/deel\/([a-f0-9-]+)/i },
+  { key: "harvey", label: "Harvey", ats: "ashby", lane: "normal", board: "harvey", urlPattern: /jobs\.ashbyhq\.com\/harvey\/([a-f0-9-]+)/i },
+  { key: "writer", label: "Writer", ats: "ashby", lane: "normal", board: "writer", urlPattern: /jobs\.ashbyhq\.com\/writer\/([a-f0-9-]+)/i },
+  { key: "deepgram", label: "Deepgram", ats: "ashby", lane: "normal", board: "deepgram", urlPattern: /jobs\.ashbyhq\.com\/deepgram\/([a-f0-9-]+)/i },
+  { key: "sierra", label: "Sierra", ats: "ashby", lane: "normal", board: "sierra", urlPattern: /jobs\.ashbyhq\.com\/sierra\/([a-f0-9-]+)/i },
+  { key: "roboflow", label: "Roboflow", ats: "ashby", lane: "normal", board: "roboflow", urlPattern: /jobs\.ashbyhq\.com\/roboflow\/([a-f0-9-]+)/i },
 
   // === SmartRecruiters companies ===
   { key: "servicenow", label: "ServiceNow", ats: "smartrecruiters", lane: "normal", board: "ServiceNow", urlPattern: /jobs\.smartrecruiters\.com\/ServiceNow\/([a-f0-9-]+)/i },
   { key: "visa", label: "Visa", ats: "smartrecruiters", lane: "normal", board: "Visa", urlPattern: /jobs\.smartrecruiters\.com\/Visa\/([a-f0-9-]+)/i },
   { key: "aristanetworks", label: "Arista Networks", ats: "smartrecruiters", lane: "normal", board: "AristaNetworks", urlPattern: /jobs\.smartrecruiters\.com\/AristaNetworks\/([a-f0-9-]+)/i },
   { key: "bosch", label: "Bosch", ats: "smartrecruiters", lane: "normal", board: "BoschGroup", urlPattern: /jobs\.smartrecruiters\.com\/BoschGroup\/([a-f0-9-]+)/i },
+  { key: "sanofi", label: "Sanofi", ats: "smartrecruiters", lane: "normal", board: "Sanofi", urlPattern: /jobs\.smartrecruiters\.com\/Sanofi\/([a-f0-9-]+)/i },
 ];
 
 // === Derived lists (auto-generated from COMPANIES) ===

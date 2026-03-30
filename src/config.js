@@ -505,7 +505,37 @@ export function getConfig() {
       apiUrl: "https://accenture.wd103.myworkdayjobs.com/wday/cxs/accenture/accenturecareers/jobs",
       baseUrl: "https://accenture.wd103.myworkdayjobs.com/accenturecareers"
     },
+    comcast: {
+      sourceKey: "comcast",
+      sourceLabel: "Comcast",
+      apiUrl: "https://comcast.wd5.myworkdayjobs.com/wday/cxs/comcast/comcast_careers/jobs",
+      baseUrl: "https://comcast.wd5.myworkdayjobs.com/comcast_careers"
+    },
+    target: {
+      sourceKey: "target",
+      sourceLabel: "Target",
+      apiUrl: "https://target.wd5.myworkdayjobs.com/wday/cxs/target/targetcareers/jobs",
+      baseUrl: "https://target.wd5.myworkdayjobs.com/targetcareers"
+    },
     // --- New Greenhouse companies ---
+    polyai: {
+      sourceKey: "polyai",
+      sourceLabel: "PolyAI",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/polyai/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/polyai/jobs/"
+    },
+    addepar: {
+      sourceKey: "addepar",
+      sourceLabel: "Addepar",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/addepar1/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/addepar1/jobs/"
+    },
+    hudl: {
+      sourceKey: "hudl",
+      sourceLabel: "Hudl",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/hudl/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/hudl/jobs/"
+    },
     spacex: {
       sourceKey: "spacex",
       sourceLabel: "SpaceX",
@@ -553,6 +583,26 @@ export function getConfig() {
       sourceLabel: "Zoox",
       apiUrl: "https://api.lever.co/v0/postings/zoox?mode=json"
     },
+    veeva: {
+      sourceKey: "veeva",
+      sourceLabel: "Veeva Systems",
+      apiUrl: "https://api.lever.co/v0/postings/veeva?mode=json"
+    },
+    floqast: {
+      sourceKey: "floqast",
+      sourceLabel: "FloQast",
+      apiUrl: "https://api.lever.co/v0/postings/floqast?mode=json"
+    },
+    gopuff: {
+      sourceKey: "gopuff",
+      sourceLabel: "GoPuff",
+      apiUrl: "https://api.lever.co/v0/postings/gopuff?mode=json"
+    },
+    highspot: {
+      sourceKey: "highspot",
+      sourceLabel: "Highspot",
+      apiUrl: "https://api.lever.co/v0/postings/highspot?mode=json"
+    },
     // --- SmartRecruiters companies ---
     servicenow: {
       sourceKey: "servicenow",
@@ -573,6 +623,11 @@ export function getConfig() {
       sourceKey: "bosch",
       sourceLabel: "Bosch",
       companySlug: "BoschGroup"
+    },
+    sanofi: {
+      sourceKey: "sanofi",
+      sourceLabel: "Sanofi",
+      companySlug: "Sanofi"
     },
     // --- New Greenhouse companies (batch 2) ---
     duolingo: {
@@ -647,6 +702,42 @@ export function getConfig() {
       sourceLabel: "Credit Genie",
       apiUrl: "https://api.ashbyhq.com/posting-api/job-board/creditgenie",
       boardSlug: "creditgenie"
+    },
+    deel: {
+      sourceKey: "deel",
+      sourceLabel: "Deel",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/deel",
+      boardSlug: "deel"
+    },
+    harvey: {
+      sourceKey: "harvey",
+      sourceLabel: "Harvey",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/harvey",
+      boardSlug: "harvey"
+    },
+    writer: {
+      sourceKey: "writer",
+      sourceLabel: "Writer",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/writer",
+      boardSlug: "writer"
+    },
+    deepgram: {
+      sourceKey: "deepgram",
+      sourceLabel: "Deepgram",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/deepgram",
+      boardSlug: "deepgram"
+    },
+    sierra: {
+      sourceKey: "sierra",
+      sourceLabel: "Sierra",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/sierra",
+      boardSlug: "sierra"
+    },
+    roboflow: {
+      sourceKey: "roboflow",
+      sourceLabel: "Roboflow",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/roboflow",
+      boardSlug: "roboflow"
     },
     // --- New Lever companies (batch 2) ---
     veeva: {
