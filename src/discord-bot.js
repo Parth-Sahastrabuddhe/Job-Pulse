@@ -16,7 +16,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { fetchJobDescription, saveJobData, jobDirId } from "./job-description.js";
-import { fitCheckResume, tailorResume, tailorFromUrl } from "./tailor.js";
+import { fitCheckResume } from "./tailor.js";
 import { upsertJobPost, updateJobPostStatus, getDb, addToCompanyQueue, getPendingCompanies } from "./state.js";
 
 const execFileAsync = promisify(execFile);
@@ -35,7 +35,7 @@ function buildButtonRows(hash, jobUrl, status) {
   // Applied is truly final. Skip is reversible — Applied stays active.
   const isApplied = status === "applied";
 
-  const row1 = new ActionRowBuilder().addComponents(
+  const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setLabel("View Job")
       .setStyle(ButtonStyle.Link)
@@ -45,14 +45,6 @@ function buildButtonRows(hash, jobUrl, status) {
       .setLabel(status === "fitchecked" ? "\u2714 Fit Check" : "Fit Check")
       .setStyle(status === "fitchecked" ? ButtonStyle.Success : ButtonStyle.Primary)
       .setDisabled(isApplied),
-    new ButtonBuilder()
-      .setCustomId(`tailor:${hash}`)
-      .setLabel("Tailor Resume")
-      .setStyle(ButtonStyle.Primary)
-      .setDisabled(isApplied)
-  );
-
-  const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`applied:${hash}`)
       .setLabel(status === "applied" ? "\u2705 Applied" : "Applied")
@@ -65,7 +57,7 @@ function buildButtonRows(hash, jobUrl, status) {
       .setDisabled(isApplied)
   );
 
-  return [row1, row2];
+  return [row];
 }
 
 function getJobUrlFromMessage(message) {
@@ -100,8 +92,6 @@ export async function startDiscordBot(config) {
         await handleAddCompany(interaction);
       } else if (interaction.commandName === "queue") {
         await handleShowQueue(interaction);
-      } else if (interaction.commandName === "tailor") {
-        await handleTailorCommand(interaction);
       }
       return;
     }
@@ -118,8 +108,6 @@ export async function startDiscordBot(config) {
         await handleApplied(interaction, hash);
       } else if (action === "skip") {
         await handleSkip(interaction, hash);
-      } else if (action === "tailor") {
-        await handleTailor(interaction, hash);
       } else if (action === "confirmapply") {
         await handleConfirmApply(interaction, hash);
       } else if (action === "cancelapply") {
@@ -157,13 +145,7 @@ export async function startDiscordBot(config) {
         ),
       new SlashCommandBuilder()
         .setName("queue")
-        .setDescription("Show pending companies in the integration queue"),
-      new SlashCommandBuilder()
-        .setName("tailor")
-        .setDescription("Tailor your resume for a specific job posting")
-        .addStringOption((opt) =>
-          opt.setName("url").setDescription("Job posting URL").setRequired(true)
-        )
+        .setDescription("Show pending companies in the integration queue")
     ].map((c) => c.toJSON());
 
     const channel = await client.channels.fetch(channelId);
@@ -488,114 +470,6 @@ async function handleShowQueue(interaction) {
   }
 }
 
-async function handleTailor(interaction, hash) {
-  await interaction.deferUpdate();
-
-  const thread = await getOrCreateThread(interaction);
-  if (!thread) return;
-
-  const jobUrl = getJobUrlFromMessage(interaction.message);
-  const embedDetails = extractJobInfoFromMessage(interaction.message);
-
-  // Look up actual job from DB
-  const db = getDb();
-  let sourceKey = "";
-  let jobId = "";
-  let jobTitle = embedDetails.role || "";
-  let jobCompany = embedDetails.company || "";
-
-  if (db) {
-    const jobKey = findJobKeyByMessageId(interaction.message.id);
-    if (jobKey) {
-      const row = db.prepare("SELECT source_key, source_label, id, title, location, url FROM seen_jobs WHERE key = ?").get(jobKey);
-      if (row) {
-        sourceKey = row.source_key;
-        jobId = row.id;
-        jobTitle = row.title;
-        jobCompany = row.source_label;
-      }
-    }
-  }
-
-  if (!sourceKey || !jobId) {
-    await thread.send("Could not identify this job for tailoring.");
-    return;
-  }
-
-  const dirId = `${sourceKey}-${jobId}`.replace(/[^a-zA-Z0-9_-]/g, "_");
-  await thread.send(`Tailoring resume for **${jobCompany} — ${jobTitle}**...\nThis takes 1-2 minutes (Claude is rewriting your resume).`);
-
-  try {
-    // Ensure description exists
-    const descPath = `data/jobs/${dirId}/description.txt`;
-    try {
-      await fs.access(descPath);
-    } catch {
-      const jobForFetch = { sourceKey, id: jobId, url: jobUrl || "", sourceLabel: jobCompany };
-      const description = await fetchJobDescription(jobForFetch);
-      if (description) await saveJobData(jobForFetch, description);
-    }
-
-    const result = await tailorResume(dirId, (msg) => console.log(`[tailor] ${msg}`));
-
-    // Send the PDF
-    const { AttachmentBuilder } = await import("discord.js");
-    const attachment = new AttachmentBuilder(result.pdfPath, { name: `${result.safeName}.pdf` });
-
-    const fitEmoji = result.shouldApply === "YES" ? "✅" : result.shouldApply === "STRETCH" ? "⚠️" : "❌";
-    await thread.send({
-      content: `${fitEmoji} **Tailored resume ready** (${result.pageCount} page${result.pageCount > 1 ? "s" : ""})\n*${jobCompany} — ${jobTitle}*`,
-      files: [attachment]
-    });
-
-    if (result.fitAssessment) {
-      const trimmed = result.fitAssessment.length > 1500
-        ? result.fitAssessment.slice(0, 1500) + "..."
-        : result.fitAssessment;
-      await thread.send(`\`\`\`\n${trimmed}\n\`\`\``);
-    }
-  } catch (error) {
-    console.error(`[tailor] Error: ${error.message}`);
-    await thread.send(`Resume tailoring failed: ${error.message.slice(0, 200)}\nTry using the Fit Check button instead.`);
-  }
-}
-
-async function handleTailorCommand(interaction) {
-  const jobUrl = interaction.options.getString("url");
-
-  await interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle("Tailoring Resume")
-        .setDescription(`Fetching job description and tailoring your resume...\nThis takes 1-2 minutes.\n\nURL: ${jobUrl}`)
-    ]
-  });
-
-  try {
-    const result = await tailorFromUrl(jobUrl, (msg) => console.log(`[tailor] ${msg}`));
-
-    const { AttachmentBuilder } = await import("discord.js");
-    const attachment = new AttachmentBuilder(result.pdfPath, { name: `${result.safeName}.pdf` });
-
-    const fitEmoji = result.shouldApply === "YES" ? "✅" : result.shouldApply === "STRETCH" ? "⚠️" : "❌";
-    await interaction.followUp({
-      content: `${fitEmoji} **Tailored resume ready** (${result.pageCount} page${result.pageCount > 1 ? "s" : ""})`,
-      files: [attachment]
-    });
-
-    if (result.fitAssessment) {
-      const trimmed = result.fitAssessment.length > 1500
-        ? result.fitAssessment.slice(0, 1500) + "..."
-        : result.fitAssessment;
-      await interaction.followUp(`\`\`\`\n${trimmed}\n\`\`\``);
-    }
-  } catch (error) {
-    console.error(`[tailor] Error: ${error.message}`);
-    await interaction.followUp(`Resume tailoring failed: ${error.message.slice(0, 200)}`);
-  }
-}
-
 async function handleSkip(interaction, hash) {
   await interaction.deferUpdate();
 
@@ -646,7 +520,13 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
 
     const descParts = [];
     if (job.location) descParts.push(job.location);
-    if (job.postedAt) descParts.push(`Posted: ${new Date(job.postedAt).toLocaleString()}`);
+    if (job.postedAt) {
+      const d = new Date(job.postedAt);
+      const postedStr = (job.postedPrecision === "day" || job.postedPrecision === "date")
+        ? d.toLocaleDateString()
+        : d.toLocaleString();
+      descParts.push(`Posted: ${postedStr}`);
+    }
     if (hasWarnings) {
       descParts.push(`\n:warning: **Flags:** ${warnings.join(" | ")}`);
     }
