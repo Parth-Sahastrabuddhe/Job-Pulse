@@ -66,9 +66,9 @@ export function normalizeCountryCode(value) {
 // Centralized title filter — used by ALL collectors
 // Title must match a role pattern AND not match a seniority pattern
 const ROLE_PATTERN = /(?:software|backend)\s+(engineer|develop)/i;
-const SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished)\b/i;
+const SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|chief)\b/i;
 // Banking-specific seniority (Goldman, JPMorgan, Citi)
-const BANKING_SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|vice\s+president|VP|SVP|AVP|managing\s+director|MD)\b/i;
+const BANKING_SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|chief|vice\s+president|VP|SVP|AVP|managing\s+director|MD)\b/i;
 
 export function isTargetRole(title, { banking = false } = {}) {
   if (!title) return false;
@@ -164,6 +164,11 @@ export function inferCountryCodeFromLocation(location) {
     return "";
   }
 
+  // Check NON-US FIRST — prevents false positives like "INDIA, in" matching as "City, IN" (Indiana)
+  if (NON_US_COUNTRIES.test(text) || NON_US_CITIES.test(text)) {
+    return "NON-US";
+  }
+
   if (
     /\bunited states\b/i.test(text) ||
     /\busa\b/i.test(text) ||
@@ -176,11 +181,6 @@ export function inferCountryCodeFromLocation(location) {
 
   if (US_CITY_STATE_CODE_PATTERN.test(text) || US_STATE_NAME_PATTERN.test(text)) {
     return "US";
-  }
-
-  // Detect known non-US locations
-  if (NON_US_COUNTRIES.test(text) || NON_US_CITIES.test(text)) {
-    return "NON-US";
   }
 
   return "";
