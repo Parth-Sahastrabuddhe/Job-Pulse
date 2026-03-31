@@ -205,55 +205,55 @@ export function getConfig() {
       sourceKey: "stripe",
       sourceLabel: "Stripe",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/stripe/jobs",
-      jobUrlBase: "https://stripe.com/jobs/search?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/stripe/jobs/"
     },
     databricks: {
       sourceKey: "databricks",
       sourceLabel: "Databricks",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/databricks/jobs",
-      jobUrlBase: "https://www.databricks.com/company/careers/open-positions?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/databricks/jobs/"
     },
     figma: {
       sourceKey: "figma",
       sourceLabel: "Figma",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/figma/jobs",
-      jobUrlBase: "https://www.figma.com/careers/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/figma/jobs/"
     },
     lyft: {
       sourceKey: "lyft",
       sourceLabel: "Lyft",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/lyft/jobs",
-      jobUrlBase: "https://www.lyft.com/careers/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/lyft/jobs/"
     },
     discord: {
       sourceKey: "discord",
       sourceLabel: "Discord",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/discord/jobs",
-      jobUrlBase: "https://discord.com/careers/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/discord/jobs/"
     },
     twilio: {
       sourceKey: "twilio",
       sourceLabel: "Twilio",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/twilio/jobs",
-      jobUrlBase: "https://www.twilio.com/company/jobs/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/twilio/jobs/"
     },
     cloudflare: {
       sourceKey: "cloudflare",
       sourceLabel: "Cloudflare",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/cloudflare/jobs",
-      jobUrlBase: "https://www.cloudflare.com/careers/jobs/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/cloudflare/jobs/"
     },
     coinbase: {
       sourceKey: "coinbase",
       sourceLabel: "Coinbase",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs",
-      jobUrlBase: "https://www.coinbase.com/careers/positions/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/coinbase/jobs/"
     },
     roblox: {
       sourceKey: "roblox",
       sourceLabel: "Roblox",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/roblox/jobs",
-      jobUrlBase: "https://careers.roblox.com/jobs/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/roblox/jobs/"
     },
     // Greenhouse additions
     anthropic: {
@@ -266,7 +266,7 @@ export function getConfig() {
       sourceKey: "airbnb",
       sourceLabel: "Airbnb",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/airbnb/jobs",
-      jobUrlBase: "https://careers.airbnb.com/positions/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/airbnb/jobs/"
     },
     doordash: {
       sourceKey: "doordash",
@@ -284,19 +284,19 @@ export function getConfig() {
       sourceKey: "pinterest",
       sourceLabel: "Pinterest",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/pinterest/jobs",
-      jobUrlBase: "https://www.pinterestcareers.com/jobs/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/pinterest/jobs/"
     },
     datadog: {
       sourceKey: "datadog",
       sourceLabel: "Datadog",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/datadog/jobs",
-      jobUrlBase: "https://careers.datadoghq.com/detail/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/datadog/jobs/"
     },
     mongodb: {
       sourceKey: "mongodb",
       sourceLabel: "MongoDB",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/mongodb/jobs",
-      jobUrlBase: "https://www.mongodb.com/careers/job/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/mongodb/jobs/"
     },
     robinhood: {
       sourceKey: "robinhood",
@@ -308,19 +308,19 @@ export function getConfig() {
       sourceKey: "hubspot",
       sourceLabel: "HubSpot",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/hubspot/jobs",
-      jobUrlBase: "https://www.hubspot.com/careers/jobs/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/hubspot/jobs/"
     },
     instacart: {
       sourceKey: "instacart",
       sourceLabel: "Instacart",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/instacart/jobs",
-      jobUrlBase: "https://instacart.careers/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/instacart/jobs/"
     },
     samsara: {
       sourceKey: "samsara",
       sourceLabel: "Samsara",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/samsara/jobs",
-      jobUrlBase: "https://www.samsara.com/company/careers/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/samsara/jobs/"
     },
     // Ashby companies
     openai: {
@@ -546,31 +546,31 @@ export function getConfig() {
       sourceKey: "okta",
       sourceLabel: "Okta",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/okta/jobs",
-      jobUrlBase: "https://www.okta.com/company/careers/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/okta/jobs/"
     },
     deepmind: {
       sourceKey: "deepmind",
       sourceLabel: "DeepMind",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/deepmind/jobs",
-      jobUrlBase: "https://www.deepmind.com/careers/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/deepmind/jobs/"
     },
     waymo: {
       sourceKey: "waymo",
       sourceLabel: "Waymo",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/waymo/jobs",
-      jobUrlBase: "https://careers.withwaymo.com/jobs?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/waymo/jobs/"
     },
     rubrik: {
       sourceKey: "rubrik",
       sourceLabel: "Rubrik",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/rubrik/jobs",
-      jobUrlBase: "https://www.rubrik.com/company/careers/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/rubrik/jobs/"
     },
     dropbox: {
       sourceKey: "dropbox",
       sourceLabel: "Dropbox",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs",
-      jobUrlBase: "https://jobs.dropbox.com/listing/?gh_jid="
+      jobUrlBase: "https://boards.greenhouse.io/dropbox/jobs/"
     },
     // --- New Lever companies ---
     binance: {
