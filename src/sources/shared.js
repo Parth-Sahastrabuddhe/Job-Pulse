@@ -155,7 +155,7 @@ export function splitLines(value) {
     .filter(Boolean);
 }
 
-const NON_US_CITIES = /\b(Bengaluru|Bangalore|Hyderabad|Mumbai|Pune|Chennai|Delhi|Gurgaon|Noida|Kolkata|Amsterdam|London|Berlin|Munich|Frankfurt|Paris|Dublin|Tokyo|Singapore|Toronto|Vancouver|Montreal|Sydney|Melbourne|Shanghai|Beijing|Shenzhen|Seoul|Zurich|Stockholm|Warsaw|Prague|Lisbon|Madrid|Milan|Rome|Barcelona|Brussels|Vienna|Copenhagen|Oslo|Helsinki|Bucharest|Budapest|Krakow|Tel Aviv|Sao Paulo|Mexico City|Bogota|Manila|Kuala Lumpur|Jakarta|Bangkok|Ho Chi Minh|Cairo|Lagos|Nairobi|Johannesburg|Cape Town|Dubai|Riyadh|Hong Kong|Luxembourg|Zagreb|Belgrade|Tallinn|Riga|Vilnius|Kyiv|Minsk|Moscow|Istanbul|Karachi|Lahore|Dhaka|Colombo|Auckland|Wellington|Oxford|Cambridge|Edinburgh|Manchester|Birmingham UK|Bristol|Leeds|Glasgow|Hamburg|Cologne|Stuttgart|Lyon|Marseille|Toulouse|Osaka|Nagoya|Taipei|Hsinchu|Mississauga|Ottawa|Calgary|Edmonton|Brisbane|Perth|Adelaide|Guelph|Waterloo ON|Belfast|Cork|Limerick|Gothenburg|Malmo|Rotterdam|The Hague|Eindhoven)\b/i;
+const NON_US_CITIES = /\b(Bengaluru|Bangalore|Hyderabad|Mumbai|Pune|Chennai|Delhi|Gurgaon|Gurugram|Noida|Kolkata|Ahmedabad|Jaipur|Lucknow|Chandigarh|Thiruvananthapuram|Kochi|Coimbatore|Indore|Nagpur|Visakhapatnam|Bhubaneswar|Mangalore|Mysore|Vadodara|Surat|Amsterdam|London|Berlin|Munich|Frankfurt|Paris|Dublin|Tokyo|Singapore|Toronto|Vancouver|Montreal|Sydney|Melbourne|Shanghai|Beijing|Shenzhen|Seoul|Zurich|Stockholm|Warsaw|Prague|Lisbon|Madrid|Milan|Rome|Barcelona|Brussels|Vienna|Copenhagen|Oslo|Helsinki|Bucharest|Budapest|Krakow|Tel Aviv|Sao Paulo|Mexico City|Bogota|Manila|Kuala Lumpur|Jakarta|Bangkok|Ho Chi Minh|Cairo|Lagos|Nairobi|Johannesburg|Cape Town|Dubai|Riyadh|Hong Kong|Luxembourg|Zagreb|Belgrade|Tallinn|Riga|Vilnius|Kyiv|Minsk|Moscow|Istanbul|Karachi|Lahore|Dhaka|Colombo|Auckland|Wellington|Oxford|Cambridge|Edinburgh|Manchester|Birmingham UK|Bristol|Leeds|Glasgow|Hamburg|Cologne|Stuttgart|Lyon|Marseille|Toulouse|Osaka|Nagoya|Taipei|Hsinchu|Mississauga|Ottawa|Calgary|Edmonton|Brisbane|Perth|Adelaide|Guelph|Waterloo ON|Belfast|Cork|Limerick|Gothenburg|Malmo|Rotterdam|The Hague|Eindhoven|Shinjuku|Minato|Chiyoda|Chuo|Shibuya)\b/i;
 
 export function inferCountryCodeFromLocation(location) {
   const text = normalizeWhitespace(location);
@@ -186,7 +186,7 @@ export function inferCountryCodeFromLocation(location) {
   return "";
 }
 
-const NON_US_COUNTRIES = /\b(Netherlands|Germany|United Kingdom|UK|Canada|India|Japan|China|France|Australia|Singapore|Ireland|Israel|South Korea|Brazil|Mexico|Sweden|Switzerland|Spain|Italy|Poland|Belgium|Austria|Denmark|Norway|Finland|Czech Republic|Portugal|Romania|Taiwan|Philippines|Malaysia|Indonesia|Vietnam|Thailand|Colombia|Argentina|Chile|Costa Rica|Egypt|Nigeria|Kenya|South Africa|Saudi Arabia|UAE|Hong Kong|Luxembourg|Hungary|Greece|Croatia|Serbia|Estonia|Latvia|Lithuania|Ukraine|Belarus|Russia|Turkey|Pakistan|Bangladesh|Sri Lanka|New Zealand)\b/i;
+const NON_US_COUNTRIES = /\b(Netherlands|Germany|United Kingdom|UK|England|Scotland|Wales|Canada|India|Japan|China|France|Australia|Singapore|Ireland|Israel|South Korea|Brazil|Mexico|Sweden|Switzerland|Spain|Italy|Poland|Belgium|Austria|Denmark|Norway|Finland|Czech Republic|Czechia|Portugal|Romania|Taiwan|Philippines|Malaysia|Indonesia|Vietnam|Thailand|Colombia|Argentina|Chile|Costa Rica|Egypt|Nigeria|Kenya|South Africa|Saudi Arabia|UAE|United Arab Emirates|Hong Kong|Luxembourg|Hungary|Greece|Croatia|Serbia|Estonia|Latvia|Lithuania|Ukraine|Belarus|Russia|Turkey|Pakistan|Bangladesh|Sri Lanka|New Zealand|INDIA|CANADA|JAPAN|CHINA|FRANCE|GERMANY|AUSTRALIA|SINGAPORE)\b/;
 
 export function looksExplicitlyNonUsLocation(location) {
   const text = normalizeWhitespace(location);
@@ -227,8 +227,20 @@ export function jobMatchesCountryFilter(job, countryFilter) {
   }
 
   const jobCountry = normalizeCountryCode(job.countryCode) || inferCountryCodeFromLocation(job.location);
+
+  // Whitelist approach: job MUST be confirmed US to pass through.
+  // If country is unknown (empty), reject it — "guilty until proven innocent."
+  // This prevents non-US jobs with ambiguous locations from leaking through.
+  // The only exception: jobs with no location at all (empty string) — these are
+  // typically remote roles where the API didn't specify a location.
   if (!jobCountry) {
-    return !looksExplicitlyNonUsLocation(job.location);
+    const loc = normalizeWhitespace(job.location);
+    // No location at all — let it through (might be remote US)
+    if (!loc) return true;
+    // Generic remote/hybrid/multiple with no country specified — let through
+    if (/^(remote|hybrid|multiple locations|various locations)$/i.test(loc)) return true;
+    // Has location text but couldn't determine country — reject
+    return false;
   }
 
   return jobCountry === filter;
