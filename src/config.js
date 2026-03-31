@@ -558,7 +558,7 @@ export function getConfig() {
       sourceKey: "waymo",
       sourceLabel: "Waymo",
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/waymo/jobs",
-      jobUrlBase: "https://waymo.com/careers/?gh_jid="
+      jobUrlBase: "https://careers.withwaymo.com/jobs?gh_jid="
     },
     rubrik: {
       sourceKey: "rubrik",
