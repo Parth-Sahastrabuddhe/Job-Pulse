@@ -118,6 +118,8 @@ export async function startDiscordBot(config) {
       try {
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: `Error: ${error.message.slice(0, 200)}`, ephemeral: true });
+        } else if (interaction.deferred) {
+          await interaction.followUp({ content: `Error: ${error.message.slice(0, 200)}`, ephemeral: true });
         }
       } catch {}
     }
@@ -171,14 +173,18 @@ async function getOrCreateThread(interaction) {
     return thread;
   }
 
-  // Check if there's a thread we can fetch
+  // Check if there's a thread we can fetch (thread ID === message ID in Discord)
   if (message.hasThread) {
-    const thread = await message.thread?.fetch();
-    if (thread) {
-      if (thread.archived) {
-        await thread.setArchived(false);
+    try {
+      const thread = await message.channel.threads.fetch(message.id);
+      if (thread) {
+        if (thread.archived) {
+          await thread.setArchived(false);
+        }
+        return thread;
       }
-      return thread;
+    } catch (fetchErr) {
+      console.error(`[getOrCreateThread] Failed to fetch thread for message ${message.id}: ${fetchErr.message}`);
     }
   }
 
@@ -238,6 +244,7 @@ async function handleFitCheck(interaction, hash) {
 
   const thread = await getOrCreateThread(interaction);
   if (!thread) {
+    await interaction.followUp({ content: "Could not open a thread for this job. Try again or use View Job.", ephemeral: true });
     return;
   }
   const jobUrl = getJobUrlFromMessage(interaction.message);
@@ -335,6 +342,7 @@ async function handleApplied(interaction, hash) {
 
   const thread = await getOrCreateThread(interaction);
   if (!thread) {
+    await interaction.followUp({ content: "Could not open a thread for this job. Try again.", ephemeral: true });
     return;
   }
   const details = extractJobInfoFromMessage(interaction.message);
@@ -473,21 +481,24 @@ async function handleShowQueue(interaction) {
 async function handleSkip(interaction, hash) {
   await interaction.deferUpdate();
 
-  const thread = await getOrCreateThread(interaction);
-  if (!thread) {
-    return;
-  }
-  await thread.send("❌ **Skipped**");
-
   try {
     updateJobPostStatus(findJobKeyByMessageId(interaction.message.id), "skipped");
   } catch {}
 
-  // Update buttons to show skipped state
   const jobUrl = getJobUrlFromMessage(interaction.message);
   if (jobUrl) {
     const updatedRows = buildButtonRows(hash, jobUrl, "skipped");
     await interaction.message.edit({ components: updatedRows });
+  }
+
+  // Thread message is cosmetic — don't block the skip action on it
+  try {
+    const thread = await getOrCreateThread(interaction);
+    if (thread) {
+      await thread.send("❌ **Skipped**");
+    }
+  } catch (err) {
+    console.error(`[skip] Thread message failed: ${err.message}`);
   }
 }
 
