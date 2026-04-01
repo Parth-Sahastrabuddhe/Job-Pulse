@@ -533,9 +533,10 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
     if (job.location) descParts.push(job.location);
     if (job.postedAt) {
       const d = new Date(job.postedAt);
+      const tz = { timeZone: "America/New_York" };
       const postedStr = (job.postedPrecision === "day" || job.postedPrecision === "date")
-        ? d.toLocaleDateString()
-        : d.toLocaleString();
+        ? d.toLocaleDateString(undefined, tz)
+        : d.toLocaleString(undefined, tz);
       descParts.push(`Posted: ${postedStr}`);
     }
     if (hasWarnings) {
