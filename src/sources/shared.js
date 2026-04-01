@@ -66,9 +66,9 @@ export function normalizeCountryCode(value) {
 // Centralized title filter — used by ALL collectors
 // Title must match a role pattern AND not match a seniority pattern
 const ROLE_PATTERN = /(?:software|backend)\s+(engineer|develop)/i;
-const SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|chief)\b/i;
+const SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|chief|intern)\b/i;
 // Banking-specific seniority (Goldman, JPMorgan, Citi)
-const BANKING_SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|chief|vice\s+president|VP|SVP|AVP|managing\s+director|MD)\b/i;
+const BANKING_SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|chief|vice\s+president|VP|SVP|AVP|managing\s+director|MD|intern)\b/i;
 
 export function isTargetRole(title, { banking = false } = {}) {
   if (!title) return false;

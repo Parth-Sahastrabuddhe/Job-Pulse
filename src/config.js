@@ -740,11 +740,6 @@ export function getConfig() {
       boardSlug: "roboflow"
     },
     // --- New Lever companies (batch 2) ---
-    veeva: {
-      sourceKey: "veeva",
-      sourceLabel: "Veeva Systems",
-      apiUrl: "https://api.lever.co/v0/postings/veeva?mode=json"
-    },
     anchorage: {
       sourceKey: "anchorage",
       sourceLabel: "Anchorage Digital",

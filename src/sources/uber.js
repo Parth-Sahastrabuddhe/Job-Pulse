@@ -11,7 +11,7 @@ function parseUberJob(raw) {
     .filter((l) => /United States|USA/i.test(l.country || ""))
     .map((l) => [l.city, l.state].filter(Boolean).join(", "))
     .join(" | ");
-  const countryCode = "";
+  const countryCode = "US";
 
   const url = `https://www.uber.com/us/en/careers/list/${id}/`;
 
