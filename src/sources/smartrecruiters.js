@@ -8,7 +8,8 @@ function parseSmartRecruitersJob(raw, companyConfig) {
   const loc = raw.location || {};
   const locationParts = [loc.city, loc.region, loc.country].filter(Boolean);
   const location = locationParts.join(", ");
-  const countryCode = loc.country === "United States" || loc.countryCode?.toUpperCase() === "US"
+  // SmartRecruiters API returns 2-letter ISO codes (e.g. "us", "in", "br"), not full names
+  const countryCode = loc.country?.toLowerCase() === "us" || loc.countryCode?.toUpperCase() === "US"
     ? "US"
     : "";
 
