@@ -7,11 +7,10 @@ function parseSmartRecruitersJob(raw, companyConfig) {
   const id = String(raw.uuid || raw.id || "");
   const loc = raw.location || {};
   const locationParts = [loc.city, loc.region, loc.country].filter(Boolean);
-  const location = locationParts.join(", ");
+  const location = loc.fullLocation || locationParts.join(", ");
   // SmartRecruiters API returns 2-letter ISO codes (e.g. "us", "in", "br"), not full names
-  const countryCode = loc.country?.toLowerCase() === "us" || loc.countryCode?.toUpperCase() === "US"
-    ? "US"
-    : "";
+  const rawCountry = (loc.country || loc.countryCode || "").toLowerCase();
+  const countryCode = rawCountry === "us" ? "US" : rawCountry ? "NON-US" : "";
 
   const url = `https://jobs.smartrecruiters.com/${companyConfig.companySlug}/${raw.id}`;
 
