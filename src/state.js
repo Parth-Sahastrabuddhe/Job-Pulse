@@ -37,6 +37,8 @@ export function initDb(dbFile) {
       status TEXT DEFAULT 'pending'
     );
 
+    CREATE INDEX IF NOT EXISTS idx_job_posts_message_id ON job_posts(message_id);
+
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
       value TEXT
@@ -216,6 +218,23 @@ export function upsertJobs(jobs, seenAt) {
 export function pruneState(retentionDays) {
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
   db.prepare("DELETE FROM seen_jobs WHERE last_seen_at < ?").run(cutoff);
+
+  // Prune old cached job data directories
+  const jobsDir = path.join(path.dirname(db.name), "jobs");
+  if (fs.existsSync(jobsDir)) {
+    const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+    try {
+      for (const entry of fs.readdirSync(jobsDir)) {
+        const dirPath = path.join(jobsDir, entry);
+        try {
+          const stat = fs.statSync(dirPath);
+          if (stat.isDirectory() && stat.mtimeMs < cutoffMs) {
+            fs.rmSync(dirPath, { recursive: true, force: true });
+          }
+        } catch {}
+      }
+    } catch {}
+  }
 }
 
 // job_posts CRUD

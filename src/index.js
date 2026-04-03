@@ -199,7 +199,7 @@ async function processBatchResults(config, flags, jobs, batchLabel) {
     const filteredJobs = await fetchDescriptionsAndFilter(jobsToNotify);
 
     for (const { job, warnings } of filteredJobs) {
-      const flag = warnings.length > 0 ? ` [FLAGGED: ${warnings.join("; ")}]` : "";
+      const flag = warnings.length > 0 ? ` [FLAGGED: ${warnings.map((w) => w.text).join("; ")}]` : "";
       log(`${job.sourceLabel}: ${job.title} | ${job.location || "Location not mentioned"}${flag}`);
     }
 
@@ -491,7 +491,6 @@ async function main() {
 
   log(`JobPulse started — tracking ${registry.length} companies`);
   log(`  Fast: ${fastCount} | Normal: ${normalCount} | Slow: ${slowCount}`);
-  log(`  Keywords: ${config.keywords.join(", ")}`);
   log(`  Country: ${config.countryFilter.toUpperCase() || "ALL"}`);
   log(`  Batch size: ${config.batchSize} | Batch delay: ${config.batchDelayMs}ms | Slow cycle: ${config.slowCycleMinutes}min`);
 

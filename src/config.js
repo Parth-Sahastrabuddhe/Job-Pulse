@@ -75,21 +75,8 @@ loadEnvFile();
 export function getConfig() {
   return {
     countryFilter: (process.env.COUNTRY_FILTER?.trim().toLowerCase() || "us"),
-    keywords: parseList(process.env.JOB_TITLE_KEYWORDS, [
-      "software engineer",
-      "software development engineer",
-      "sde",
-      "software developer"
-    ]),
-    headless: parseBoolean(process.env.HEADLESS, true),
-    debugBrowser: parseBoolean(process.env.DEBUG_BROWSER, false),
-    pageTimeoutMs: parseNumber(process.env.PAGE_TIMEOUT_MS, 45000),
-    networkSettleMs: parseNumber(process.env.NETWORK_SETTLE_MS, 4000),
-    maxScrollSteps: parseNumber(process.env.MAX_SCROLL_STEPS, 5),
-    maxLoadMoreClicks: parseNumber(process.env.MAX_LOAD_MORE_CLICKS, 2),
     maxJobsPerSource: parseNumber(process.env.MAX_JOBS_PER_SOURCE, 60),
     retentionDays: parseNumber(process.env.STATE_RETENTION_DAYS, 45),
-    pollIntervalSeconds: parseNumber(process.env.POLL_INTERVAL_SECONDS, 15),
     batchSize: parseNumber(process.env.BATCH_SIZE, 20),
     batchDelayMs: parseNumber(process.env.BATCH_DELAY_MS, 3000),
     slowCycleMinutes: parseNumber(process.env.SLOW_CYCLE_MINUTES, 5),

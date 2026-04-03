@@ -65,10 +65,10 @@ export function normalizeCountryCode(value) {
 
 // Centralized title filter — used by ALL collectors
 // Title must match a role pattern AND not match a seniority pattern
-const ROLE_PATTERN = /(?:software|backend)\s+(engineer|develop)/i;
-const SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|chief|intern)\b/i;
+const ROLE_PATTERN = /(?:(?:software|backend|full[\s-]?stack|platform|application|systems|cloud)\s+(?:engineer|develop)|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i;
+const SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|(?<!technical\s)staff|lead\w*|manager|director|distinguished|chief|intern)\b/i;
 // Banking-specific seniority (Goldman, JPMorgan, Citi)
-const BANKING_SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|staff|lead\w*|manager|director|distinguished|chief|vice\s+president|VP|SVP|AVP|managing\s+director|MD|intern)\b/i;
+const BANKING_SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|(?<!technical\s)staff|lead\w*|manager|director|distinguished|chief|vice\s+president|VP|SVP|AVP|managing\s+director|MD|intern)\b/i;
 
 export function isTargetRole(title, { banking = false } = {}) {
   if (!title) return false;
@@ -77,19 +77,6 @@ export function isTargetRole(title, { banking = false } = {}) {
   const seniorityPattern = banking ? BANKING_SENIORITY_EXCLUDE : SENIORITY_EXCLUDE;
   if (seniorityPattern.test(t)) return false;
   return true;
-}
-
-export function titleMatchesKeywords(title, keywords) {
-  if (!title) {
-    return false;
-  }
-
-  if (keywords.length === 0) {
-    return true;
-  }
-
-  const normalizedTitle = normalizeForMatch(title);
-  return keywords.some((keyword) => normalizedTitle.includes(normalizeForMatch(keyword)));
 }
 
 export function normalizeUrl(baseUrl, rawUrl) {

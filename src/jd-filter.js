@@ -69,7 +69,7 @@ export function checkJobDescription(description) {
   for (const pattern of NO_SPONSORSHIP_PATTERNS) {
     const match = description.match(pattern);
     if (match) {
-      warnings.push(`No sponsorship: "${match[0].trim()}"`);
+      warnings.push({ text: `No sponsorship: "${match[0].trim()}"`, severity: "hard" });
       break;
     }
   }
@@ -85,7 +85,7 @@ export function checkJobDescription(description) {
       if (/\b(no|not|don'?t|doesn'?t|without|neither)\b/.test(prefix)) {
         continue;
       }
-      warnings.push(`Clearance required: "${match[0].trim()}"`);
+      warnings.push({ text: `Clearance required: "${match[0].trim()}"`, severity: "hard" });
       found = true;
       break;
     }
@@ -107,7 +107,7 @@ export function checkJobDescription(description) {
     }
   }
   if (maxYears >= 5) {
-    warnings.push(`${maxYears}+ years required: "${maxMatch}"`);
+    warnings.push({ text: `${maxYears}+ years required: "${maxMatch}"`, severity: "soft" });
   }
 
   return warnings;

@@ -528,6 +528,7 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
     const hash = jobButtonId(job);
     const warnings = warningsMap.get(job.key);
     const hasWarnings = warnings && warnings.length > 0;
+    const hasHardWarnings = hasWarnings && warnings.some((w) => w.severity === "hard");
 
     const descParts = [];
     if (job.location) descParts.push(job.location);
@@ -540,14 +541,17 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
       descParts.push(`Posted: ${postedStr}`);
     }
     if (hasWarnings) {
-      descParts.push(`\n:warning: **Flags:** ${warnings.join(" | ")}`);
+      const parts = warnings.map((w) =>
+        w.severity === "hard" ? `:octagonal_sign: ${w.text}` : `:warning: ${w.text}`
+      );
+      descParts.push(`\n${parts.join("\n")}`);
     }
 
     const embed = new EmbedBuilder()
       .setAuthor({ name: job.sourceLabel })
       .setTitle(job.title)
       .setURL(job.url)
-      .setColor(hasWarnings ? 0xFFA500 : 0x5865F2);
+      .setColor(hasHardWarnings ? 0xED4245 : hasWarnings ? 0xFFA500 : 0x5865F2);
 
     if (descParts.length > 0) {
       embed.setDescription(descParts.join("\n"));
@@ -561,13 +565,9 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
         components: rows
       });
 
-      // Auto-create thread
-      const threadName = `${job.sourceLabel} - ${job.title}`.slice(0, 100);
-      const thread = await message.startThread({ name: threadName });
-
-      // Store in DB
+      // Store in DB (thread created lazily on first interaction)
       try {
-        upsertJobPost(job.key, message.id, thread.id, channelId);
+        upsertJobPost(job.key, message.id, null, channelId);
       } catch (err) {
         console.error(`[discord-bot] Failed to store job_post: ${err.message}`);
       }
