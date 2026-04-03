@@ -491,15 +491,6 @@ async function handleSkip(interaction, hash) {
     await interaction.message.edit({ components: updatedRows });
   }
 
-  // Thread message is cosmetic — don't block the skip action on it
-  try {
-    const thread = await getOrCreateThread(interaction);
-    if (thread) {
-      await thread.send("❌ **Skipped**");
-    }
-  } catch (err) {
-    console.error(`[skip] Thread message failed: ${err.message}`);
-  }
 }
 
 function findJobKeyByMessageId(messageId) {
