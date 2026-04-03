@@ -298,10 +298,10 @@ async function fetchOracleHCMDescription(job) {
     try {
       const page = await browser.newPage();
       await page.goto(job.url, { timeout: 60000 });
-      try { await page.waitForSelector(".job-details__body, [class*=requisition]", { timeout: 15000 }); } catch {}
+      try { await page.waitForSelector(".job-details__description-content, .job-details__body, [class*=requisition]", { timeout: 15000 }); } catch {}
       await page.waitForTimeout(5000);
       const desc = await page.evaluate(() => {
-        for (const sel of [".job-details__body", "[class*=requisition-description]", "[class*=job-detail]"]) {
+        for (const sel of [".job-details__description-content", ".job-details__body", "[class*=requisition-description]", "[class*=job-detail]"]) {
           const el = document.querySelector(sel);
           if (el && el.textContent.trim().length > 50) return el.textContent.trim();
         }
