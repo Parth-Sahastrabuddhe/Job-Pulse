@@ -63,20 +63,45 @@ export function normalizeCountryCode(value) {
   return normalized.toUpperCase();
 }
 
-// Centralized title filter — used by ALL collectors
-// Title must match a role pattern AND not match a seniority pattern
-const ROLE_PATTERN = /(?:(?:software|backend|full[\s-]?stack|platform|application|systems|cloud)\s+(?:engineer|develop)|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i;
-const SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|(?<!technical\s)staff|lead\w*|manager|director|distinguished|chief|intern)\b/i;
-// Banking-specific seniority (Goldman, JPMorgan, Citi)
-const BANKING_SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|(?<!technical\s)staff|lead\w*|manager|director|distinguished|chief|vice\s+president|VP|SVP|AVP|managing\s+director|MD|intern)\b/i;
+// --- Role category patterns (one per supported category) ---
+const ROLE_CATEGORY_PATTERNS = {
+  software_engineer: /(?:(?:software|full[\s-]?stack|application|systems|cloud)\s+(?:engineer|develop)|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i,
+  data_engineer: /(?:data\s+(?:engineer|platform|infrastructure)|analytics\s+engineer|\bETL\b)/i,
+  ml_engineer: /(?:machine\s+learning|(?:ML|AI)\s+engineer|deep\s+learning|\bNLP\b|computer\s+vision)/i,
+  frontend: /(?:front[\s-]?end|UI\s+engineer|web\s+develop)/i,
+  backend: /(?:back[\s-]?end|server\s+engineer|API\s+engineer)/i,
+  devops_sre: /(?:\bdevops\b|\bSRE\b|site\s+reliability|(?:infrastructure|cloud)\s+engineer)/i,
+  mobile: /(?:(?:iOS|Android|mobile)\s+(?:engineer|develop)|React\s+Native|Flutter)/i,
+  product_manager: /(?:product\s+manager|program\s+manager|\bTPM\b|technical\s+program)/i,
+};
 
-export function isTargetRole(title, { banking = false } = {}) {
+const BROAD_ROLE_PATTERN = new RegExp(
+  Object.values(ROLE_CATEGORY_PATTERNS).map((r) => r.source).join("|"),
+  "i"
+);
+
+const PLATFORM_ENGINEER_PATTERN = /\bplatform\s+engineer/i;
+
+// Centralized title filter — now matches all tech/PM roles at any seniority
+export function isTargetRole(title) {
   if (!title) return false;
   const t = title.trim();
-  if (!ROLE_PATTERN.test(t)) return false;
-  const seniorityPattern = banking ? BANKING_SENIORITY_EXCLUDE : SENIORITY_EXCLUDE;
-  if (seniorityPattern.test(t)) return false;
-  return true;
+  return BROAD_ROLE_PATTERN.test(t) || PLATFORM_ENGINEER_PATTERN.test(t);
+}
+
+export function detectRoleCategories(title) {
+  if (!title) return [];
+  const t = title.trim();
+  const categories = [];
+  for (const [category, pattern] of Object.entries(ROLE_CATEGORY_PATTERNS)) {
+    if (pattern.test(t)) {
+      categories.push(category);
+    }
+  }
+  if (PLATFORM_ENGINEER_PATTERN.test(t) && !categories.includes("software_engineer")) {
+    categories.push("software_engineer");
+  }
+  return categories;
 }
 
 export function normalizeUrl(baseUrl, rawUrl) {

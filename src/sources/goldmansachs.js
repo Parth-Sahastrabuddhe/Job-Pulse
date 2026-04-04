@@ -27,7 +27,7 @@ const GET_ROLES_QUERY = `query GetRoles($searchQueryInput: RoleSearchQueryInput!
 
 function parseGSJob(raw) {
   const title = raw.jobTitle?.trim();
-  if (!title || !isTargetRole(title, { banking: true })) return null;
+  if (!title || !isTargetRole(title)) return null;
 
   const roleId = raw.externalSource?.sourceId || raw.roleId?.replace(/_.*/, "") || "";
   const id = String(roleId);
