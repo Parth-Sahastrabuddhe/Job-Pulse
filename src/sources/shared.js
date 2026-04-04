@@ -104,6 +104,36 @@ export function detectRoleCategories(title) {
   return categories;
 }
 
+export function detectSeniority(title) {
+  if (!title) return "mid";
+  const t = title.trim();
+  if (!t) return "mid";
+
+  // Staff / Principal (check first — most specific)
+  if (/\b((?<!technical\s)staff|principal|distinguished|fellow)\b/i.test(t)) return "staff";
+  if (/\barchitect\b/i.test(t) && !/\bsolution/i.test(t)) return "staff";
+  if (/\bSVP\b/.test(t)) return "staff";
+
+  // Intern
+  if (/\b(intern|internship|co[\s-]?op)\b/i.test(t)) return "intern";
+
+  // Senior
+  if (/\b(senior|sr\.?)\b/i.test(t)) return "senior";
+  if (/\blead\b/i.test(t)) return "senior";
+  if (/\bIII\b/.test(t) || /\bengineer\s+3\b/i.test(t)) return "senior";
+  if (/\bvice\s+president\b|\bVP\b/i.test(t)) return "senior";
+
+  // Entry
+  if (/\b(new\s+grad|entry[\s-]?level|junior|jr\.?)\b/i.test(t)) return "entry";
+  if (/\bassociate\b/i.test(t) && !/\bassociate\s+director/i.test(t)) return "entry";
+  if (/\bI\b/.test(t) && !/\bII\b/.test(t) && !/\bIII\b/.test(t)) return "entry";
+  if (/\bengineer\s+1\b/i.test(t)) return "entry";
+  if (/\bSDE\s*I\b/.test(t) && !/\bSDE\s*II\b/.test(t)) return "entry";
+
+  // Mid — II, 2, or default
+  return "mid";
+}
+
 export function normalizeUrl(baseUrl, rawUrl) {
   if (!rawUrl) {
     return null;
