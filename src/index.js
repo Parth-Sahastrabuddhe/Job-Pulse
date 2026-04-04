@@ -13,7 +13,7 @@ import { collectLeverJobs } from "./sources/lever.js";
 import { collectMetaJobs } from "./sources/meta.js";
 import { collectMicrosoftJobs } from "./sources/microsoft.js";
 import { collectPcsxJobs } from "./sources/pcsx.js";
-import { dedupeJobs, delay, jobIsFresh, jobMatchesCountryFilter } from "./sources/shared.js";
+import { dedupeJobs, delay, isLegacySweFilter, jobIsFresh, jobMatchesCountryFilter } from "./sources/shared.js";
 import { COMPANIES } from "./companies.js";
 import { collectWorkdayJobs } from "./sources/workday.js";
 import { collectAshbyJobs } from "./sources/ashby.js";
@@ -195,7 +195,9 @@ async function processBatchResults(config, flags, jobs, batchLabel) {
   }
 
   if (freshJobs.length > 0) {
-    const jobsToNotify = freshJobs.slice(0, config.maxNewJobsPerNotify);
+    // Apply personal bot filter — only SWE entry/mid (legacy behavior)
+    const personalFiltered = freshJobs.filter((job) => isLegacySweFilter(job.title));
+    const jobsToNotify = personalFiltered.slice(0, config.maxNewJobsPerNotify);
     const filteredJobs = await fetchDescriptionsAndFilter(jobsToNotify);
 
     for (const { job, warnings } of filteredJobs) {

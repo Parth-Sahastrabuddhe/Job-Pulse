@@ -82,6 +82,21 @@ const BROAD_ROLE_PATTERN = new RegExp(
 
 const PLATFORM_ENGINEER_PATTERN = /\bplatform\s+engineer/i;
 
+// Legacy filter for personal bot — matches the OLD isTargetRole behavior
+// SWE titles only, entry/mid seniority only
+const LEGACY_SWE_PATTERN = /(?:(?:software|backend|full[\s-]?stack|platform|application|systems|cloud)\s+(?:engineer|develop)|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i;
+const LEGACY_SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|(?<!technical\s)staff|lead\w*|manager|director|distinguished|chief|intern)\b/i;
+const LEGACY_BANKING_SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|(?<!technical\s)staff|lead\w*|manager|director|distinguished|chief|vice\s+president|VP|SVP|AVP|managing\s+director|MD|intern)\b/i;
+
+export function isLegacySweFilter(title, { banking = false } = {}) {
+  if (!title) return false;
+  const t = title.trim();
+  if (!LEGACY_SWE_PATTERN.test(t)) return false;
+  const seniorityPattern = banking ? LEGACY_BANKING_SENIORITY_EXCLUDE : LEGACY_SENIORITY_EXCLUDE;
+  if (seniorityPattern.test(t)) return false;
+  return true;
+}
+
 // Centralized title filter — now matches all tech/PM roles at any seniority
 export function isTargetRole(title) {
   if (!title) return false;
