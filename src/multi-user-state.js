@@ -130,12 +130,16 @@ export function markJobNotified(userId, jobKey) {
  */
 export function updateJobStatus(userId, jobKey, status) {
   const now = new Date().toISOString();
+  const appliedClause = status === "applied" ? ", applied_at = ?" : "";
+  const params = status === "applied"
+    ? [status, now, now, userId, jobKey]
+    : [status, now, userId, jobKey];
   getDb()
     .prepare(
-      `UPDATE user_seen_jobs SET status = ?, updated_at = ?
+      `UPDATE user_seen_jobs SET status = ?, updated_at = ?${appliedClause}
        WHERE user_id = ? AND job_key = ?`
     )
-    .run(status, now, userId, jobKey);
+    .run(...params);
 }
 
 /**

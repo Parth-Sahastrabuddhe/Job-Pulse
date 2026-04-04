@@ -211,6 +211,7 @@ CREATE TABLE user_seen_jobs (
   job_key TEXT NOT NULL,
   status TEXT DEFAULT 'notified',           -- notified | applied | skipped | interviewing | offer | rejected
   notified_at TEXT NOT NULL,
+  applied_at TEXT,                           -- set when status changes to "applied"
   updated_at TEXT,
   PRIMARY KEY (user_id, job_key),
   FOREIGN KEY (user_id) REFERENCES user_profiles(id)

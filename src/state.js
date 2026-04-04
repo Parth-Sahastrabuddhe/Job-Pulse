@@ -91,6 +91,7 @@ export function initDb(dbFile) {
       job_key TEXT NOT NULL,
       status TEXT DEFAULT 'notified',
       notified_at TEXT NOT NULL,
+      applied_at TEXT,
       updated_at TEXT,
       PRIMARY KEY (user_id, job_key),
       FOREIGN KEY (user_id) REFERENCES user_profiles(id)
