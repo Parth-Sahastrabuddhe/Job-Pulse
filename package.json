@@ -10,11 +10,16 @@
     "dry-run": "node src/index.js --dry-run --notify-existing",
     "seed": "node src/index.js --seed-only",
     "tailor": "node src/tailor.js",
-    "check": "node --check src/index.js && node --check src/config.js && node --check src/state.js && node --check src/notifiers/discord.js && node --check src/notifiers/telegram.js && node --check src/sources/shared.js && node --check src/sources/amazon.js && node --check src/sources/microsoft.js && node --check src/sources/google.js && node --check src/sources/meta.js && node --check src/sources/ashby.js && node --check src/job-description.js && node --check src/tailor.js && node --check src/discord-bot.js"
+    "check": "node --check src/index.js && node --check src/config.js && node --check src/state.js && node --check src/notifiers/discord.js && node --check src/notifiers/telegram.js && node --check src/sources/shared.js && node --check src/sources/amazon.js && node --check src/sources/microsoft.js && node --check src/sources/google.js && node --check src/sources/meta.js && node --check src/sources/ashby.js && node --check src/job-description.js && node --check src/tailor.js && node --check src/discord-bot.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",
     "discord.js": "^14.14.0",
     "playwright": "^1.58.2"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.2"
   }
 }
