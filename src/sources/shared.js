@@ -172,7 +172,9 @@ export function finalizeJob(job) {
 
   return {
     ...normalizedJob,
-    key: createHash("sha1").update(identity).digest("hex")
+    key: createHash("sha1").update(identity).digest("hex"),
+    seniorityLevel: detectSeniority(normalizedJob.title),
+    roleCategories: detectRoleCategories(normalizedJob.title)
   };
 }
 
