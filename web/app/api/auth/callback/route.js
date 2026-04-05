@@ -82,8 +82,12 @@ export async function GET(request) {
     .sign(SECRET);
 
   // Redirect with session cookie set on the response
+  // Use forwarded headers to get the real public URL (Nginx proxies to localhost:3000)
+  const proto = request.headers.get("x-forwarded-proto") || "http";
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+  const baseUrl = `${proto}://${host}`;
   const destination = profileComplete ? "/profile" : "/verify";
-  const response = NextResponse.redirect(new URL(destination, request.url));
+  const response = NextResponse.redirect(new URL(destination, baseUrl));
   response.cookies.set(COOKIE_NAME, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
