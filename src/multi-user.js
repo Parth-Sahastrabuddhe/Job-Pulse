@@ -34,6 +34,7 @@ import {
   logError,
 } from "./multi-user-state.js";
 import { filterJobsForUser } from "./user-filter.js";
+import { jobIsFresh } from "./sources/shared.js";
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
 import { sendJobDm, sendDigestDm, jobButtonHash, buildDmButtons } from "./mu-delivery.js";
 
@@ -395,15 +396,35 @@ async function runPollCycle() {
     } catch {
       roleCategories = [];
     }
-    return { ...job, roleCategories, sourceKey: job.source_key };
+    return {
+      ...job,
+      roleCategories,
+      sourceKey: job.source_key,
+      postedAt: job.posted_at,
+      postedPrecision: job.posted_precision,
+    };
   });
+
+  // Filter stale jobs — mirrors the check in index.js processBatchResults()
+  const freshJobs = jobs.filter((job) =>
+    jobIsFresh(job, nowIso, {
+      maxPostAgeMinutes: Number(process.env.MAX_POST_AGE_MINUTES) || 180,
+      maxDateOnlyAgeDays: Number(process.env.MAX_DATE_ONLY_AGE_DAYS) || 1,
+    })
+  );
+
+  if (freshJobs.length < jobs.length) {
+    console.log(`[multi-user] Suppressed ${jobs.length - freshJobs.length} stale jobs.`);
+  }
+
+  if (freshJobs.length === 0) return;
 
   const users = getActiveUsers();
 
   for (const user of users) {
     try {
       const seenKeys    = getUserSeenJobKeys(user.id);
-      const matchedJobs = filterJobsForUser(jobs, user, seenKeys, {
+      const matchedJobs = filterJobsForUser(freshJobs, user, seenKeys, {
         sponsorLookup: isH1bSponsor,
       });
 
