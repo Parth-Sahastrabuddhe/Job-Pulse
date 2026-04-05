@@ -1,5 +1,6 @@
+import bcrypt from "bcryptjs";
 import { getSession } from "@/lib/session";
-import { getUserProfile, updateUserProfile } from "@/lib/db";
+import { getUserProfile, updateUserProfile, setPasswordHash } from "@/lib/db";
 
 export async function GET() {
   const session = await getSession();
@@ -23,6 +24,7 @@ export async function GET() {
     quietHoursEnd: profile.quiet_hours_end || "",
     quietHoursTz: profile.quiet_hours_tz || "America/New_York",
     isActive: profile.is_active === 1,
+    hasPassword: !!profile.password_hash,
   });
 }
 
@@ -51,10 +53,19 @@ export async function PUT(request) {
   if (body.quietHoursTz !== undefined) fields.quiet_hours_tz = body.quietHoursTz;
   if (body.isActive !== undefined) fields.is_active = body.isActive ? 1 : 0;
 
+  // Handle password setting/changing
+  if (body.newPassword) {
+    if (body.newPassword.length < 6) {
+      return Response.json({ error: "Password must be at least 6 characters" }, { status: 400 });
+    }
+    const hash = await bcrypt.hash(body.newPassword, 10);
+    setPasswordHash(session.discordId, hash);
+  }
+
   try {
-    console.log("[profile] PUT for", session.discordId, "fields:", JSON.stringify(fields));
-    updateUserProfile(session.discordId, fields);
-    console.log("[profile] Updated successfully");
+    if (Object.keys(fields).length > 0) {
+      updateUserProfile(session.discordId, fields);
+    }
   } catch (err) {
     console.error("[profile] Update error:", err);
     return Response.json({ error: "Failed to update profile" }, { status: 500 });

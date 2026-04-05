@@ -78,7 +78,7 @@ export async function GET(request) {
     profileComplete,
   })
     .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("7d")
+    .setExpirationTime("30d")
     .sign(SECRET);
 
   // Redirect with session cookie set on the response
@@ -93,7 +93,7 @@ export async function GET(request) {
     httpOnly: true,
     secure: isHttps,
     sameSite: "lax",
-    maxAge: 7 * 24 * 60 * 60,
+    maxAge: 30 * 24 * 60 * 60,
     path: "/",
   });
 

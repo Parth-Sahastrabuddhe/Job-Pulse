@@ -44,7 +44,7 @@ export async function POST(request) {
     profileComplete: true,
   })
     .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("7d")
+    .setExpirationTime("30d")
     .sign(SECRET);
 
   const proto = request.headers.get("x-forwarded-proto") || "http";
@@ -55,7 +55,7 @@ export async function POST(request) {
     httpOnly: true,
     secure: isHttps,
     sameSite: "lax",
-    maxAge: 7 * 24 * 60 * 60,
+    maxAge: 30 * 24 * 60 * 60,
     path: "/",
   });
 

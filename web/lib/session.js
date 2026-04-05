@@ -11,12 +11,12 @@ const COOKIE_NAME = "jobpulse_session";
 export async function createSession(payload) {
   const token = await new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("7d")
+    .setExpirationTime("30d")
     .sign(SECRET);
   const cookieStore = await cookies();
   cookieStore.set(COOKIE_NAME, token, {
     httpOnly: true, secure: false, // Enable when SSL is configured
-    sameSite: "lax", maxAge: 7 * 24 * 60 * 60, path: "/"
+    sameSite: "lax", maxAge: 30 * 24 * 60 * 60, path: "/"
   });
   return token;
 }
