@@ -58,17 +58,18 @@ export function updateUserProfile(discordId, fields) {
 
 // --- User Applications ---
 
-export function getUserApplications(discordId, { status, limit = 2000, offset = 0 } = {}) {
+export function getUserApplications(discordId, { status, limit = 50, offset = 0 } = {}) {
   const d = getDb();
   const user = getUserProfile(discordId);
-  if (!user) return [];
-  let sql = `SELECT usj.*, sj.title, sj.source_label, sj.source_key, sj.location, sj.url, sj.posted_at
-    FROM user_seen_jobs usj JOIN seen_jobs sj ON usj.job_key = sj.key WHERE usj.user_id = ?`;
+  if (!user) return { applications: [], total: 0 };
+  let where = "WHERE usj.user_id = ?";
   const params = [user.id];
-  if (status) { sql += " AND usj.status = ?"; params.push(status); }
-  sql += " ORDER BY usj.notified_at DESC LIMIT ? OFFSET ?";
-  params.push(limit, offset);
-  return d.prepare(sql).all(...params);
+  if (status) { where += " AND usj.status = ?"; params.push(status); }
+  const total = d.prepare(`SELECT COUNT(*) as cnt FROM user_seen_jobs usj ${where}`).get(...params).cnt;
+  const applications = d.prepare(`SELECT usj.*, sj.title, sj.source_label, sj.source_key, sj.location, sj.url, sj.posted_at
+    FROM user_seen_jobs usj JOIN seen_jobs sj ON usj.job_key = sj.key ${where}
+    ORDER BY usj.notified_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  return { applications, total };
 }
 
 export function updateApplicationStatus(discordId, jobKey, status) {

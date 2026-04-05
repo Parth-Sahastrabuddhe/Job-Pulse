@@ -22,24 +22,36 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatingKey, setUpdatingKey] = useState(null);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  const fetchApplications = useCallback(async (filter) => {
+  const fetchApplications = useCallback(async (filter, pg) => {
     setLoading(true);
     setError("");
     try {
-      const url = filter ? `/api/applications?status=${filter}` : "/api/applications";
-      const res = await fetch(url);
+      const params = new URLSearchParams();
+      if (filter) params.set("status", filter);
+      params.set("page", String(pg));
+      const res = await fetch(`/api/applications?${params}`);
       if (res.status === 401) { router.push("/auth"); return; }
       if (!res.ok) { setError("Failed to load applications."); return; }
       const data = await res.json();
       setApplications(data.applications || []);
+      setTotalPages(data.totalPages || 1);
+      setTotal(data.total || 0);
     } catch { setError("Network error. Please try again."); }
     finally { setLoading(false); }
   }, [router]);
 
   useEffect(() => {
-    fetchApplications(statusFilter);
-  }, [statusFilter, fetchApplications]);
+    fetchApplications(statusFilter, page);
+  }, [statusFilter, page, fetchApplications]);
+
+  function handleFilterChange(e) {
+    setStatusFilter(e.target.value);
+    setPage(1);
+  }
 
   async function handleStatusChange(jobKey, newStatus) {
     setUpdatingKey(jobKey);
@@ -69,11 +81,12 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground font-display">Application Tracker</h1>
           <p className="text-muted text-sm mt-0.5">
-            {applications.length} job{applications.length !== 1 ? "s" : ""}
+            {total} job{total !== 1 ? "s" : ""}
             {statusFilter ? ` with status \u201c${statusFilter}\u201d` : " tracked"}
+            {totalPages > 1 ? ` \u2014 page ${page} of ${totalPages}` : ""}
           </p>
         </div>
-        <select id="statusFilter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectClass}>
+        <select id="statusFilter" value={statusFilter} onChange={handleFilterChange} className={selectClass}>
           <option value="">All Statuses</option>
           {ALL_STATUSES.map((s) => (
             <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
@@ -98,59 +111,84 @@ export default function DashboardPage() {
           <p className="text-sm text-muted">Jobs you receive alerts for will appear here.</p>
         </div>
       ) : (
-        <div className="bg-surface rounded-xl border border-line overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-line bg-elevated">
-                  <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Company</th>
-                  <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Role</th>
-                  <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Date</th>
-                  <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Update</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {applications.map((app) => (
-                  <tr key={app.job_key} className="hover:bg-surface-hover transition-colors">
-                    <td className="px-4 py-3 font-medium text-foreground">
-                      {app.source_label || app.source_key || "\u2014"}
-                    </td>
-                    <td className="px-4 py-3 text-muted max-w-xs">
-                      {app.url ? (
-                        <a href={app.url} target="_blank" rel="noopener noreferrer"
-                          className="text-pulse hover:text-pulse-hover hover:underline">
-                          {app.title || "View Job"}
-                        </a>
-                      ) : (
-                        <span>{app.title || "\u2014"}</span>
-                      )}
-                      {app.location && (
-                        <div className="text-xs text-faint mt-0.5">{app.location}</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3"><StatusBadge status={app.status} /></td>
-                    <td className="px-4 py-3 text-muted whitespace-nowrap">
-                      {formatDate(app.applied_at || app.notified_at)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <select
-                        value={app.status}
-                        onChange={(e) => handleStatusChange(app.job_key, e.target.value)}
-                        disabled={updatingKey === app.job_key}
-                        className="bg-surface border border-line rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-pulse disabled:opacity-50"
-                      >
-                        {ALL_STATUSES.map((s) => (
-                          <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
-                        ))}
-                      </select>
-                    </td>
+        <>
+          <div className="bg-surface rounded-xl border border-line overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-line bg-elevated">
+                    <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Company</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Role</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Status</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Date</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Update</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {applications.map((app) => (
+                    <tr key={app.job_key} className="hover:bg-surface-hover transition-colors">
+                      <td className="px-4 py-3 font-medium text-foreground">
+                        {app.source_label || app.source_key || "\u2014"}
+                      </td>
+                      <td className="px-4 py-3 text-muted max-w-xs">
+                        {app.url ? (
+                          <a href={app.url} target="_blank" rel="noopener noreferrer"
+                            className="text-pulse hover:text-pulse-hover hover:underline">
+                            {app.title || "View Job"}
+                          </a>
+                        ) : (
+                          <span>{app.title || "\u2014"}</span>
+                        )}
+                        {app.location && (
+                          <div className="text-xs text-faint mt-0.5">{app.location}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3"><StatusBadge status={app.status} /></td>
+                      <td className="px-4 py-3 text-muted whitespace-nowrap">
+                        {formatDate(app.applied_at || app.notified_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={app.status}
+                          onChange={(e) => handleStatusChange(app.job_key, e.target.value)}
+                          disabled={updatingKey === app.job_key}
+                          className="bg-surface border border-line rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-pulse disabled:opacity-50"
+                        >
+                          {ALL_STATUSES.map((s) => (
+                            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="bg-elevated hover:bg-surface-hover disabled:opacity-30 text-foreground px-4 py-2 rounded-lg border border-line text-sm font-medium transition-colors"
+              >
+                Previous
+              </button>
+              <span className="text-muted text-sm">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="bg-elevated hover:bg-surface-hover disabled:opacity-30 text-foreground px-4 py-2 rounded-lg border border-line text-sm font-medium transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
