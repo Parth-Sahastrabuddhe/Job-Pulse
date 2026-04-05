@@ -28,6 +28,7 @@ export function initDb(dbFile) {
       last_seen_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_seen_source ON seen_jobs(source_key, id);
+    CREATE INDEX IF NOT EXISTS idx_seen_first_seen ON seen_jobs(first_seen_at);
 
     CREATE TABLE IF NOT EXISTS job_posts (
       job_key TEXT PRIMARY KEY,
@@ -51,6 +52,112 @@ export function initDb(dbFile) {
       status TEXT DEFAULT 'pending',
       notes TEXT DEFAULT ''
     );
+  `);
+
+  // --- Multi-user schema migrations ---
+  const seenJobsCols = db.pragma("table_info(seen_jobs)").map((c) => c.name);
+  if (!seenJobsCols.includes("seniority_level")) {
+    db.exec("ALTER TABLE seen_jobs ADD COLUMN seniority_level TEXT DEFAULT 'mid'");
+  }
+  if (!seenJobsCols.includes("role_categories")) {
+    db.exec("ALTER TABLE seen_jobs ADD COLUMN role_categories TEXT DEFAULT '[]'");
+  }
+
+  // --- Multi-user tables ---
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      discord_id TEXT UNIQUE NOT NULL,
+      discord_username TEXT NOT NULL,
+      first_name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      email_verified BOOLEAN DEFAULT 0,
+      role_categories TEXT NOT NULL DEFAULT '["software_engineer"]',
+      seniority_levels TEXT NOT NULL DEFAULT '["entry","mid"]',
+      company_selections TEXT DEFAULT '["all"]',
+      country TEXT DEFAULT 'US',
+      requires_sponsorship BOOLEAN DEFAULT 0,
+      notification_mode TEXT DEFAULT 'realtime',
+      quiet_hours_start TEXT DEFAULT NULL,
+      quiet_hours_end TEXT DEFAULT NULL,
+      quiet_hours_tz TEXT DEFAULT 'America/New_York',
+      is_active BOOLEAN DEFAULT 1,
+      role TEXT DEFAULT 'user',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS user_seen_jobs (
+      user_id INTEGER NOT NULL,
+      job_key TEXT NOT NULL,
+      status TEXT DEFAULT 'notified',
+      notified_at TEXT NOT NULL,
+      applied_at TEXT,
+      updated_at TEXT,
+      PRIMARY KEY (user_id, job_key),
+      FOREIGN KEY (user_id) REFERENCES user_profiles(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS h1b_sponsors (
+      company_key TEXT PRIMARY KEY,
+      company_name TEXT NOT NULL,
+      sponsors_h1b BOOLEAN DEFAULT 1,
+      lca_count INTEGER DEFAULT 0,
+      avg_salary INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS otp_codes (
+      email TEXT NOT NULL,
+      code TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used BOOLEAN DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS dm_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      job_key TEXT NOT NULL,
+      status TEXT DEFAULT 'sent',
+      sent_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES user_profiles(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS error_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_key TEXT,
+      error_message TEXT,
+      occurred_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS company_suggestions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      company_name TEXT NOT NULL,
+      careers_url TEXT DEFAULT '',
+      reason TEXT DEFAULT '',
+      status TEXT DEFAULT 'pending',
+      admin_response TEXT DEFAULT '',
+      submitted_at TEXT NOT NULL,
+      reviewed_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES user_profiles(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS support_tickets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      category TEXT NOT NULL,
+      description TEXT NOT NULL,
+      status TEXT DEFAULT 'open',
+      admin_response TEXT DEFAULT '',
+      submitted_at TEXT NOT NULL,
+      resolved_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES user_profiles(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_seen_jobs_user ON user_seen_jobs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_dm_log_user ON dm_log(user_id);
+    CREATE INDEX IF NOT EXISTS idx_otp_email ON otp_codes(email);
   `);
 
   return db;
@@ -86,10 +193,12 @@ export function migrateFromJson(jsonFile) {
     INSERT OR IGNORE INTO seen_jobs
       (key, source_key, source_label, id, title, location, url,
        posted_text, posted_at, posted_precision, country_code,
+       seniority_level, role_categories,
        first_seen_at, last_seen_at)
     VALUES
       (@key, @sourceKey, @sourceLabel, @id, @title, @location, @url,
        @postedText, @postedAt, @postedPrecision, @countryCode,
+       @seniorityLevel, @roleCategories,
        @firstSeenAt, @lastSeenAt)
   `);
 
@@ -107,6 +216,8 @@ export function migrateFromJson(jsonFile) {
         postedAt: job.postedAt || "",
         postedPrecision: job.postedPrecision || "",
         countryCode: job.countryCode || "",
+        seniorityLevel: "mid",
+        roleCategories: "[]",
         firstSeenAt: job.firstSeenAt || new Date().toISOString(),
         lastSeenAt: job.lastSeenAt || new Date().toISOString()
       });
@@ -166,10 +277,12 @@ export function upsertJobs(jobs, seenAt) {
     INSERT INTO seen_jobs
       (key, source_key, source_label, id, title, location, url,
        posted_text, posted_at, posted_precision, country_code,
+       seniority_level, role_categories,
        first_seen_at, last_seen_at)
     VALUES
       (@key, @sourceKey, @sourceLabel, @id, @title, @location, @url,
        @postedText, @postedAt, @postedPrecision, @countryCode,
+       @seniorityLevel, @roleCategories,
        @firstSeenAt, @lastSeenAt)
     ON CONFLICT(key) DO UPDATE SET
       last_seen_at = @lastSeenAt
@@ -204,6 +317,8 @@ export function upsertJobs(jobs, seenAt) {
         postedAt: job.postedAt || "",
         postedPrecision: job.postedPrecision || "",
         countryCode: job.countryCode || "",
+        seniorityLevel: job.seniorityLevel || "mid",
+        roleCategories: JSON.stringify(job.roleCategories || []),
         firstSeenAt: existingFirstSeen || seenAt,
         lastSeenAt: seenAt
       });
@@ -267,4 +382,10 @@ export function getPendingCompanies() {
 
 export function updateCompanyQueueStatus(id, status, notes) {
   db.prepare("UPDATE company_queue SET status = ?, notes = ? WHERE id = ?").run(status, notes || "", id);
+}
+
+// Cleanup expired OTP codes
+export function cleanupExpiredOtps() {
+  if (!db) return;
+  db.prepare("DELETE FROM otp_codes WHERE expires_at < ?").run(new Date().toISOString());
 }

@@ -12,7 +12,7 @@ function parseCitiJobs(html) {
     if (seen.has(id)) continue;
     seen.add(id);
 
-    if (!isTargetRole(title, { banking: true })) continue;
+    if (!isTargetRole(title)) continue;
 
     // Find location near this job ID
     const locPattern = new RegExp(`job-${id}"[\\s\\S]{0,500}?sr-job-item__location[^>]*>([^<]+)`, 'i');

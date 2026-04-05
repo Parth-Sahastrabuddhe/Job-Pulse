@@ -2,7 +2,7 @@ import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
 function parseJPMorganJob(raw) {
   const title = raw.Title?.trim();
-  if (!title || !isTargetRole(title, { banking: true })) return null;
+  if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.Id || "");
   const location = raw.PrimaryLocation || "";
