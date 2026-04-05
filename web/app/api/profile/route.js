@@ -52,9 +52,11 @@ export async function PUT(request) {
   if (body.isActive !== undefined) fields.is_active = body.isActive ? 1 : 0;
 
   try {
+    console.log("[profile] PUT for", session.discordId, "fields:", JSON.stringify(fields));
     updateUserProfile(session.discordId, fields);
+    console.log("[profile] Updated successfully");
   } catch (err) {
-    console.error("Profile update error:", err);
+    console.error("[profile] Update error:", err);
     return Response.json({ error: "Failed to update profile" }, { status: 500 });
   }
 
