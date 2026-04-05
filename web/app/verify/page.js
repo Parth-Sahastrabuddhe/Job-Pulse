@@ -146,20 +146,18 @@ export default function VerifyPage() {
               <input
                 id="code"
                 type="text"
-                inputMode="numeric"
-                pattern="[0-9]{6}"
                 maxLength={6}
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                placeholder="123456"
-                required
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-center tracking-widest text-lg font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                placeholder="000000"
+                autoComplete="one-time-code"
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-center tracking-[0.3em] text-2xl font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               />
             </div>
 
             <button
               type="submit"
-              disabled={loading || code.length !== 6}
+              disabled={loading || code.length < 6}
               className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold py-2.5 rounded-lg transition-colors"
             >
               {loading ? "Verifying..." : "Verify"}
