@@ -15,6 +15,8 @@ import { collectMicrosoftJobs } from "./sources/microsoft.js";
 import { collectPcsxJobs } from "./sources/pcsx.js";
 import { dedupeJobs, delay, isLegacySweFilter, jobIsFresh, jobMatchesCountryFilter } from "./sources/shared.js";
 import { COMPANIES } from "./companies.js";
+
+const BANKING_KEYS = new Set(COMPANIES.filter((c) => c.banking).map((c) => c.key));
 import { collectWorkdayJobs } from "./sources/workday.js";
 import { collectAshbyJobs } from "./sources/ashby.js";
 import { collectOracleJobs } from "./sources/oracle.js";
@@ -196,7 +198,7 @@ async function processBatchResults(config, flags, jobs, batchLabel) {
 
   if (freshJobs.length > 0) {
     // Apply personal bot filter — only SWE entry/mid (legacy behavior)
-    const personalFiltered = freshJobs.filter((job) => isLegacySweFilter(job.title));
+    const personalFiltered = freshJobs.filter((job) => isLegacySweFilter(job.title, { banking: BANKING_KEYS.has(job.sourceKey) }));
     const jobsToNotify = personalFiltered.slice(0, config.maxNewJobsPerNotify);
     const filteredJobs = await fetchDescriptionsAndFilter(jobsToNotify);
 

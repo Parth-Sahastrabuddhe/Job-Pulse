@@ -62,12 +62,16 @@ export async function GET(request) {
 
   const profileComplete = !!(existingUser && existingUser.email_verified);
 
+  // Determine role: admin env var takes precedence, otherwise read from DB
+  const isAdminById = process.env.ADMIN_DISCORD_ID && discordUser.id === process.env.ADMIN_DISCORD_ID;
+  const role = isAdminById ? "admin" : (existingUser?.role || null);
+
   // Create JWT session
   await createSession({
     discordId: discordUser.id,
     username: discordUser.username,
     avatar: discordUser.avatar,
-    role: existingUser?.role_categories || null,
+    role,
     profileComplete,
   });
 

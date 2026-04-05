@@ -21,7 +21,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { initDb, getDb, closeDb } from "./state.js";
+import { initDb, getDb, closeDb, cleanupExpiredOtps } from "./state.js";
 import {
   getActiveUsers,
   getUserSeenJobKeys,
@@ -439,6 +439,7 @@ async function digestLoop() {
   while (running) {
     try {
       await runDigestCycle();
+      cleanupExpiredOtps();
     } catch (err) {
       console.error(`[multi-user] Digest cycle error: ${err.message}`);
       logError("multi-user-digest", err.message);

@@ -28,6 +28,7 @@ export function initDb(dbFile) {
       last_seen_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_seen_source ON seen_jobs(source_key, id);
+    CREATE INDEX IF NOT EXISTS idx_seen_first_seen ON seen_jobs(first_seen_at);
 
     CREATE TABLE IF NOT EXISTS job_posts (
       job_key TEXT PRIMARY KEY,
@@ -381,4 +382,10 @@ export function getPendingCompanies() {
 
 export function updateCompanyQueueStatus(id, status, notes) {
   db.prepare("UPDATE company_queue SET status = ?, notes = ? WHERE id = ?").run(status, notes || "", id);
+}
+
+// Cleanup expired OTP codes
+export function cleanupExpiredOtps() {
+  if (!db) return;
+  db.prepare("DELETE FROM otp_codes WHERE expires_at < ?").run(new Date().toISOString());
 }

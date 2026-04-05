@@ -26,12 +26,14 @@ export default async function Navbar() {
               <span className="text-gray-500">
                 {session.username}
               </span>
-              <Link
-                href="/api/auth/logout"
-                className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md transition-colors"
-              >
-                Logout
-              </Link>
+              <form action="/api/auth/logout" method="POST">
+                <button
+                  type="submit"
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md transition-colors"
+                >
+                  Logout
+                </button>
+              </form>
             </>
           ) : (
             <Link

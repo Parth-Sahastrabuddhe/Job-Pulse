@@ -1,7 +1,7 @@
-import { redirect } from "next/navigation";
+import { NextResponse } from "next/server";
 import { clearSession } from "@/lib/session";
 
-export async function GET() {
+export async function POST() {
   await clearSession();
-  redirect("/");
+  return NextResponse.json({ loggedOut: true });
 }
