@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 
 export default function AuthPage() {
   const router = useRouter();
@@ -29,25 +28,30 @@ export default function AuthPage() {
     finally { setLoading(false); }
   }
 
+  const inputClass = "w-full bg-surface border border-line rounded-lg px-3 py-2.5 text-sm text-foreground placeholder:text-faint focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)]";
+
   return (
-    <div className="flex flex-col items-center justify-center py-16">
-      <div className="bg-white rounded-xl border border-gray-200 p-8 w-full max-w-md">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6 text-center">JobPulse</h1>
+    <div className="flex flex-col items-center justify-center py-16 animate-fade-in-up">
+      <div className="bg-surface rounded-xl border border-line p-8 w-full max-w-md">
+        <div className="flex items-center justify-center gap-0.5 mb-8">
+          <span className="text-2xl font-bold text-foreground font-display">Job</span>
+          <span className="text-2xl font-bold text-pulse font-display">Pulse</span>
+        </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-200 mb-6">
+        <div className="flex border-b border-line mb-6">
           <button onClick={() => { setTab("login"); setError(""); }}
-            className={`flex-1 pb-3 text-sm font-medium ${tab === "login" ? "border-b-2 border-indigo-600 text-indigo-600" : "text-gray-500"}`}>
+            className={`flex-1 pb-3 text-sm font-medium transition-colors ${tab === "login" ? "border-b-2 border-pulse text-pulse" : "text-faint hover:text-muted"}`}>
             Login
           </button>
           <button onClick={() => { setTab("register"); setError(""); }}
-            className={`flex-1 pb-3 text-sm font-medium ${tab === "register" ? "border-b-2 border-indigo-600 text-indigo-600" : "text-gray-500"}`}>
+            className={`flex-1 pb-3 text-sm font-medium transition-colors ${tab === "register" ? "border-b-2 border-pulse text-pulse" : "text-faint hover:text-muted"}`}>
             Register
           </button>
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">
+          <div className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-danger text-sm px-4 py-3 rounded-lg mb-4">
             {error}
           </div>
         )}
@@ -55,26 +59,24 @@ export default function AuthPage() {
         {tab === "login" ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <label htmlFor="email" className="block text-sm font-medium text-foreground/80 mb-1">Email</label>
               <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com" required
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
+                placeholder="you@example.com" required className={inputClass} />
             </div>
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <label htmlFor="password" className="block text-sm font-medium text-foreground/80 mb-1">Password</label>
               <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                placeholder="Your password" required
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
+                placeholder="Your password" required className={inputClass} />
             </div>
             <button type="submit" disabled={loading}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold py-2.5 rounded-lg transition-colors">
+              className="w-full bg-pulse hover:bg-pulse-hover disabled:opacity-50 text-black font-semibold py-2.5 rounded-lg transition-colors">
               {loading ? "Logging in..." : "Login"}
             </button>
           </form>
         ) : (
           <div className="space-y-4">
-            <p className="text-gray-600 text-sm text-center">
-              Register with Discord to link your account for job alerts. You only need to do this once.
+            <p className="text-muted text-sm text-center">
+              Register with Discord to link your account for job alerts.
             </p>
             <a href="/api/auth/discord"
               className="flex items-center justify-center gap-3 w-full bg-[#5865F2] hover:bg-[#4752c4] text-white font-semibold py-3 px-6 rounded-lg transition-colors">
@@ -83,7 +85,7 @@ export default function AuthPage() {
               </svg>
               Register with Discord
             </a>
-            <p className="text-xs text-gray-400 text-center">
+            <p className="text-xs text-faint text-center">
               After Discord auth, you'll verify your email and set a password for future logins.
             </p>
           </div>

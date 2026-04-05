@@ -1,8 +1,9 @@
-import { Inter } from "next/font/google";
+import { Syne, Outfit } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 
-const inter = Inter({ subsets: ["latin"] });
+const syne = Syne({ subsets: ["latin"], variable: "--font-syne" });
+const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" });
 
 export const metadata = {
   title: "JobPulse — Real-time Job Alerts",
@@ -11,10 +12,10 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={inter.className}>
-      <body className="bg-gray-50 min-h-screen">
+    <html lang="en" className={`${syne.variable} ${outfit.variable}`}>
+      <body className="min-h-screen">
         <Navbar />
-        <main className="max-w-4xl mx-auto px-4 py-8">
+        <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 relative z-10">
           {children}
         </main>
       </body>

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import StatusBadge from "@/components/StatusBadge";
 
 function formatDate(dateStr) {
-  if (!dateStr) return "—";
+  if (!dateStr) return "\u2014";
   return new Date(dateStr).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -14,7 +14,7 @@ function formatDate(dateStr) {
 }
 
 function formatDateTime(dateStr) {
-  if (!dateStr) return "—";
+  if (!dateStr) return "\u2014";
   return new Date(dateStr).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
@@ -23,29 +23,30 @@ function formatDateTime(dateStr) {
   });
 }
 
-function StatCard({ label, value, color = "indigo" }) {
+function StatCard({ label, value, color = "pulse" }) {
   const colorMap = {
-    indigo: "text-indigo-600",
-    green: "text-green-600",
-    blue: "text-blue-600",
-    yellow: "text-yellow-600",
-    red: "text-red-600",
-    gray: "text-gray-600",
+    pulse: "text-pulse",
+    green: "text-pulse",
+    blue: "text-info",
+    yellow: "text-warn",
+    red: "text-danger",
+    gray: "text-muted",
+    indigo: "text-info",
   };
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4">
-      <div className={`text-2xl font-bold ${colorMap[color] || colorMap.indigo}`}>{value ?? "—"}</div>
-      <div className="text-sm text-gray-500 mt-0.5">{label}</div>
+    <div className="bg-surface rounded-xl border border-line p-4">
+      <div className={`text-2xl font-bold ${colorMap[color] || colorMap.pulse}`}>{value ?? "\u2014"}</div>
+      <div className="text-sm text-muted mt-0.5">{label}</div>
     </div>
   );
 }
 
 function TicketStatusBadge({ status }) {
   const styleMap = {
-    open: "bg-yellow-100 text-yellow-700",
-    in_progress: "bg-blue-100 text-blue-700",
-    resolved: "bg-green-100 text-green-700",
-    closed: "bg-gray-100 text-gray-500",
+    open: "bg-[rgba(245,158,11,0.12)] text-warn",
+    in_progress: "bg-[rgba(59,130,246,0.12)] text-info",
+    resolved: "bg-[rgba(34,197,94,0.12)] text-pulse",
+    closed: "bg-[rgba(78,81,102,0.12)] text-faint",
   };
   const labelMap = {
     open: "Open",
@@ -54,7 +55,7 @@ function TicketStatusBadge({ status }) {
     closed: "Closed",
   };
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styleMap[status] || "bg-gray-100 text-gray-600"}`}>
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styleMap[status] || "bg-[rgba(78,81,102,0.12)] text-muted"}`}>
       {labelMap[status] || status}
     </span>
   );
@@ -62,12 +63,12 @@ function TicketStatusBadge({ status }) {
 
 function SuggestionStatusBadge({ status }) {
   const styleMap = {
-    pending: "bg-yellow-100 text-yellow-700",
-    approved: "bg-green-100 text-green-700",
-    rejected: "bg-red-100 text-red-600",
+    pending: "bg-[rgba(245,158,11,0.12)] text-warn",
+    approved: "bg-[rgba(34,197,94,0.12)] text-pulse",
+    rejected: "bg-[rgba(239,68,68,0.12)] text-danger",
   };
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styleMap[status] || "bg-gray-100 text-gray-600"}`}>
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styleMap[status] || "bg-[rgba(78,81,102,0.12)] text-muted"}`}>
       {status.charAt(0).toUpperCase() + status.slice(1)}
     </span>
   );
@@ -90,8 +91,8 @@ function OverviewTab() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="text-gray-500 text-sm py-8 text-center">Loading health data...</div>;
-  if (error) return <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>;
+  if (loading) return <div className="text-muted text-sm py-8 text-center">Loading health data...</div>;
+  if (error) return <div className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-danger text-sm px-4 py-3 rounded-lg">{error}</div>;
   if (!health) return null;
 
   return (
@@ -110,28 +111,28 @@ function OverviewTab() {
       </div>
 
       <div>
-        <h2 className="text-base font-semibold text-gray-900 mb-3">Recent Errors</h2>
+        <h2 className="text-base font-semibold text-foreground mb-3">Recent Errors</h2>
         {health.recentErrors.length === 0 ? (
-          <div className="text-sm text-gray-500 bg-white rounded-xl border border-gray-200 p-6 text-center">
+          <div className="text-sm text-muted bg-surface rounded-xl border border-line p-6 text-center">
             No recent errors — system is healthy.
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-surface rounded-xl border border-line overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-200 bg-gray-50">
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Source</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Error</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Time</th>
+                  <tr className="border-b border-line bg-elevated">
+                    <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Source</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Error</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider whitespace-nowrap">Time</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-line">
                   {health.recentErrors.map((err) => (
-                    <tr key={err.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{err.source_key || "—"}</td>
-                      <td className="px-4 py-3 text-red-600 max-w-sm truncate">{err.error_message}</td>
-                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDateTime(err.occurred_at)}</td>
+                    <tr key={err.id} className="hover:bg-surface-hover transition-colors">
+                      <td className="px-4 py-3 text-foreground whitespace-nowrap">{err.source_key || "\u2014"}</td>
+                      <td className="px-4 py-3 text-danger max-w-sm truncate">{err.error_message}</td>
+                      <td className="px-4 py-3 text-muted whitespace-nowrap">{formatDateTime(err.occurred_at)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -222,12 +223,12 @@ function UsersTab() {
           placeholder="Search by username, name, or email..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="flex-1 bg-surface border border-line rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-faint focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)]"
         />
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="bg-surface border border-line rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)]"
         >
           <option value="">All Users</option>
           <option value="active">Active</option>
@@ -236,56 +237,56 @@ function UsersTab() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
+        <div className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-danger text-sm px-4 py-3 rounded-lg">{error}</div>
       )}
 
       {loading ? (
-        <div className="text-gray-500 text-sm py-8 text-center">Loading users...</div>
+        <div className="text-muted text-sm py-8 text-center">Loading users...</div>
       ) : users.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-500">
+        <div className="bg-surface rounded-xl border border-line p-8 text-center text-sm text-muted">
           No users found.
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-xl border border-line overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-200 bg-gray-50">
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Username</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Name</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Email</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Role</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Joined</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Actions</th>
+                <tr className="border-b border-line bg-elevated">
+                  <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Username</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Name</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Email</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Role</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Joined</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-line">
                 {users.map((user) => (
-                  <tr key={user.discord_id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-gray-900">@{user.discord_username}</td>
-                    <td className="px-4 py-3 text-gray-700">{user.first_name}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{user.email}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{user.role || "user"}</td>
+                  <tr key={user.discord_id} className="hover:bg-surface-hover transition-colors">
+                    <td className="px-4 py-3 font-medium text-foreground">@{user.discord_username}</td>
+                    <td className="px-4 py-3 text-foreground">{user.first_name}</td>
+                    <td className="px-4 py-3 text-muted text-xs">{user.email}</td>
+                    <td className="px-4 py-3 text-muted text-xs">{user.role || "user"}</td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${user.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${user.is_active ? "bg-[rgba(34,197,94,0.12)] text-pulse" : "bg-[rgba(78,81,102,0.12)] text-faint"}`}>
                         {user.is_active ? "Active" : "Paused"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDate(user.created_at)}</td>
+                    <td className="px-4 py-3 text-muted whitespace-nowrap">{formatDate(user.created_at)}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
                         <button
                           onClick={() => toggleActive(user.discord_id, user.is_active)}
                           disabled={actionPending === user.discord_id}
-                          className={`px-2 py-1 rounded text-xs font-medium disabled:opacity-50 ${user.is_active ? "bg-yellow-100 text-yellow-700 hover:bg-yellow-200" : "bg-green-100 text-green-700 hover:bg-green-200"}`}
+                          className={`px-2 py-1 rounded text-xs font-medium disabled:opacity-50 transition-colors ${user.is_active ? "bg-[rgba(245,158,11,0.12)] text-warn hover:bg-[rgba(245,158,11,0.2)]" : "bg-[rgba(34,197,94,0.12)] text-pulse hover:bg-[rgba(34,197,94,0.2)]"}`}
                         >
                           {user.is_active ? "Pause" : "Resume"}
                         </button>
                         <button
                           onClick={() => handleDelete(user.discord_id, user.discord_username)}
                           disabled={actionPending === user.discord_id}
-                          className="px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
+                          className="px-2 py-1 rounded text-xs font-medium bg-[rgba(239,68,68,0.12)] text-danger hover:bg-[rgba(239,68,68,0.2)] disabled:opacity-50 transition-colors"
                         >
                           Delete
                         </button>
@@ -360,11 +361,11 @@ function TicketsTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <label className="text-sm text-gray-600">Filter:</label>
+        <label className="text-sm text-muted">Filter:</label>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="bg-surface border border-line rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)]"
         >
           <option value="">All Statuses</option>
           <option value="open">Open</option>
@@ -375,35 +376,35 @@ function TicketsTab() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
+        <div className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-danger text-sm px-4 py-3 rounded-lg">{error}</div>
       )}
 
       {loading ? (
-        <div className="text-gray-500 text-sm py-8 text-center">Loading tickets...</div>
+        <div className="text-muted text-sm py-8 text-center">Loading tickets...</div>
       ) : tickets.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-500">
+        <div className="bg-surface rounded-xl border border-line p-8 text-center text-sm text-muted">
           No tickets found.
         </div>
       ) : (
         <div className="space-y-4">
           {tickets.map((ticket) => (
-            <div key={ticket.id} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div key={ticket.id} className="bg-surface rounded-xl border border-line p-4">
               <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
                 <div>
-                  <span className="font-medium text-gray-900">#{ticket.id}</span>
-                  <span className="mx-2 text-gray-300">|</span>
-                  <span className="text-gray-700">@{ticket.discord_username}</span>
-                  <span className="mx-2 text-gray-300">|</span>
-                  <span className="text-xs text-gray-500">{ticket.category}</span>
+                  <span className="font-medium text-foreground">#{ticket.id}</span>
+                  <span className="mx-2 text-faint">|</span>
+                  <span className="text-foreground">@{ticket.discord_username}</span>
+                  <span className="mx-2 text-faint">|</span>
+                  <span className="text-xs text-muted">{ticket.category}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <TicketStatusBadge status={ticket.status} />
-                  <span className="text-xs text-gray-400">{formatDate(ticket.submitted_at)}</span>
+                  <span className="text-xs text-faint">{formatDate(ticket.submitted_at)}</span>
                 </div>
               </div>
-              <p className="text-sm text-gray-700 mb-3 bg-gray-50 rounded p-3">{ticket.description}</p>
+              <p className="text-sm text-foreground mb-3 bg-elevated rounded p-3">{ticket.description}</p>
               {ticket.admin_response && (
-                <p className="text-sm text-indigo-700 bg-indigo-50 rounded p-3 mb-3">
+                <p className="text-sm text-pulse bg-[rgba(34,197,94,0.08)] rounded p-3 mb-3">
                   <span className="font-medium">Admin: </span>{ticket.admin_response}
                 </p>
               )}
@@ -413,13 +414,13 @@ function TicketsTab() {
                   value={responseText[ticket.id] || ""}
                   onChange={(e) => setResponseText((prev) => ({ ...prev, [ticket.id]: e.target.value }))}
                   rows={2}
-                  className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                  className="flex-1 bg-surface border border-line rounded px-3 py-2 text-sm text-foreground placeholder:text-faint focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)] resize-none"
                 />
                 <div className="flex gap-2 sm:flex-col">
                   <select
                     value={responseStatus[ticket.id] || "in_progress"}
                     onChange={(e) => setResponseStatus((prev) => ({ ...prev, [ticket.id]: e.target.value }))}
-                    className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    className="bg-surface border border-line rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)]"
                   >
                     <option value="open">Open</option>
                     <option value="in_progress">In Progress</option>
@@ -429,7 +430,7 @@ function TicketsTab() {
                   <button
                     onClick={() => handleRespond(ticket.id)}
                     disabled={responding === ticket.id}
-                    className="px-3 py-1 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+                    className="px-3 py-1 bg-pulse hover:bg-pulse-hover text-black rounded text-xs font-semibold disabled:opacity-50 transition-colors"
                   >
                     {responding === ticket.id ? "Saving..." : "Submit"}
                   </button>
@@ -496,11 +497,11 @@ function SuggestionsTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <label className="text-sm text-gray-600">Filter:</label>
+        <label className="text-sm text-muted">Filter:</label>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="bg-surface border border-line rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)]"
         >
           <option value="">All Statuses</option>
           <option value="pending">Pending</option>
@@ -510,28 +511,28 @@ function SuggestionsTab() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
+        <div className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-danger text-sm px-4 py-3 rounded-lg">{error}</div>
       )}
 
       {loading ? (
-        <div className="text-gray-500 text-sm py-8 text-center">Loading suggestions...</div>
+        <div className="text-muted text-sm py-8 text-center">Loading suggestions...</div>
       ) : suggestions.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-500">
+        <div className="bg-surface rounded-xl border border-line p-8 text-center text-sm text-muted">
           No suggestions found.
         </div>
       ) : (
         <div className="space-y-4">
           {suggestions.map((sug) => (
-            <div key={sug.id} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div key={sug.id} className="bg-surface rounded-xl border border-line p-4">
               <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
                 <div>
-                  <span className="font-semibold text-gray-900">{sug.company_name}</span>
-                  <span className="mx-2 text-gray-300">|</span>
-                  <span className="text-gray-600 text-sm">@{sug.discord_username}</span>
+                  <span className="font-semibold text-foreground">{sug.company_name}</span>
+                  <span className="mx-2 text-faint">|</span>
+                  <span className="text-muted text-sm">@{sug.discord_username}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <SuggestionStatusBadge status={sug.status} />
-                  <span className="text-xs text-gray-400">{formatDate(sug.submitted_at)}</span>
+                  <span className="text-xs text-faint">{formatDate(sug.submitted_at)}</span>
                 </div>
               </div>
               {sug.careers_url && (
@@ -539,27 +540,27 @@ function SuggestionsTab() {
                   href={sug.careers_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-indigo-600 hover:underline block mb-1"
+                  className="text-xs text-pulse hover:underline block mb-1"
                 >
                   {sug.careers_url}
                 </a>
               )}
               {sug.reason && (
-                <p className="text-sm text-gray-600 bg-gray-50 rounded p-2 mb-3">{sug.reason}</p>
+                <p className="text-sm text-muted bg-elevated rounded p-2 mb-3">{sug.reason}</p>
               )}
               {sug.status === "pending" && (
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleAction(sug.id, "approved")}
                     disabled={acting === sug.id}
-                    className="px-3 py-1 bg-green-100 text-green-700 rounded text-xs font-medium hover:bg-green-200 disabled:opacity-50"
+                    className="px-3 py-1 bg-[rgba(34,197,94,0.12)] text-pulse rounded text-xs font-medium hover:bg-[rgba(34,197,94,0.2)] disabled:opacity-50 transition-colors"
                   >
                     Approve
                   </button>
                   <button
                     onClick={() => handleAction(sug.id, "rejected")}
                     disabled={acting === sug.id}
-                    className="px-3 py-1 bg-red-100 text-red-700 rounded text-xs font-medium hover:bg-red-200 disabled:opacity-50"
+                    className="px-3 py-1 bg-[rgba(239,68,68,0.12)] text-danger rounded text-xs font-medium hover:bg-[rgba(239,68,68,0.2)] disabled:opacity-50 transition-colors"
                   >
                     Reject
                   </button>
@@ -594,19 +595,19 @@ export default function AdminPage() {
   if (authorized === null) {
     return (
       <div className="flex justify-center py-16">
-        <div className="text-gray-500 text-sm">Checking access...</div>
+        <div className="text-muted text-sm">Checking access...</div>
       </div>
     );
   }
 
   if (authorized === false) {
     return (
-      <div className="bg-red-50 border border-red-200 text-red-700 px-6 py-8 rounded-xl text-center">
+      <div className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-danger px-6 py-8 rounded-xl text-center">
         <div className="text-lg font-semibold mb-1">Access denied</div>
         <div className="text-sm">You do not have permission to view this page.</div>
         <button
           onClick={() => router.push("/")}
-          className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
+          className="mt-4 px-4 py-2 bg-[rgba(239,68,68,0.12)] text-danger hover:bg-[rgba(239,68,68,0.2)] rounded-lg text-sm font-medium transition-colors"
         >
           Go home
         </button>
@@ -617,19 +618,19 @@ export default function AdminPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Admin Panel</h1>
-        <p className="text-gray-500 text-sm mt-0.5">Manage users, tickets, and system health.</p>
+        <h1 className="text-2xl font-bold text-foreground font-display">Admin Panel</h1>
+        <p className="text-muted text-sm mt-0.5">Manage users, tickets, and system health.</p>
       </div>
 
-      <div className="flex gap-1 border-b border-gray-200 mb-6">
+      <div className="flex gap-1 border-b border-line mb-6">
         {TABS.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === tab
-                ? "border-indigo-600 text-indigo-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-pulse text-pulse"
+                : "border-transparent text-faint hover:text-muted"
             }`}
           >
             {tab}
