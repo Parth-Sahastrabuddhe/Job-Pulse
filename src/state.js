@@ -69,6 +69,12 @@ export function initDb(dbFile) {
     db.exec("ALTER TABLE user_profiles ADD COLUMN password_hash TEXT DEFAULT NULL");
   }
 
+  // Add applied_at column to user_seen_jobs (idempotent)
+  const usjCols = db.pragma("table_info(user_seen_jobs)").map((c) => c.name);
+  if (usjCols.length > 0 && !usjCols.includes("applied_at")) {
+    db.exec("ALTER TABLE user_seen_jobs ADD COLUMN applied_at TEXT DEFAULT NULL");
+  }
+
   // --- Multi-user tables ---
   db.exec(`
     CREATE TABLE IF NOT EXISTS user_profiles (
