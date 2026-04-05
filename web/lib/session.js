@@ -15,7 +15,7 @@ export async function createSession(payload) {
     .sign(SECRET);
   const cookieStore = await cookies();
   cookieStore.set(COOKIE_NAME, token, {
-    httpOnly: true, secure: process.env.NODE_ENV === "production",
+    httpOnly: true, secure: false, // Enable when SSL is configured
     sameSite: "lax", maxAge: 7 * 24 * 60 * 60, path: "/"
   });
   return token;

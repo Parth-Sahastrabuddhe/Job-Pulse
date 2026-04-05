@@ -88,9 +88,10 @@ export async function GET(request) {
   const baseUrl = `${proto}://${host}`;
   const destination = profileComplete ? "/profile" : "/verify";
   const response = NextResponse.redirect(new URL(destination, baseUrl));
+  const isHttps = proto === "https";
   response.cookies.set(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: isHttps,
     sameSite: "lax",
     maxAge: 7 * 24 * 60 * 60,
     path: "/",
