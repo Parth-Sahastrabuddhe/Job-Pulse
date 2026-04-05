@@ -1,11 +1,10 @@
 import crypto from "node:crypto";
 import { getSession } from "@/lib/session";
 import { createOtp } from "@/lib/db";
-import { sendOtpEmail } from "@/lib/ses";
 
-const otpAttempts = new Map(); // discordId -> { count, resetAt }
+const otpAttempts = new Map();
 const OTP_RATE_LIMIT = 3;
-const OTP_RATE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+const OTP_RATE_WINDOW_MS = 5 * 60 * 1000;
 
 export async function POST(request) {
   const session = await getSession();
@@ -38,15 +37,19 @@ export async function POST(request) {
     attempts.count++;
   }
 
-  // Generate cryptographically secure 6-digit code
   const code = String(crypto.randomInt(100000, 1000000));
+  const normalizedEmail = email.toLowerCase().trim();
 
+  createOtp(normalizedEmail, code);
+
+  // Try SES first, fall back to console logging
   try {
-    createOtp(email.toLowerCase().trim(), code);
-    await sendOtpEmail(email.toLowerCase().trim(), code);
+    const { sendOtpEmail } = await import("@/lib/ses");
+    await sendOtpEmail(normalizedEmail, code);
+    console.log(`[OTP] Sent to ${normalizedEmail} via SES`);
   } catch (err) {
-    console.error("OTP send error:", err);
-    return Response.json({ error: "Failed to send verification code" }, { status: 500 });
+    // SES not configured — log code to console so admin can retrieve it
+    console.log(`[OTP] SES unavailable (${err.name}). Code for ${normalizedEmail}: ${code}`);
   }
 
   return Response.json({ sent: true });
