@@ -63,6 +63,12 @@ export function initDb(dbFile) {
     db.exec("ALTER TABLE seen_jobs ADD COLUMN role_categories TEXT DEFAULT '[]'");
   }
 
+  // Add password_hash column to user_profiles (idempotent)
+  const userCols = db.pragma("table_info(user_profiles)").map((c) => c.name);
+  if (userCols.length > 0 && !userCols.includes("password_hash")) {
+    db.exec("ALTER TABLE user_profiles ADD COLUMN password_hash TEXT DEFAULT NULL");
+  }
+
   // --- Multi-user tables ---
   db.exec(`
     CREATE TABLE IF NOT EXISTS user_profiles (
@@ -83,6 +89,7 @@ export function initDb(dbFile) {
       quiet_hours_tz TEXT DEFAULT 'America/New_York',
       is_active BOOLEAN DEFAULT 1,
       role TEXT DEFAULT 'user',
+      password_hash TEXT DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

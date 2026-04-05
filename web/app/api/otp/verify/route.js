@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import { getSession, createSession } from "@/lib/session";
 import { verifyOtp, createUserProfile } from "@/lib/db";
 
@@ -7,18 +8,23 @@ export async function POST(request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let email, code, firstName;
+  let email, code, firstName, password;
   try {
     const body = await request.json();
     email = body.email;
     code = body.code;
     firstName = body.firstName;
+    password = body.password;
   } catch {
     return Response.json({ error: "Invalid request body" }, { status: 400 });
   }
 
   if (!email || !code || !firstName) {
     return Response.json({ error: "email, code, and firstName are required" }, { status: 400 });
+  }
+
+  if (!password || password.length < 6) {
+    return Response.json({ error: "Password must be at least 6 characters" }, { status: 400 });
   }
 
   const normalizedEmail = email.toLowerCase().trim();
@@ -35,20 +41,23 @@ export async function POST(request) {
     return Response.json({ error: "Invalid or expired code" }, { status: 400 });
   }
 
-  // Create user profile
+  // Hash password
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  // Create user profile with password
   try {
     createUserProfile({
       discordId: session.discordId,
       discordUsername: session.username,
       firstName: firstName.trim(),
       email: normalizedEmail,
+      passwordHash,
     });
   } catch (err) {
-    // Profile may already exist (race condition) — not fatal
     console.error("createUserProfile error:", err);
   }
 
-  // Update session with profileComplete: true
+  // Update session
   await createSession({
     ...session,
     profileComplete: true,

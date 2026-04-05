@@ -14,18 +14,27 @@ export function getDb() {
 
 // --- User Profiles ---
 
-export function createUserProfile({ discordId, discordUsername, firstName, email }) {
+export function createUserProfile({ discordId, discordUsername, firstName, email, passwordHash }) {
   const d = getDb();
   const now = new Date().toISOString();
   const result = d.prepare(`
-    INSERT INTO user_profiles (discord_id, discord_username, first_name, email, email_verified, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 1, ?, ?)
-  `).run(discordId, discordUsername, firstName, email, now, now);
+    INSERT INTO user_profiles (discord_id, discord_username, first_name, email, email_verified, password_hash, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+  `).run(discordId, discordUsername, firstName, email, passwordHash || null, now, now);
   return result.lastInsertRowid;
 }
 
 export function getUserProfile(discordId) {
   return getDb().prepare("SELECT * FROM user_profiles WHERE discord_id = ?").get(discordId);
+}
+
+export function getUserProfileByEmail(email) {
+  return getDb().prepare("SELECT * FROM user_profiles WHERE email = ?").get(email);
+}
+
+export function setPasswordHash(discordId, passwordHash) {
+  getDb().prepare("UPDATE user_profiles SET password_hash = ?, updated_at = ? WHERE discord_id = ?")
+    .run(passwordHash, new Date().toISOString(), discordId);
 }
 
 export function updateUserProfile(discordId, fields) {
