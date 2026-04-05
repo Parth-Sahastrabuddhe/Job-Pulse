@@ -58,7 +58,7 @@ export function updateUserProfile(discordId, fields) {
 
 // --- User Applications ---
 
-export function getUserApplications(discordId, { status, limit = 50, offset = 0 } = {}) {
+export function getUserApplications(discordId, { status, limit = 2000, offset = 0 } = {}) {
   const d = getDb();
   const user = getUserProfile(discordId);
   if (!user) return [];

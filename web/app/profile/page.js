@@ -76,7 +76,7 @@ export default function ProfilePage() {
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Failed to save profile."); return; }
-      setSuccess(true); setTimeout(() => setSuccess(false), 3000);
+      setSuccess(true);
     } catch { setError("Network error. Please try again."); }
     finally { setSaving(false); }
   }
@@ -95,7 +95,23 @@ export default function ProfilePage() {
         <div className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-danger text-sm px-4 py-3 rounded-lg mb-6">{error}</div>
       )}
       {success && (
-        <div className="bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.2)] text-pulse text-sm px-4 py-3 rounded-lg mb-6">Profile saved successfully.</div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.6)] backdrop-blur-sm">
+          <div className="bg-surface border border-line rounded-xl p-8 max-w-sm w-full mx-4 text-center animate-fade-in-up">
+            <div className="w-12 h-12 rounded-full bg-[rgba(34,197,94,0.15)] flex items-center justify-center mx-auto mb-4">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-foreground font-display mb-2">Profile Saved</h3>
+            <p className="text-muted text-sm mb-6">Your preferences have been updated.</p>
+            <button
+              onClick={() => setSuccess(false)}
+              className="bg-pulse hover:bg-pulse-hover text-black font-semibold py-2.5 px-8 rounded-lg transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
       )}
 
       <form onSubmit={handleSave} className="space-y-6 stagger">
