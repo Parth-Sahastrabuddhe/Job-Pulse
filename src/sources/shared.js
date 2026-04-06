@@ -65,7 +65,7 @@ export function normalizeCountryCode(value) {
 
 // --- Role category patterns (one per supported category) ---
 const ROLE_CATEGORY_PATTERNS = {
-  software_engineer: /(?:(?:software|full[\s-]?stack|application|systems|cloud)\s+(?:engineer|develop)|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i,
+  software_engineer: /(?:(?:software|full[\s-]?stack|systems|cloud)\s+(?:engineer|develop)|application\s+(?:software\s+)?develop|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i,
   data_engineer: /(?:data\s+(?:engineer|platform|infrastructure)|analytics\s+engineer|\bETL\b)/i,
   ml_engineer: /(?:machine\s+learning|(?:ML|AI)\s+engineer|deep\s+learning|\bNLP\b|computer\s+vision)/i,
   frontend: /(?:front[\s-]?end|UI\s+engineer|web\s+develop)/i,
@@ -84,7 +84,7 @@ const PLATFORM_ENGINEER_PATTERN = /\bplatform\s+engineer/i;
 
 // Legacy filter for personal bot — matches the OLD isTargetRole behavior
 // SWE titles only, entry/mid seniority only
-const LEGACY_SWE_PATTERN = /(?:(?:software|backend|full[\s-]?stack|platform|application|systems|cloud)\s+(?:engineer|develop)|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i;
+const LEGACY_SWE_PATTERN = /(?:(?:software|backend|full[\s-]?stack|platform|systems|cloud)\s+(?:engineer|develop)|application\s+(?:software\s+)?develop|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i;
 const LEGACY_SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|(?<!technical\s)staff|lead\w*|manager|director|distinguished|chief|intern)\b/i;
 const LEGACY_BANKING_SENIORITY_EXCLUDE = /\b(senior|sr\.?|princ\w*|(?<!technical\s)staff|lead\w*|manager|director|distinguished|chief|vice\s+president|VP|SVP|AVP|managing\s+director|MD|intern)\b/i;
 

@@ -177,54 +177,7 @@ export async function startDiscordBot(config) {
   return client;
 }
 
-async function getOrCreateThread(interaction) {
-  const message = interaction.message;
 
-  // Check if thread already exists on this message
-  if (message.thread) {
-    const thread = message.thread;
-    if (thread.archived) {
-      await thread.setArchived(false);
-    }
-    return thread;
-  }
-
-  // Check if there's a thread we can fetch (thread ID === message ID in Discord)
-  if (message.hasThread) {
-    try {
-      const thread = await message.channel.threads.fetch(message.id);
-      if (thread) {
-        if (thread.archived) {
-          await thread.setArchived(false);
-        }
-        return thread;
-      }
-    } catch (fetchErr) {
-      console.error(`[getOrCreateThread] Failed to fetch thread for message ${message.id}: ${fetchErr.message}`);
-    }
-  }
-
-  // Extract thread name from embed or message content
-  const embed = message.embeds?.[0];
-  let threadName;
-  if (embed?.author?.name && embed?.title) {
-    threadName = `${embed.author.name} - ${embed.title}`;
-  } else {
-    const titleMatch = message.content.match(/\*\*\[([^\]]+)\]\s*(.+?)\*\*/);
-    threadName = titleMatch
-      ? `${titleMatch[1]} - ${titleMatch[2]}`
-      : "Job Discussion";
-  }
-  threadName = threadName.slice(0, 100);
-
-  try {
-    const thread = await message.startThread({ name: threadName });
-    return thread;
-  } catch {
-    // Thread may already exist but couldn't be fetched — return null safely
-    return null;
-  }
-}
 
 function extractJobInfoFromMessage(message) {
   const embed = message.embeds?.[0];
@@ -256,13 +209,8 @@ function extractJobFromMessage(urlOrText) {
 }
 
 async function handleFitCheck(interaction, hash) {
-  await interaction.deferUpdate();
+  await interaction.deferReply({ ephemeral: true });
 
-  const thread = await getOrCreateThread(interaction);
-  if (!thread) {
-    await interaction.followUp({ content: "Could not open a thread for this job. Try again or use View Job.", ephemeral: true });
-    return;
-  }
   const jobUrl = getJobUrlFromMessage(interaction.message);
   const jobInfo = extractJobFromMessage(jobUrl);
 
@@ -292,12 +240,12 @@ async function handleFitCheck(interaction, hash) {
   }
 
   if (!sourceKey || !jobId) {
-    await thread.send("Could not identify this job. Try using View Job instead.");
+    await interaction.editReply("Could not identify this job. Try using View Job instead.");
     return;
   }
 
   const dirId = `${sourceKey}-${jobId}`.replace(/[^a-zA-Z0-9_-]/g, "_");
-  await thread.send("Running fit check... This may take 20-40 seconds.");
+  await interaction.editReply("Running fit check... This may take 20-40 seconds.");
 
   try {
     // Try to fetch job description if we don't have one
@@ -324,7 +272,7 @@ async function handleFitCheck(interaction, hash) {
       }
 
       if (!description || description.length < 50) {
-        await thread.send(`Could not fetch job description for **${jobCompany} — ${jobTitle}**.\nUse the View Job button to check the listing directly.`);
+        await interaction.editReply(`Could not fetch job description for **${jobCompany} — ${jobTitle}**.\nUse the View Job button to check the listing directly.`);
         return;
       }
 
@@ -340,7 +288,7 @@ async function handleFitCheck(interaction, hash) {
         : result.fitAssessment;
       assessmentMsg += `\n\`\`\`\n${trimmed}\n\`\`\``;
     }
-    await thread.send(assessmentMsg);
+    await interaction.editReply(assessmentMsg);
 
     // Update buttons to show fit check was done
     if (jobUrl) {
@@ -349,38 +297,36 @@ async function handleFitCheck(interaction, hash) {
     }
   } catch (error) {
     console.error(`[fit-check] Error for ${sourceKey}-${jobId}: ${error.message}`);
-    await thread.send(`Could not complete fit check for **${jobCompany} — ${jobTitle}**.\nUse the View Job button to check the listing directly.`);
+    await interaction.editReply(`Could not complete fit check for **${jobCompany} — ${jobTitle}**.\nUse the View Job button to check the listing directly.`);
   }
 }
 
 async function handleApplied(interaction, hash) {
-  await interaction.deferUpdate();
+  await interaction.deferReply({ ephemeral: true });
 
-  const thread = await getOrCreateThread(interaction);
-  if (!thread) {
-    await interaction.followUp({ content: "Could not open a thread for this job. Try again.", ephemeral: true });
-    return;
-  }
   const details = extractJobInfoFromMessage(interaction.message);
 
   if (!details.company || !details.role || !details.url) {
-    await thread.send("Could not extract job details from this message.");
+    await interaction.editReply("Could not extract job details from this message.");
     return;
   }
+
+  // Encode original message ID in button so handleConfirmApply can find the job notification
+  const originalMessageId = interaction.message.id;
 
   // Confirmation step — ask before updating tracker
   const confirmRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`confirmapply:${hash}`)
+      .setCustomId(`confirmapply:${hash}:${originalMessageId}`)
       .setLabel("Yes, mark as applied")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
-      .setCustomId(`cancelapply:${hash}`)
+      .setCustomId(`cancelapply:${hash}:${originalMessageId}`)
       .setLabel("Cancel")
       .setStyle(ButtonStyle.Secondary)
   );
 
-  await thread.send({
+  await interaction.editReply({
     content: `Mark **${details.company} — ${details.role}** as applied?\nThis will update your tracker.`,
     components: [confirmRow]
   });
@@ -389,17 +335,22 @@ async function handleApplied(interaction, hash) {
 async function handleConfirmApply(interaction, hash) {
   await interaction.deferUpdate();
 
-  // Find the original job message from the thread's parent
-  const thread = interaction.channel;
-  const parentMessage = await thread.fetchStarterMessage();
+  // Find the original job message using the ID encoded in the button
+  const parts = interaction.customId.split(":");
+  const originalMessageId = parts[2];
+  const channel = interaction.channel;
+  let parentMessage;
+  try {
+    parentMessage = await channel.messages.fetch(originalMessageId);
+  } catch {}
   if (!parentMessage) {
-    await thread.send("Could not find the original job message.");
+    await interaction.followUp({ content: "Could not find the original job message.", ephemeral: true });
     return;
   }
 
   const details = extractJobInfoFromMessage(parentMessage);
   if (!details.company || !details.role || !details.url) {
-    await thread.send("Could not extract job details.");
+    await interaction.followUp({ content: "Could not extract job details.", ephemeral: true });
     return;
   }
 
@@ -412,14 +363,14 @@ async function handleConfirmApply(interaction, hash) {
     ]);
 
     if (stdout.trim().startsWith("OK")) {
-      await thread.send(`✅ **Marked as applied**\n${details.company} — ${details.role}`);
+      await interaction.editReply({ content: `✅ **Marked as applied**\n${details.company} — ${details.role}`, components: [] });
       try {
         const applyKey = findJobKeyByMessageId(parentMessage.id);
         updateJobPostStatus(applyKey, "applied");
         bridgeToTracker(applyKey, "applied");
       } catch {}
     } else {
-      await thread.send(`Tracker update issue: ${stdout.trim()}`);
+      await interaction.editReply({ content: `Tracker update issue: ${stdout.trim()}`, components: [] });
     }
 
     // Update buttons on the original message
@@ -428,18 +379,15 @@ async function handleConfirmApply(interaction, hash) {
       const updatedRows = buildButtonRows(hash, jobUrl, "applied");
       await parentMessage.edit({ components: updatedRows });
     }
-
-    // Remove the confirmation buttons
-    await interaction.message.edit({ components: [] });
   } catch (error) {
     console.error(`[applied] Error: ${error.message}`);
-    await thread.send(`Failed to update tracker: ${error.message.slice(0, 300)}`);
+    await interaction.followUp({ content: `Failed to update tracker: ${error.message.slice(0, 300)}`, ephemeral: true });
   }
 }
 
 async function handleCancelApply(interaction, hash) {
   await interaction.deferUpdate();
-  await interaction.message.edit({
+  await interaction.editReply({
     content: "~~" + interaction.message.content + "~~\nCancelled.",
     components: []
   });
