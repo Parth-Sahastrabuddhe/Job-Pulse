@@ -355,29 +355,30 @@ async function handleConfirmApply(interaction, hash) {
   }
 
   try {
-    const scriptPath = path.resolve(__dirname, "..", "scripts", "add_application.py");
-    const isLinux = process.platform === "linux";
-    const pythonCmd = isLinux ? path.resolve(process.env.HOME, "venv", "bin", "python") : "python";
-    const { stdout } = await execFileAsync(pythonCmd, [
-      scriptPath, details.company, details.role, details.url
-    ]);
-
-    if (stdout.trim().startsWith("OK")) {
-      await interaction.editReply({ content: `✅ **Marked as applied**\n${details.company} — ${details.role}`, components: [] });
-      try {
-        const applyKey = findJobKeyByMessageId(parentMessage.id);
-        updateJobPostStatus(applyKey, "applied");
-        bridgeToTracker(applyKey, "applied");
-      } catch {}
-    } else {
-      await interaction.editReply({ content: `Tracker update issue: ${stdout.trim()}`, components: [] });
+    // Update tracker immediately — don't wait for the Google Sheet script
+    const applyKey = findJobKeyByMessageId(parentMessage.id);
+    if (applyKey) {
+      updateJobPostStatus(applyKey, "applied");
+      bridgeToTracker(applyKey, "applied");
     }
+
+    await interaction.editReply({ content: `✅ **Marked as applied**\n${details.company} — ${details.role}`, components: [] });
 
     // Update buttons on the original message
     const jobUrl = getJobUrlFromMessage(parentMessage);
     if (jobUrl) {
       const updatedRows = buildButtonRows(hash, jobUrl, "applied");
       await parentMessage.edit({ components: updatedRows });
+    }
+
+    // Update Google Sheet in background — don't block the tracker
+    try {
+      const scriptPath = path.resolve(__dirname, "..", "scripts", "add_application.py");
+      const isLinux = process.platform === "linux";
+      const pythonCmd = isLinux ? path.resolve(process.env.HOME, "venv", "bin", "python") : "python";
+      await execFileAsync(pythonCmd, [scriptPath, details.company, details.role, details.url]);
+    } catch (sheetErr) {
+      console.error(`[applied] Sheet update failed: ${sheetErr.message}`);
     }
   } catch (error) {
     console.error(`[applied] Error: ${error.message}`);
