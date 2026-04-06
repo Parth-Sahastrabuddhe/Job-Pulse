@@ -23,7 +23,7 @@ export default function AuthPage() {
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Login failed."); return; }
-      router.push("/profile");
+      window.location.href = "/profile";
     } catch { setError("Network error."); }
     finally { setLoading(false); }
   }
