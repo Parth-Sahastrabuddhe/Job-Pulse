@@ -89,7 +89,7 @@ async function main() {
   if (!user) { console.error("User not found"); db.close(); process.exit(1); }
 
   const findExisting = db.prepare(`
-    SELECT usj.job_key, usj.status
+    SELECT usj.job_key, usj.status, usj.applied_at
     FROM user_seen_jobs usj
     JOIN seen_jobs sj ON usj.job_key = sj.key
     WHERE usj.user_id = ? AND sj.source_label = ? AND sj.title = ?
@@ -107,7 +107,7 @@ async function main() {
   `);
 
   const updateStatus = db.prepare(`
-    UPDATE user_seen_jobs SET status = ?, updated_at = ? WHERE user_id = ? AND job_key = ?
+    UPDATE user_seen_jobs SET status = ?, applied_at = ?, updated_at = ? WHERE user_id = ? AND job_key = ?
   `);
 
   const now = new Date().toISOString();
@@ -134,8 +134,9 @@ async function main() {
       const existing = findExisting.get(user.id, company, role, `${datePrefix}%`);
 
       if (existing) {
-        if (existing.status !== dbStatus) {
-          updateStatus.run(dbStatus, now, user.id, existing.job_key);
+        const dateWrong = appliedAt && existing.applied_at && existing.applied_at.slice(0, 10) !== appliedAt.slice(0, 10);
+        if (existing.status !== dbStatus || dateWrong) {
+          updateStatus.run(dbStatus, appliedAt, now, user.id, existing.job_key);
           updated++;
         } else {
           skipped++;

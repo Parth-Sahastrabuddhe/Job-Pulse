@@ -412,7 +412,7 @@ export function bridgeToTracker(jobKey, status) {
       INSERT INTO user_seen_jobs (user_id, job_key, status, notified_at, applied_at, saved_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id, job_key) DO UPDATE SET status = excluded.status,
-        applied_at = COALESCE(excluded.applied_at, user_seen_jobs.applied_at),
+        applied_at = COALESCE(user_seen_jobs.applied_at, excluded.applied_at),
         saved_at = CASE WHEN excluded.status = 'saved' THEN excluded.saved_at ELSE user_seen_jobs.saved_at END,
         save_reminder_sent = CASE WHEN excluded.status = 'saved' THEN 0 ELSE user_seen_jobs.save_reminder_sent END,
         updated_at = excluded.updated_at
