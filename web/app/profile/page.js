@@ -43,6 +43,9 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwMsg, setPwMsg] = useState("");
 
   useEffect(() => {
     async function loadData() {
@@ -64,6 +67,23 @@ export default function ProfilePage() {
 
   function toggleArrayValue(arr, value) {
     return arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value];
+  }
+
+  async function handlePasswordSave() {
+    if (!newPassword) return;
+    setPwSaving(true); setPwMsg("");
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setPwMsg(data.error || "Failed to set password."); return; }
+      setPwMsg("Password saved.");
+      setNewPassword("");
+      setProfile((p) => ({ ...p, hasPassword: true }));
+    } catch { setPwMsg("Network error."); }
+    finally { setPwSaving(false); }
   }
 
   async function handleSave(e) {
@@ -257,6 +277,34 @@ export default function ProfilePage() {
                   </div>
                 </div>
               </label>
+            </section>
+
+            {/* Password */}
+            <section className="bg-surface rounded-xl border border-line p-5 space-y-3">
+              <h2 className="text-sm font-semibold text-foreground font-display uppercase tracking-wider">
+                {profile.hasPassword ? "Change Password" : "Set Password"}
+              </h2>
+              <p className="text-xs text-faint">
+                {profile.hasPassword ? "Update your login password." : "Set a password so you can log in with email."}
+              </p>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="New password (min 6 chars)"
+                className={`${inputClass} w-full`}
+              />
+              {pwMsg && (
+                <p className={`text-xs ${pwMsg === "Password saved." ? "text-pulse" : "text-danger"}`}>{pwMsg}</p>
+              )}
+              <button
+                type="button"
+                onClick={handlePasswordSave}
+                disabled={pwSaving || newPassword.length < 6}
+                className="bg-elevated hover:bg-surface-hover disabled:opacity-30 text-foreground px-4 py-2 rounded-lg border border-line text-sm font-medium transition-colors"
+              >
+                {pwSaving ? "Saving..." : profile.hasPassword ? "Update Password" : "Set Password"}
+              </button>
             </section>
           </div>
         </form>
