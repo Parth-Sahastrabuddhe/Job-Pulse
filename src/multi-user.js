@@ -28,6 +28,9 @@ import {
   markJobNotified,
   updateJobStatus,
   getSavedJobs,
+  getExpiringReminders,
+  markRemindersSent,
+  expireSavedJobs,
   logDm,
   isH1bSponsor,
   getUserProfile,
@@ -98,6 +101,7 @@ const client = new Client({
 let running = true;
 /** ISO timestamp — only jobs first_seen_at after this are considered new. */
 let lastPollAt = new Date().toISOString();
+let lastExpiryCheck = 0;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: find job key from a short button hash
@@ -547,6 +551,47 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Expiry check: reminders + auto-expire saved jobs
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function checkSavedJobExpiry() {
+  try {
+    // Step 1: Send reminders for jobs expiring tomorrow
+    const expiring = getExpiringReminders();
+
+    // Group by user
+    const byUser = new Map();
+    for (const row of expiring) {
+      if (!byUser.has(row.user_id)) byUser.set(row.user_id, { discordId: row.discord_id, jobs: [] });
+      byUser.get(row.user_id).jobs.push(row);
+    }
+
+    for (const [userId, { discordId, jobs }] of byUser) {
+      try {
+        const user = await client.users.fetch(discordId);
+        const jobLines = jobs.map((j) => `\u2022 ${j.title} \u2014 ${j.source_label}${j.location ? ", " + j.location : ""}`);
+        await user.send(
+          `\u23F0 **Saved jobs expiring tomorrow**\n\n${jobLines.join("\n")}\n\nReply \`/saved\` to review them, or they'll be removed tomorrow.`
+        );
+        markRemindersSent(jobs.map((j) => ({ user_id: j.user_id, job_key: j.job_key })));
+        console.log(`[expiry] Sent reminder to user ${userId} for ${jobs.length} jobs`);
+      } catch (err) {
+        console.error(`[expiry] Failed to send reminder to user ${userId}: ${err.message}`);
+      }
+    }
+
+    // Step 2: Expire jobs older than 7 days
+    const expired = expireSavedJobs();
+    if (expired > 0) {
+      console.log(`[expiry] Expired ${expired} saved jobs`);
+    }
+  } catch (err) {
+    console.error(`[expiry] Error in saved job expiry check: ${err.message}`);
+    logError("expiry-check", err.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Polling loop (every 10 seconds)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -649,6 +694,12 @@ async function digestLoop() {
     try {
       await runDigestCycle();
       cleanupExpiredOtps();
+
+      // Hourly check: saved job reminders + expiry
+      if (Date.now() - lastExpiryCheck >= 60 * 60 * 1000) {
+        lastExpiryCheck = Date.now();
+        await checkSavedJobExpiry();
+      }
     } catch (err) {
       console.error(`[multi-user] Digest cycle error: ${err.message}`);
       logError("multi-user-digest", err.message);

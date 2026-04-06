@@ -32,7 +32,7 @@ import { collectFordJobs } from "./sources/ford.js";
 import { collectCitiJobs } from "./sources/citi.js";
 import {
   initDb, closeDb, migrateFromJson,
-  getNewJobs, upsertJobs, pruneState, hasSeenJobs
+  getNewJobs, upsertJobs, pruneState, hasSeenJobs, expireSavedJobPosts
 } from "./state.js";
 import { checkJobDescription } from "./jd-filter.js";
 
@@ -282,6 +282,7 @@ async function runBatchLoop(config, flags, registry) {
   let batchIndex = 0;
   let lastSlowRun = 0;
   let rotationCount = 0;
+  let lastSavedExpiry = 0;
 
   while (true) {
     const cycleStart = Date.now();
@@ -329,6 +330,13 @@ async function runBatchLoop(config, flags, registry) {
           }
         }
         lastSlowRun = Date.now();
+      }
+
+      // Hourly: expire saved job_posts older than 7 days
+      if (Date.now() - lastSavedExpiry >= 60 * 60 * 1000) {
+        lastSavedExpiry = Date.now();
+        const expired = expireSavedJobPosts();
+        if (expired > 0) log(`Expired ${expired} saved job posts`);
       }
     } catch (cycleError) {
       log(`[cycle] Unhandled error: ${cycleError.message}`);
