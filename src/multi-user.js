@@ -99,8 +99,9 @@ const client = new Client({
 // ─────────────────────────────────────────────────────────────────────────────
 
 let running = true;
-/** ISO timestamp — only jobs first_seen_at after this are considered new. */
-let lastPollAt = new Date().toISOString();
+/** ISO timestamp — only jobs first_seen_at after this are considered new.
+ *  Persisted in the meta table so restarts don't lose pending jobs. */
+let lastPollAt = null;
 let lastExpiryCheck = 0;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -612,6 +613,7 @@ async function runPollCycle() {
   const cutoff  = lastPollAt;
   const nowIso  = new Date().toISOString();
   lastPollAt    = nowIso;
+  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(nowIso);
 
   // Fetch newly seen jobs since last poll
   const rawJobs = db
@@ -667,14 +669,17 @@ async function runPollCycle() {
       if (matchedJobs.length === 0) continue;
 
       for (const job of matchedJobs) {
-        markJobNotified(user.id, job.key);
-
         const action = getDeliveryAction(user, new Date());
 
         if (action === "send") {
           const result = await sendJobDm(client, user.discord_id, job, user.first_name);
+          markJobNotified(user.id, job.key);
           logDm(user.id, job.key, result ? "sent" : "failed");
+          if (!result) {
+            console.error(`[multi-user] DM to ${user.discord_id} (user ${user.id}) returned null for ${job.title}`);
+          }
         } else {
+          markJobNotified(user.id, job.key);
           logDm(user.id, job.key, "queued");
         }
 
@@ -683,7 +688,7 @@ async function runPollCycle() {
       }
     } catch (err) {
       console.error(`[multi-user] Error processing user ${user.id}: ${err.message}`);
-      logError("multi-user-poll-user", `user=${user.id} ${err.message}`);
+      try { logError("multi-user-poll-user", `user=${user.id} ${err.message}`); } catch (_) { /* DB may be busy */ }
     }
   }
 }
@@ -819,6 +824,11 @@ client.once("ready", async () => {
   } catch (err) {
     console.error(`[multi-user] Failed to register slash commands: ${err.message}`);
   }
+
+  // Restore lastPollAt from DB so restarts don't lose pending jobs
+  const saved = getDb().prepare("SELECT value FROM meta WHERE key = 'mu_lastPollAt'").get();
+  lastPollAt = saved?.value || new Date().toISOString();
+  console.log(`[multi-user] Resuming poll from ${lastPollAt}`);
 
   // Start loops
   pollLoop();
