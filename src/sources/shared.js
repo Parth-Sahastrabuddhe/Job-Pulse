@@ -315,6 +315,23 @@ function getUtcDateStamp(dateLike) {
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
 }
 
+function getDateStampForTz(dateLike, tz) {
+  const parsedMs = typeof dateLike === "number" ? dateLike : Date.parse(dateLike);
+  if (!Number.isFinite(parsedMs)) return null;
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(parsedMs));
+
+  const y = +parts.find((p) => p.type === "year").value;
+  const m = +parts.find((p) => p.type === "month").value - 1;
+  const d = +parts.find((p) => p.type === "day").value;
+  return Date.UTC(y, m, d);
+}
+
 export function jobIsFresh(job, referenceTime, config) {
   const referenceMs = typeof referenceTime === "number" ? referenceTime : Date.parse(referenceTime);
   if (!Number.isFinite(referenceMs)) {
@@ -331,8 +348,11 @@ export function jobIsFresh(job, referenceTime, config) {
   }
 
   if (job.postedPrecision === "date" || job.postedPrecision === "day") {
-    const jobDateStamp = getUtcDateStamp(job.postedAt);
-    const referenceDateStamp = getUtcDateStamp(referenceMs);
+    const stamp = config.timezone
+      ? (v) => getDateStampForTz(v, config.timezone)
+      : getUtcDateStamp;
+    const jobDateStamp = stamp(job.postedAt);
+    const referenceDateStamp = stamp(referenceMs);
 
     if (jobDateStamp === null || referenceDateStamp === null) {
       return true;

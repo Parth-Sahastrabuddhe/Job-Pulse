@@ -410,6 +410,7 @@ async function runPollCycle() {
     jobIsFresh(job, nowIso, {
       maxPostAgeMinutes: Number(process.env.MAX_POST_AGE_MINUTES) || 180,
       maxDateOnlyAgeDays: Number(process.env.MAX_DATE_ONLY_AGE_DAYS) || 1,
+      timezone: "America/New_York",
     })
   );
 
