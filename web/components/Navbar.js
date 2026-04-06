@@ -28,6 +28,11 @@ export default async function Navbar() {
               <Link href="/support" className="text-muted hover:text-foreground transition-colors">
                 Support
               </Link>
+              {session.role === "admin" && (
+                <Link href="/admin" className="text-muted hover:text-foreground transition-colors">
+                  Admin
+                </Link>
+              )}
               <span className="text-faint">{session.username}</span>
               <a
                 href="/api/auth/logout"
