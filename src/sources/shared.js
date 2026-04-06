@@ -124,7 +124,12 @@ export function detectSeniority(title) {
   const t = title.trim();
   if (!t) return "mid";
 
-  // Staff / Principal (check first — most specific)
+  // Director / Manager / Chief — always blocked (checked first)
+  if (/\b(director|manager|chief)\b/i.test(t)) return "director";
+  if (/\bmanaging\s+director\b/i.test(t)) return "director";
+  if (/\bMD\b/.test(t)) return "director";
+
+  // Staff / Principal (check before senior — most specific)
   if (/\b((?<!technical\s)staff|principal|distinguished|fellow)\b/i.test(t)) return "staff";
   if (/\barchitect\b/i.test(t) && !/\bsolution/i.test(t)) return "staff";
   if (/\bSVP\b/.test(t)) return "staff";
@@ -137,14 +142,14 @@ export function detectSeniority(title) {
   if (/\blead\b/i.test(t)) return "senior";
   if (/\bvice\s+president\b|\bVP\b/i.test(t)) return "senior";
 
-  // Entry
-  if (/\b(new\s+grad|entry[\s-]?level|junior|jr\.?)\b/i.test(t)) return "entry";
-  if (/\bassociate\b/i.test(t) && !/\bassociate\s+director/i.test(t)) return "entry";
-  if (/\bI\b/.test(t) && !/\bII\b/.test(t) && !/\bIII\b/.test(t)) return "entry";
-  if (/\bengineer\s+1\b/i.test(t)) return "entry";
-  if (/\bSDE\s*I\b/.test(t) && !/\bSDE\s*II\b/.test(t)) return "entry";
+  // Entry+Mid composite — SWE I / SDE I / Engineer 1 (no II/III suffix)
+  if (/\b(?:SWE|SDE)\s*I\b/.test(t) && !/\b(?:SWE|SDE)\s*II\b/.test(t)) return "entry_mid";
+  if (/\bengineer\s+1\b/i.test(t) && !/\bengineer\s+[23]\b/i.test(t)) return "entry_mid";
 
-  // Mid — II, 2, or default
+  // Entry only — new grad, early career, junior
+  if (/\b(new\s+grad|early[\s-]?career|entry[\s-]?level|junior|jr\.?)\b/i.test(t)) return "entry";
+
+  // Mid — default (includes SWE II/III, SDE II/III, Engineer 2/3, plain "Software Engineer")
   return "mid";
 }
 
