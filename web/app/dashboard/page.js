@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import StatusBadge from "@/components/StatusBadge";
+import CalendarSidebar from "@/components/CalendarSidebar";
 
 const BASE_STATUSES = ["applied", "interviewing", "offer", "rejected"];
 const ALL_STATUSES_WITH_SKIP = ["applied", "skipped", "interviewing", "offer", "rejected"];
@@ -99,7 +100,11 @@ export default function DashboardPage() {
   const selectClass = "bg-surface border border-line rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)]";
 
   return (
-    <div className="animate-fade-in-up">
+    <div className="flex gap-6 animate-fade-in-up">
+      <div className="hidden lg:block">
+        <CalendarSidebar />
+      </div>
+      <div className="flex-1 min-w-0">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground font-display">Application Tracker</h1>
@@ -222,6 +227,7 @@ export default function DashboardPage() {
           )}
         </>
       )}
+      </div>
     </div>
   );
 }

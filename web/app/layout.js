@@ -15,7 +15,7 @@ export default function RootLayout({ children }) {
     <html lang="en" className={`${syne.variable} ${outfit.variable}`}>
       <body className="min-h-screen">
         <Navbar />
-        <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 relative z-10">
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 relative z-10">
           {children}
         </main>
       </body>
