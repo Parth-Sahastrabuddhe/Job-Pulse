@@ -16,7 +16,13 @@ export function jobMatchesUserProfile(job, profile, { sponsorLookup } = {}) {
 
   // 3. Seniority match
   const userSeniority = JSON.parse(profile.seniority_levels || "[]");
-  if (!userSeniority.includes(job.seniorityLevel || "mid")) return false;
+  const level = job.seniorityLevel || "mid";
+  if (level === "director") return false;  // always blocked
+  if (level === "entry_mid") {
+    if (!userSeniority.includes("entry") && !userSeniority.includes("mid")) return false;
+  } else {
+    if (!userSeniority.includes(level)) return false;
+  }
 
   // 4. Country match
   const userCountry = (profile.country || "US").toUpperCase();
