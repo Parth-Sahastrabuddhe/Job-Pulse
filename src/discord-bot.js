@@ -556,13 +556,9 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
         components: rows
       });
 
-      // Auto-create thread
-      const threadName = `${job.sourceLabel} - ${job.title}`.slice(0, 100);
-      const thread = await message.startThread({ name: threadName });
-
-      // Store in DB
+      // Store in DB (thread created on-demand when user clicks Fit Check)
       try {
-        upsertJobPost(job.key, message.id, thread.id, channelId);
+        upsertJobPost(job.key, message.id, null, channelId);
       } catch (err) {
         console.error(`[discord-bot] Failed to store job_post: ${err.message}`);
       }
