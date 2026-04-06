@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { fetchJobDescription, saveJobData, jobDirId } from "./job-description.js";
 import { fitCheckResume } from "./tailor.js";
-import { upsertJobPost, updateJobPostStatus, bridgeToTracker, getDb, addToCompanyQueue, getPendingCompanies } from "./state.js";
+import { upsertJobPost, updateJobPostStatus, bridgeToTracker, getDb, addToCompanyQueue, getPendingCompanies, getJobPost } from "./state.js";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,9 +31,9 @@ function jobButtonId(job) {
 }
 
 function buildButtonRows(hash, jobUrl, status) {
-  // status: "pending" | "fitchecked" | "applied" | "skipped"
-  // Applied is truly final. Skip is reversible — Applied stays active.
+  // status: "pending" | "fitchecked" | "applied" | "skipped" | "saved"
   const isApplied = status === "applied";
+  const isSaved = status === "saved";
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -49,6 +49,11 @@ function buildButtonRows(hash, jobUrl, status) {
       .setCustomId(`applied:${hash}`)
       .setLabel(status === "applied" ? "\u2705 Applied" : "Applied")
       .setStyle(ButtonStyle.Success)
+      .setDisabled(isApplied),
+    new ButtonBuilder()
+      .setCustomId(`save:${hash}`)
+      .setLabel(isSaved ? "\uD83D\uDCCC Saved" : "Save")
+      .setStyle(isSaved ? ButtonStyle.Primary : ButtonStyle.Secondary)
       .setDisabled(isApplied),
     new ButtonBuilder()
       .setCustomId(`skip:${hash}`)
@@ -108,6 +113,8 @@ export async function startDiscordBot(config) {
         await handleApplied(interaction, hash);
       } else if (action === "skip") {
         await handleSkip(interaction, hash);
+      } else if (action === "save") {
+        await handleSave(interaction, hash);
       } else if (action === "confirmapply") {
         await handleConfirmApply(interaction, hash);
       } else if (action === "cancelapply") {
@@ -494,6 +501,28 @@ async function handleSkip(interaction, hash) {
     await interaction.message.edit({ components: updatedRows });
   }
 
+}
+
+async function handleSave(interaction, hash) {
+  await interaction.deferUpdate();
+
+  try {
+    const saveKey = findJobKeyByMessageId(interaction.message.id);
+    if (saveKey) {
+      const post = getJobPost(saveKey);
+      const newStatus = post?.status === "saved" ? "pending" : "saved";
+      updateJobPostStatus(saveKey, newStatus);
+      bridgeToTracker(saveKey, newStatus);
+
+      const jobUrl = getJobUrlFromMessage(interaction.message);
+      if (jobUrl) {
+        const updatedRows = buildButtonRows(hash, jobUrl, newStatus);
+        await interaction.message.edit({ components: updatedRows });
+      }
+    }
+  } catch (error) {
+    console.error(`[save] Error: ${error.message}`);
+  }
 }
 
 function findJobKeyByMessageId(messageId) {
