@@ -4,11 +4,11 @@
  * Builds Discord embeds and buttons for DMs, and sends them.
  *
  * Exports:
- *   jobButtonHash(jobKey)                                → 16-char SHA1 hex prefix
- *   buildDmButtons(hash, jobUrl, status)                 → ActionRow[]
- *   buildJobEmbed(job)                                   → EmbedBuilder
- *   sendJobDm(client, discordId, job, firstName)         → { messageId } | null
- *   sendDigestDm(client, discordId, jobs, firstName)     → void
+ *   jobButtonHash(jobKey)                                        → 16-char SHA1 hex prefix
+ *   buildDmButtons(hash, jobUrl, status)                         → ActionRow[]
+ *   buildJobEmbed(job, { timezone?, experienceYears? })           → EmbedBuilder
+ *   sendJobDm(client, discordId, job, firstName, { timezone?, experienceYears? })  → { messageId } | null
+ *   sendDigestDm(client, discordId, jobs, firstName, { timezone? })               → void
  */
 
 import crypto from "node:crypto";
@@ -80,21 +80,37 @@ export function buildDmButtons(hash, jobUrl, status) {
  * this function handles both.
  *
  * @param {object} job
+ * @param {object} [options]
+ * @param {string} [options.timezone]       IANA timezone, e.g. "America/New_York"
+ * @param {number} [options.experienceYears] max years of experience found in JD
  * @returns {EmbedBuilder}
  */
-export function buildJobEmbed(job) {
+export function buildJobEmbed(job, { timezone, experienceYears } = {}) {
   // Normalise field names — prefer snake_case (DB), fall back to camelCase
-  const company   = job.source_label  ?? job.sourceLabel  ?? "Unknown Company";
-  const title     = job.title         ?? "Untitled";
-  const url       = job.url           ?? "";
-  const location  = job.location      ?? "";
-  const postedAt  = job.posted_at     ?? job.postedAt     ?? "";
-  const postedTxt = job.posted_text   ?? job.postedText   ?? "";
+  const company   = job.source_label    ?? job.sourceLabel    ?? "Unknown Company";
+  const title     = job.title           ?? "Untitled";
+  const url       = job.url             ?? "";
+  const location  = job.location        ?? "";
+  const postedAt  = job.posted_at       ?? job.postedAt       ?? "";
+  const precision = job.posted_precision ?? job.postedPrecision ?? "";
 
-  // Build a compact description line
+  // Build description lines (plain text, matching micro bot style)
   const descParts = [];
-  if (location) descParts.push(`**Location:** ${location}`);
-  if (postedTxt || postedAt) descParts.push(`**Posted:** ${postedTxt || postedAt}`);
+  if (location) descParts.push(location);
+
+  if (postedAt) {
+    const d = new Date(postedAt);
+    const tz = { timeZone: timezone || "America/New_York" };
+    const postedStr = (precision === "day" || precision === "date")
+      ? d.toLocaleDateString(undefined, tz)
+      : d.toLocaleString(undefined, tz);
+    descParts.push(`Posted: ${postedStr}`);
+  }
+
+  if (experienceYears) {
+    descParts.push(`Experience: ${experienceYears}+ years`);
+  }
+
   const description = descParts.join("\n") || undefined;
 
   const embed = new EmbedBuilder()
@@ -118,11 +134,13 @@ export function buildJobEmbed(job) {
  * @param {import("discord.js").Client} client
  * @param {string}  discordId   Snowflake string
  * @param {object}  job         Job row from seen_jobs (snake_case) or camelCase
- * @param {string}  firstName   User's first name (currently unused in single-job DMs
- *                              but kept for API consistency)
+ * @param {string}  firstName   User's first name
+ * @param {object}  [options]
+ * @param {string}  [options.timezone]        IANA timezone for date formatting
+ * @param {number}  [options.experienceYears] max experience years from JD
  * @returns {Promise<{ messageId: string }|null>}
  */
-export async function sendJobDm(client, discordId, job, firstName) {
+export async function sendJobDm(client, discordId, job, firstName, options = {}) {
   try {
     const user = await client.users.fetch(discordId);
 
@@ -130,7 +148,7 @@ export async function sendJobDm(client, discordId, job, firstName) {
     const jobUrl = job.url ?? "";
     const hash   = jobButtonHash(jobKey);
 
-    const embed   = buildJobEmbed(job);
+    const embed   = buildJobEmbed(job, options);
     const buttons = buildDmButtons(hash, jobUrl, "pending");
 
     const message = await user.send({
@@ -155,9 +173,11 @@ export async function sendJobDm(client, discordId, job, firstName) {
  * @param {string}   discordId
  * @param {object[]} jobs       Array of job rows (snake_case or camelCase)
  * @param {string}   firstName
+ * @param {object}   [options]
+ * @param {string}   [options.timezone]  IANA timezone for date formatting
  * @returns {Promise<void>}
  */
-export async function sendDigestDm(client, discordId, jobs, firstName) {
+export async function sendDigestDm(client, discordId, jobs, firstName, options = {}) {
   try {
     const user = await client.users.fetch(discordId);
 
@@ -188,7 +208,10 @@ export async function sendDigestDm(client, discordId, jobs, firstName) {
       const jobUrl = job.url ?? "";
       const hash   = jobButtonHash(jobKey);
 
-      const embed   = buildJobEmbed(job);
+      const embed   = buildJobEmbed(job, {
+        timezone: options.timezone,
+        experienceYears: job._experienceYears,
+      });
       const buttons = buildDmButtons(hash, jobUrl, "pending");
 
       await user.send({ embeds: [embed], components: buttons });
