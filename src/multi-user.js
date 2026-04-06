@@ -632,8 +632,11 @@ async function runPollCycle() {
       ...job,
       roleCategories,
       sourceKey: job.source_key,
+      sourceLabel: job.source_label,
       postedAt: job.posted_at,
       postedPrecision: job.posted_precision,
+      countryCode: job.country_code,
+      seniorityLevel: job.seniority_level,
     };
   });
 

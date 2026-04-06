@@ -135,7 +135,6 @@ export function detectSeniority(title) {
   // Senior
   if (/\b(senior|sr\.?)\b/i.test(t)) return "senior";
   if (/\blead\b/i.test(t)) return "senior";
-  if (/\bIII\b/.test(t) || /\bengineer\s+3\b/i.test(t)) return "senior";
   if (/\bvice\s+president\b|\bVP\b/i.test(t)) return "senior";
 
   // Entry
