@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { fetchJobDescription, saveJobData, jobDirId } from "./job-description.js";
 import { fitCheckResume } from "./tailor.js";
-import { upsertJobPost, updateJobPostStatus, getDb, addToCompanyQueue, getPendingCompanies } from "./state.js";
+import { upsertJobPost, updateJobPostStatus, bridgeToTracker, getDb, addToCompanyQueue, getPendingCompanies } from "./state.js";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -398,7 +398,9 @@ async function handleConfirmApply(interaction, hash) {
     if (stdout.trim().startsWith("OK")) {
       await thread.send(`✅ **Marked as applied**\n${details.company} — ${details.role}`);
       try {
-        updateJobPostStatus(findJobKeyByMessageId(parentMessage.id), "applied");
+        const applyKey = findJobKeyByMessageId(parentMessage.id);
+        updateJobPostStatus(applyKey, "applied");
+        bridgeToTracker(applyKey, "applied");
       } catch {}
     } else {
       await thread.send(`Tracker update issue: ${stdout.trim()}`);
@@ -482,7 +484,9 @@ async function handleSkip(interaction, hash) {
   await interaction.deferUpdate();
 
   try {
-    updateJobPostStatus(findJobKeyByMessageId(interaction.message.id), "skipped");
+    const skipKey = findJobKeyByMessageId(interaction.message.id);
+    updateJobPostStatus(skipKey, "skipped");
+    bridgeToTracker(skipKey, "skipped");
   } catch {}
 
   const jobUrl = getJobUrlFromMessage(interaction.message);
@@ -559,6 +563,7 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
       // Store in DB (thread created on-demand when user clicks Fit Check)
       try {
         upsertJobPost(job.key, message.id, null, channelId);
+        bridgeToTracker(job.key, "notified");
       } catch (err) {
         console.error(`[discord-bot] Failed to store job_post: ${err.message}`);
       }

@@ -381,6 +381,25 @@ export function updateJobPostStatus(jobKey, status) {
   db.prepare("UPDATE job_posts SET status = ? WHERE job_key = ?").run(status, jobKey);
 }
 
+// Bridge personal bot actions → web dashboard (user_seen_jobs) for admin user
+const ADMIN_DISCORD_ID = "1038422401874145372";
+
+export function bridgeToTracker(jobKey, status) {
+  try {
+    const user = db.prepare("SELECT id FROM user_profiles WHERE discord_id = ?").get(ADMIN_DISCORD_ID);
+    if (!user) return;
+    const now = new Date().toISOString();
+    const appliedAt = status === "applied" ? now : null;
+    db.prepare(`
+      INSERT INTO user_seen_jobs (user_id, job_key, status, notified_at, applied_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, job_key) DO UPDATE SET status = excluded.status,
+        applied_at = COALESCE(excluded.applied_at, user_seen_jobs.applied_at),
+        updated_at = excluded.updated_at
+    `).run(user.id, jobKey, status, now, appliedAt, now);
+  } catch {}
+}
+
 // company_queue CRUD
 export function addToCompanyQueue(companyName) {
   db.prepare(`
