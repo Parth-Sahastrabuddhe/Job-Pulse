@@ -577,9 +577,23 @@ async function handleSavedAction(interaction, hash, action) {
     return;
   }
 
-  const newStatus = action === "saved_apply" ? "applied" : "skipped";
+  const newStatus = action === "saved_apply" ? "applied" : "pending";
   updateJobPostStatus(jobKey, newStatus);
   bridgeToTracker(jobKey, newStatus);
+
+  // Update buttons on the original notification message
+  const post = getJobPost(jobKey);
+  if (post?.message_id && post?.channel_id && client) {
+    try {
+      const ch = await client.channels.fetch(post.channel_id);
+      const msg = await ch.messages.fetch(post.message_id);
+      const jobUrl = getJobUrlFromMessage(msg);
+      if (jobUrl) {
+        const updatedRows = buildButtonRows(savedJobHash(jobKey), jobUrl, newStatus);
+        await msg.edit({ components: updatedRows });
+      }
+    } catch {}
+  }
 
   // Refresh the /saved list
   const response = buildSavedResponse(0);
