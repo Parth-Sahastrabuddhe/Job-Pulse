@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import StatusBadge from "@/components/StatusBadge";
 
-const ALL_STATUSES = ["applied", "skipped", "interviewing", "offer", "rejected"];
+const ALL_STATUSES = ["applied", "interviewing", "offer", "rejected"];
 
 function formatDate(dateStr) {
   if (!dateStr) return "\u2014";

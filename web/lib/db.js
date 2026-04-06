@@ -62,7 +62,7 @@ export function getUserApplications(discordId, { status, query, limit = 50, offs
   const d = getDb();
   const user = getUserProfile(discordId);
   if (!user) return { applications: [], total: 0 };
-  let where = "WHERE usj.user_id = ? AND usj.status != 'notified'";
+  let where = "WHERE usj.user_id = ? AND usj.status NOT IN ('notified', 'skipped')";
   const params = [user.id];
   if (status) { where += " AND usj.status = ?"; params.push(status); }
   if (query) { where += " AND (sj.title LIKE ? OR sj.source_label LIKE ?)"; params.push(`%${query}%`, `%${query}%`); }

@@ -486,7 +486,6 @@ async function handleSkip(interaction, hash) {
   try {
     const skipKey = findJobKeyByMessageId(interaction.message.id);
     updateJobPostStatus(skipKey, "skipped");
-    bridgeToTracker(skipKey, "skipped");
   } catch {}
 
   const jobUrl = getJobUrlFromMessage(interaction.message);
