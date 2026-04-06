@@ -75,6 +75,16 @@ export function initDb(dbFile) {
     db.exec("ALTER TABLE user_seen_jobs ADD COLUMN applied_at TEXT DEFAULT NULL");
   }
 
+  // Add saved_at column to user_seen_jobs (idempotent)
+  if (usjCols.length > 0 && !usjCols.includes("saved_at")) {
+    db.exec("ALTER TABLE user_seen_jobs ADD COLUMN saved_at TEXT DEFAULT NULL");
+  }
+
+  // Add save_reminder_sent column to user_seen_jobs (idempotent)
+  if (usjCols.length > 0 && !usjCols.includes("save_reminder_sent")) {
+    db.exec("ALTER TABLE user_seen_jobs ADD COLUMN save_reminder_sent BOOLEAN DEFAULT 0");
+  }
+
   // --- Multi-user tables ---
   db.exec(`
     CREATE TABLE IF NOT EXISTS user_profiles (
