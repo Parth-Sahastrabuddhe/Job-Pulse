@@ -130,13 +130,22 @@ export function markJobNotified(userId, jobKey) {
  */
 export function updateJobStatus(userId, jobKey, status) {
   const now = new Date().toISOString();
-  const appliedClause = status === "applied" ? ", applied_at = ?" : "";
-  const params = status === "applied"
-    ? [status, now, now, userId, jobKey]
-    : [status, now, userId, jobKey];
+  let extraSql = "";
+  const params = [status, now];
+
+  if (status === "applied") {
+    extraSql = ", applied_at = ?";
+    params.push(now);
+  } else if (status === "saved") {
+    extraSql = ", saved_at = ?, save_reminder_sent = 0";
+    params.push(now);
+  }
+
+  params.push(userId, jobKey);
+
   getDb()
     .prepare(
-      `UPDATE user_seen_jobs SET status = ?, updated_at = ?${appliedClause}
+      `UPDATE user_seen_jobs SET status = ?, updated_at = ?${extraSql}
        WHERE user_id = ? AND job_key = ?`
     )
     .run(...params);
@@ -179,6 +188,90 @@ export function getUserApplications(userId, { status, limit = 50, offset = 0 } =
   params.push(limit, offset);
 
   return getDb().prepare(sql).all(...params);
+}
+
+/**
+ * Get a user's saved jobs, ordered by expiry (soonest first).
+ * @param {number} userId
+ * @param {{ limit?: number, offset?: number }} opts
+ * @returns {{ results: object[], total: number }}
+ */
+export function getSavedJobs(userId, { limit = 5, offset = 0 } = {}) {
+  const db = getDb();
+  const baseSql = `
+    FROM user_seen_jobs usj
+    LEFT JOIN seen_jobs sj ON sj.key = usj.job_key
+    WHERE usj.user_id = ? AND usj.status = 'saved'
+  `;
+  const total = db
+    .prepare(`SELECT COUNT(*) AS cnt ${baseSql}`)
+    .get(userId).cnt;
+
+  const results = db
+    .prepare(
+      `SELECT usj.job_key, usj.saved_at, usj.status,
+              sj.title, sj.location, sj.url, sj.source_label
+       ${baseSql}
+       ORDER BY usj.saved_at ASC
+       LIMIT ? OFFSET ?`
+    )
+    .all(userId, limit, offset);
+
+  return { results, total };
+}
+
+/**
+ * Get saved jobs that need a reminder (saved 6+ days ago, reminder not yet sent).
+ * Returns rows with user_id so we know who to DM.
+ * @returns {object[]}
+ */
+export function getExpiringReminders() {
+  const cutoff = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString();
+  return getDb()
+    .prepare(
+      `SELECT usj.user_id, usj.job_key, usj.saved_at,
+              sj.title, sj.source_label, sj.location,
+              up.discord_id
+       FROM user_seen_jobs usj
+       LEFT JOIN seen_jobs sj ON sj.key = usj.job_key
+       LEFT JOIN user_profiles up ON up.id = usj.user_id
+       WHERE usj.status = 'saved'
+         AND usj.saved_at <= ?
+         AND usj.save_reminder_sent = 0`
+    )
+    .all(cutoff);
+}
+
+/**
+ * Mark reminder as sent for a batch of (user_id, job_key) pairs.
+ * @param {Array<{user_id: number, job_key: string}>} pairs
+ */
+export function markRemindersSent(pairs) {
+  const db = getDb();
+  const stmt = db.prepare(
+    "UPDATE user_seen_jobs SET save_reminder_sent = 1 WHERE user_id = ? AND job_key = ?"
+  );
+  const tx = db.transaction(() => {
+    for (const { user_id, job_key } of pairs) {
+      stmt.run(user_id, job_key);
+    }
+  });
+  tx();
+}
+
+/**
+ * Expire saved jobs older than 7 days — set status to 'skipped'.
+ * @returns {number} number of rows updated
+ */
+export function expireSavedJobs() {
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const now = new Date().toISOString();
+  return getDb()
+    .prepare(
+      `UPDATE user_seen_jobs SET status = 'skipped', updated_at = ?
+       WHERE status = 'saved' AND saved_at <= ?`
+    )
+    .run(now, cutoff).changes;
 }
 
 // ---------------------------------------------------------------------------

@@ -391,6 +391,13 @@ export function updateJobPostStatus(jobKey, status) {
   db.prepare("UPDATE job_posts SET status = ? WHERE job_key = ?").run(status, jobKey);
 }
 
+export function expireSavedJobPosts() {
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  return db.prepare(
+    "UPDATE job_posts SET status = 'skipped' WHERE status = 'saved' AND job_key IN (SELECT key FROM seen_jobs WHERE last_seen_at <= ?)"
+  ).run(cutoff).changes;
+}
+
 // Bridge personal bot actions → web dashboard (user_seen_jobs) for admin user
 const ADMIN_DISCORD_ID = "1038422401874145372";
 
@@ -400,13 +407,16 @@ export function bridgeToTracker(jobKey, status) {
     if (!user) return;
     const now = new Date().toISOString();
     const appliedAt = status === "applied" ? now : null;
+    const savedAt = status === "saved" ? now : null;
     db.prepare(`
-      INSERT INTO user_seen_jobs (user_id, job_key, status, notified_at, applied_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO user_seen_jobs (user_id, job_key, status, notified_at, applied_at, saved_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id, job_key) DO UPDATE SET status = excluded.status,
         applied_at = COALESCE(excluded.applied_at, user_seen_jobs.applied_at),
+        saved_at = CASE WHEN excluded.status = 'saved' THEN excluded.saved_at ELSE user_seen_jobs.saved_at END,
+        save_reminder_sent = CASE WHEN excluded.status = 'saved' THEN 0 ELSE user_seen_jobs.save_reminder_sent END,
         updated_at = excluded.updated_at
-    `).run(user.id, jobKey, status, now, appliedAt, now);
+    `).run(user.id, jobKey, status, now, appliedAt, savedAt, now);
   } catch {}
 }
 
