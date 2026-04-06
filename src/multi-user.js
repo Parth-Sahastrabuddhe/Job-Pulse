@@ -27,6 +27,7 @@ import {
   getUserSeenJobKeys,
   markJobNotified,
   updateJobStatus,
+  getSavedJobs,
   logDm,
   isH1bSponsor,
   getUserProfile,
@@ -154,6 +155,10 @@ const searchCommand = new SlashCommandBuilder()
     opt.setName("days").setDescription("Look back N days (default: 30)")
   );
 
+const savedCommand = new SlashCommandBuilder()
+  .setName("saved")
+  .setDescription("Show your saved jobs");
+
 // ─────────────────────────────────────────────────────────────────────────────
 // /search handler
 // ─────────────────────────────────────────────────────────────────────────────
@@ -262,6 +267,98 @@ function buildSearchResponse(profile, searchParams) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// /saved response builder
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SAVED_PAGE_SIZE = 4;
+
+function buildMuSavedResponse(profile, offset = 0) {
+  const { results, total } = getSavedJobs(profile.id, {
+    limit: SAVED_PAGE_SIZE,
+    offset,
+  });
+
+  if (total === 0) {
+    const embed = new EmbedBuilder()
+      .setTitle("\uD83D\uDCCC Saved Jobs")
+      .setDescription("No saved jobs. Click **Save** on a job notification to bookmark it for later.")
+      .setColor(0x5865F2);
+    return { embeds: [embed], components: [] };
+  }
+
+  // Group by company
+  const byCompany = new Map();
+  results.forEach((row) => {
+    const company = row.source_label ?? "Unknown";
+    if (!byCompany.has(company)) byCompany.set(company, []);
+    byCompany.get(company).push(row);
+  });
+
+  const lines = [];
+  for (const [company, jobs] of byCompany) {
+    lines.push(`**${company}**`);
+    for (const job of jobs) {
+      const title = job.url ? `[${job.title}](${job.url})` : job.title;
+      const loc = job.location ? ` \u2014 ${job.location}` : "";
+      const daysLeft = Math.max(0, 7 - Math.floor((Date.now() - new Date(job.saved_at).getTime()) / (24 * 60 * 60 * 1000)));
+      lines.push(`\u2022 ${title}${loc} (expires in ${daysLeft}d)`);
+    }
+    lines.push("");
+  }
+
+  const totalPages = Math.ceil(total / SAVED_PAGE_SIZE) || 1;
+  const currentPage = Math.floor(offset / SAVED_PAGE_SIZE) + 1;
+
+  const embed = new EmbedBuilder()
+    .setTitle(`\uD83D\uDCCC Saved Jobs (${total})`)
+    .setDescription(lines.join("\n").trim())
+    .setFooter({ text: `Page ${currentPage} of ${totalPages}` })
+    .setColor(0x5865F2);
+
+  const components = [];
+
+  // Per-job action buttons (Applied / Remove) for each job on this page
+  for (const row of results) {
+    const hash = jobButtonHash(row.job_key);
+    const actionRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`mu_saved_apply:${hash}`)
+        .setLabel(`Applied \u2014 ${(row.title ?? "Job").slice(0, 40)}`)
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`mu_saved_remove:${hash}`)
+        .setLabel(`Remove \u2014 ${(row.title ?? "Job").slice(0, 40)}`)
+        .setStyle(ButtonStyle.Danger)
+    );
+    components.push(actionRow);
+  }
+
+  // Pagination buttons — Discord max 5 action rows
+  if (total > SAVED_PAGE_SIZE && components.length < 5) {
+    const hasPrev = offset > 0;
+    const hasNext = offset + SAVED_PAGE_SIZE < total;
+    const prevOffset = Math.max(0, offset - SAVED_PAGE_SIZE);
+    const nextOffset = offset + SAVED_PAGE_SIZE;
+
+    const navRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`mu_saved_page:${prevOffset}`)
+        .setLabel("\u25C0 Prev")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasPrev),
+      new ButtonBuilder()
+        .setCustomId(`mu_saved_page:${nextOffset}`)
+        .setLabel("Next \u25B6")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasNext)
+    );
+    components.push(navRow);
+  }
+
+  return { embeds: [embed], components };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Interaction handler
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -286,6 +383,21 @@ client.on("interactionCreate", async (interaction) => {
       };
 
       const response = buildSearchResponse(profile, searchParams);
+      await interaction.editReply(response);
+      return;
+    }
+
+    // ── /saved slash command ──────────────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === "saved") {
+      await interaction.deferReply({ ephemeral: true });
+
+      const profile = getUserProfile(interaction.user.id);
+      if (!profile) {
+        await interaction.editReply({ content: "You don't have a profile yet. Please sign up first." });
+        return;
+      }
+
+      const response = buildMuSavedResponse(profile, 0);
       await interaction.editReply(response);
       return;
     }
@@ -360,6 +472,48 @@ client.on("interactionCreate", async (interaction) => {
 
       const updatedButtons = buildDmButtons(hash, jobUrl, newStatus);
       await interaction.editReply({ components: updatedButtons });
+      return;
+    }
+
+    // ── mu_saved_apply / mu_saved_remove (from /saved list) ───────────────
+    if (action === "mu_saved_apply" || action === "mu_saved_remove") {
+      await interaction.deferUpdate();
+
+      const profile = getUserProfile(interaction.user.id);
+      if (!profile) {
+        await interaction.followUp({ content: "Profile not found.", ephemeral: true });
+        return;
+      }
+
+      const hash   = payload;
+      const jobKey = findJobKeyByHash(hash, profile.id);
+      if (!jobKey) {
+        await interaction.followUp({ content: "Job not found.", ephemeral: true });
+        return;
+      }
+
+      const newStatus = action === "mu_saved_apply" ? "applied" : "skipped";
+      updateJobStatus(profile.id, jobKey, newStatus);
+
+      // Refresh the /saved list
+      const response = buildMuSavedResponse(profile, 0);
+      await interaction.editReply(response);
+      return;
+    }
+
+    // ── mu_saved_page (pagination for /saved) ─────────────────────────────
+    if (action === "mu_saved_page") {
+      await interaction.deferUpdate();
+
+      const profile = getUserProfile(interaction.user.id);
+      if (!profile) {
+        await interaction.followUp({ content: "Profile not found.", ephemeral: true });
+        return;
+      }
+
+      const offset = parseInt(payload, 10) || 0;
+      const response = buildMuSavedResponse(profile, offset);
+      await interaction.editReply(response);
       return;
     }
 
@@ -605,9 +759,9 @@ client.once("ready", async () => {
   try {
     const rest = new REST().setToken(token);
     await rest.put(Routes.applicationCommands(client.user.id), {
-      body: [searchCommand.toJSON()],
+      body: [searchCommand.toJSON(), savedCommand.toJSON()],
     });
-    console.log("[multi-user] Slash command /search registered globally.");
+    console.log("[multi-user] Slash commands /search and /saved registered globally.");
   } catch (err) {
     console.error(`[multi-user] Failed to register slash commands: ${err.message}`);
   }
