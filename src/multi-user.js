@@ -851,7 +851,24 @@ async function runDigestCycle() {
             const job = db.prepare("SELECT * FROM seen_jobs WHERE key = ?").get(row.job_key);
             if (!job) continue;
 
-            const result = await sendJobDm(client, user.discord_id, job, user.first_name);
+            // Try to extract experience info from cached description
+            let experienceYears = null;
+            try {
+              const dirId = jobDirId({ sourceKey: job.source_key, id: job.id });
+              const data = await loadJobData(dirId);
+              if (data?.description) {
+                const warnings = checkJobDescription(data.description);
+                const expWarn = warnings.find((w) => w.severity === "soft");
+                if (expWarn) {
+                  const m = expWarn.text.match(/^(\d+)\+/);
+                  if (m) experienceYears = parseInt(m[1], 10);
+                }
+              }
+            } catch {
+              // No cached description — skip experience info
+            }
+
+            const result = await sendJobDm(client, user.discord_id, job, user.first_name, { timezone: tz, experienceYears });
             if (result) {
               db.prepare(
                 "UPDATE dm_log SET status = 'sent' WHERE user_id = ? AND job_key = ? AND status = 'queued'"
