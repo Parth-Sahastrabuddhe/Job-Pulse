@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import StatusBadge from "@/components/StatusBadge";
 
-const ALL_STATUSES = ["applied", "interviewing", "offer", "rejected"];
+const BASE_STATUSES = ["applied", "interviewing", "offer", "rejected"];
+const ALL_STATUSES_WITH_SKIP = ["applied", "skipped", "interviewing", "offer", "rejected"];
 
 function formatDate(dateStr) {
   if (!dateStr) return "\u2014";
@@ -27,6 +28,7 @@ export default function DashboardPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
+  const [hideSkipped, setHideSkipped] = useState(false);
   const debounceRef = useRef(null);
 
   const fetchApplications = useCallback(async (filter, pg, query) => {
@@ -44,6 +46,7 @@ export default function DashboardPage() {
       setApplications(data.applications || []);
       setTotalPages(data.totalPages || 1);
       setTotal(data.total || 0);
+      if (data.hideSkipped !== undefined) setHideSkipped(data.hideSkipped);
     } catch { setError("Network error. Please try again."); }
     finally { setLoading(false); }
   }, [router]);
@@ -115,7 +118,7 @@ export default function DashboardPage() {
           />
           <select id="statusFilter" value={statusFilter} onChange={handleFilterChange} className={selectClass}>
             <option value="">All Statuses</option>
-            {ALL_STATUSES.map((s) => (
+            {(hideSkipped ? BASE_STATUSES : ALL_STATUSES_WITH_SKIP).map((s) => (
               <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
             ))}
           </select>
@@ -182,7 +185,7 @@ export default function DashboardPage() {
                           disabled={updatingKey === app.job_key}
                           className="bg-surface border border-line rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-pulse disabled:opacity-50"
                         >
-                          {ALL_STATUSES.map((s) => (
+                          {(hideSkipped ? BASE_STATUSES : ALL_STATUSES_WITH_SKIP).map((s) => (
                             <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
                           ))}
                         </select>

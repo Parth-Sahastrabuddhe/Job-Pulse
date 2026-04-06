@@ -16,7 +16,8 @@ export async function GET(request) {
 
   try {
     const { applications, total } = getUserApplications(session.discordId, { status, query, limit, offset });
-    return Response.json({ applications, total, page, totalPages: Math.ceil(total / limit) });
+    const isAdmin = session.discordId === "1038422401874145372";
+    return Response.json({ applications, total, page, totalPages: Math.ceil(total / limit), hideSkipped: isAdmin });
   } catch (err) {
     console.error("Applications fetch error:", err);
     return Response.json({ error: "Failed to fetch applications" }, { status: 500 });
