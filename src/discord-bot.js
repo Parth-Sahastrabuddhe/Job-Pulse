@@ -117,6 +117,8 @@ export async function startDiscordBot(config) {
         await handleSkip(interaction, hash);
       } else if (action === "save") {
         await handleSave(interaction, hash);
+      } else if (action === "saved_apply" || action === "saved_remove") {
+        await handleSavedAction(interaction, hash, action);
       } else if (action === "saved_page") {
         await handleSavedPage(interaction, hash);
       } else if (action === "confirmapply") {
@@ -510,12 +512,24 @@ async function handleSkip(interaction, hash) {
 
 }
 
-const SAVED_PAGE_SIZE = 5;
+const SAVED_PAGE_SIZE = 4;
+
+function savedJobHash(jobKey) {
+  return crypto.createHash("sha1").update(jobKey).digest("hex").slice(0, 16);
+}
 
 function buildSavedResponse(offset = 0) {
   const db = getDb();
 
   const total = db.prepare("SELECT COUNT(*) AS cnt FROM job_posts WHERE status = 'saved'").get().cnt;
+
+  if (total === 0) {
+    const embed = new EmbedBuilder()
+      .setTitle("\uD83D\uDCCC Saved Jobs")
+      .setDescription("No saved jobs. Click **Save** on a job notification to bookmark it for later.")
+      .setColor(0x5865F2);
+    return { embeds: [embed], components: [] };
+  }
 
   const rows = db.prepare(`
     SELECT jp.job_key, sj.title, sj.location, sj.url, sj.source_label, sj.last_seen_at
@@ -526,20 +540,12 @@ function buildSavedResponse(offset = 0) {
     LIMIT ? OFFSET ?
   `).all(SAVED_PAGE_SIZE, offset);
 
-  if (total === 0) {
-    const embed = new EmbedBuilder()
-      .setTitle("\uD83D\uDCCC Saved Jobs")
-      .setDescription("No saved jobs. Click **Save** on a job notification to bookmark it for later.")
-      .setColor(0x5865F2);
-    return { embeds: [embed], components: [] };
-  }
-
   // Group by company
   const byCompany = new Map();
-  rows.forEach((row, i) => {
+  rows.forEach((row) => {
     const company = row.source_label ?? "Unknown";
     if (!byCompany.has(company)) byCompany.set(company, []);
-    byCompany.get(company).push({ ...row, index: offset + i });
+    byCompany.get(company).push(row);
   });
 
   const lines = [];
@@ -564,7 +570,24 @@ function buildSavedResponse(offset = 0) {
 
   const components = [];
 
-  if (total > SAVED_PAGE_SIZE) {
+  // Per-job action buttons (Applied / Remove)
+  for (const row of rows) {
+    const hash = savedJobHash(row.job_key);
+    const actionRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`saved_apply:${hash}`)
+        .setLabel(`Applied \u2014 ${(row.title ?? "Job").slice(0, 40)}`)
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`saved_remove:${hash}`)
+        .setLabel(`Remove \u2014 ${(row.title ?? "Job").slice(0, 40)}`)
+        .setStyle(ButtonStyle.Danger)
+    );
+    components.push(actionRow);
+  }
+
+  // Pagination buttons — Discord max 5 action rows
+  if (total > SAVED_PAGE_SIZE && components.length < 5) {
     const hasPrev = offset > 0;
     const hasNext = offset + SAVED_PAGE_SIZE < total;
 
@@ -588,6 +611,28 @@ function buildSavedResponse(offset = 0) {
 
 async function handleSavedCommand(interaction) {
   await interaction.deferReply({ ephemeral: true });
+  const response = buildSavedResponse(0);
+  await interaction.editReply(response);
+}
+
+async function handleSavedAction(interaction, hash, action) {
+  await interaction.deferUpdate();
+
+  // Find job_key by matching hash against all saved job_posts
+  const db = getDb();
+  const savedRows = db.prepare("SELECT job_key FROM job_posts WHERE status = 'saved'").all();
+  const jobKey = savedRows.find((r) => savedJobHash(r.job_key) === hash)?.job_key;
+
+  if (!jobKey) {
+    await interaction.followUp({ content: "Job not found.", ephemeral: true });
+    return;
+  }
+
+  const newStatus = action === "saved_apply" ? "applied" : "skipped";
+  updateJobPostStatus(jobKey, newStatus);
+  bridgeToTracker(jobKey, newStatus);
+
+  // Refresh the /saved list
   const response = buildSavedResponse(0);
   await interaction.editReply(response);
 }
