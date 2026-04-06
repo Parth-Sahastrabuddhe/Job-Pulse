@@ -120,7 +120,6 @@ async function main() {
       insertUserJob.run(user.id, key, dbStatus, appliedAt, appliedAt, now);
       inserted++;
     }
-  });
 
     // Remove bot entries that duplicate a sheet entry (same company + title)
     const dupes = db.prepare(`
