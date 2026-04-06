@@ -128,7 +128,6 @@ export async function sendJobDm(client, discordId, job, firstName) {
     const buttons = buildDmButtons(hash, jobUrl, "pending");
 
     const message = await user.send({
-      content: `Hey ${firstName}, a new job match for you!`,
       embeds: [embed],
       components: buttons,
     });
