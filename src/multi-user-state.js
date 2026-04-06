@@ -226,7 +226,8 @@ export function getSavedJobs(userId, { limit = 5, offset = 0 } = {}) {
  * @returns {object[]}
  */
 export function getExpiringReminders() {
-  const cutoff = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString();
+  const sixDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   return getDb()
     .prepare(
       `SELECT usj.user_id, usj.job_key, usj.saved_at,
@@ -237,9 +238,10 @@ export function getExpiringReminders() {
        LEFT JOIN user_profiles up ON up.id = usj.user_id
        WHERE usj.status = 'saved'
          AND usj.saved_at <= ?
+         AND usj.saved_at > ?
          AND usj.save_reminder_sent = 0`
     )
-    .all(cutoff);
+    .all(sixDaysAgo, sevenDaysAgo);
 }
 
 /**
