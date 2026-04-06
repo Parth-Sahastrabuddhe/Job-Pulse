@@ -97,6 +97,8 @@ export async function startDiscordBot(config) {
         await handleAddCompany(interaction);
       } else if (interaction.commandName === "queue") {
         await handleShowQueue(interaction);
+      } else if (interaction.commandName === "saved") {
+        await handleSavedCommand(interaction);
       }
       return;
     }
@@ -115,6 +117,8 @@ export async function startDiscordBot(config) {
         await handleSkip(interaction, hash);
       } else if (action === "save") {
         await handleSave(interaction, hash);
+      } else if (action === "saved_page") {
+        await handleSavedPage(interaction, hash);
       } else if (action === "confirmapply") {
         await handleConfirmApply(interaction, hash);
       } else if (action === "cancelapply") {
@@ -154,7 +158,10 @@ export async function startDiscordBot(config) {
         ),
       new SlashCommandBuilder()
         .setName("queue")
-        .setDescription("Show pending companies in the integration queue")
+        .setDescription("Show pending companies in the integration queue"),
+      new SlashCommandBuilder()
+        .setName("saved")
+        .setDescription("Show your saved jobs"),
     ].map((c) => c.toJSON());
 
     const channel = await client.channels.fetch(channelId);
@@ -501,6 +508,95 @@ async function handleSkip(interaction, hash) {
     await interaction.message.edit({ components: updatedRows });
   }
 
+}
+
+const SAVED_PAGE_SIZE = 5;
+
+function buildSavedResponse(offset = 0) {
+  const db = getDb();
+
+  const total = db.prepare("SELECT COUNT(*) AS cnt FROM job_posts WHERE status = 'saved'").get().cnt;
+
+  const rows = db.prepare(`
+    SELECT jp.job_key, sj.title, sj.location, sj.url, sj.source_label, sj.last_seen_at
+    FROM job_posts jp
+    LEFT JOIN seen_jobs sj ON sj.key = jp.job_key
+    WHERE jp.status = 'saved'
+    ORDER BY sj.last_seen_at ASC
+    LIMIT ? OFFSET ?
+  `).all(SAVED_PAGE_SIZE, offset);
+
+  if (total === 0) {
+    const embed = new EmbedBuilder()
+      .setTitle("\uD83D\uDCCC Saved Jobs")
+      .setDescription("No saved jobs. Click **Save** on a job notification to bookmark it for later.")
+      .setColor(0x5865F2);
+    return { embeds: [embed], components: [] };
+  }
+
+  // Group by company
+  const byCompany = new Map();
+  rows.forEach((row, i) => {
+    const company = row.source_label ?? "Unknown";
+    if (!byCompany.has(company)) byCompany.set(company, []);
+    byCompany.get(company).push({ ...row, index: offset + i });
+  });
+
+  const lines = [];
+  for (const [company, jobs] of byCompany) {
+    lines.push(`**${company}**`);
+    for (const job of jobs) {
+      const title = job.url ? `[${job.title}](${job.url})` : job.title;
+      const loc = job.location ? ` \u2014 ${job.location}` : "";
+      lines.push(`\u2022 ${title}${loc}`);
+    }
+    lines.push("");
+  }
+
+  const totalPages = Math.ceil(total / SAVED_PAGE_SIZE) || 1;
+  const currentPage = Math.floor(offset / SAVED_PAGE_SIZE) + 1;
+
+  const embed = new EmbedBuilder()
+    .setTitle(`\uD83D\uDCCC Saved Jobs (${total})`)
+    .setDescription(lines.join("\n").trim())
+    .setFooter({ text: `Page ${currentPage} of ${totalPages}` })
+    .setColor(0x5865F2);
+
+  const components = [];
+
+  if (total > SAVED_PAGE_SIZE) {
+    const hasPrev = offset > 0;
+    const hasNext = offset + SAVED_PAGE_SIZE < total;
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`saved_page:${Math.max(0, offset - SAVED_PAGE_SIZE)}`)
+        .setLabel("\u25C0 Prev")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasPrev),
+      new ButtonBuilder()
+        .setCustomId(`saved_page:${offset + SAVED_PAGE_SIZE}`)
+        .setLabel("Next \u25B6")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasNext)
+    );
+    components.push(row);
+  }
+
+  return { embeds: [embed], components };
+}
+
+async function handleSavedCommand(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  const response = buildSavedResponse(0);
+  await interaction.editReply(response);
+}
+
+async function handleSavedPage(interaction, offsetStr) {
+  await interaction.deferUpdate();
+  const offset = parseInt(offsetStr, 10) || 0;
+  const response = buildSavedResponse(offset);
+  await interaction.editReply(response);
 }
 
 async function handleSave(interaction, hash) {
