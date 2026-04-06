@@ -39,6 +39,8 @@ import {
 } from "./multi-user-state.js";
 import { filterJobsForUser } from "./user-filter.js";
 import { jobIsFresh } from "./sources/shared.js";
+import { checkJobDescription } from "./jd-filter.js";
+import { fetchJobDescription, jobDirId, loadJobData } from "./job-description.js";
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
 import { sendJobDm, sendDigestDm, jobButtonHash, buildDmButtons } from "./mu-delivery.js";
 
@@ -593,6 +595,30 @@ async function checkSavedJobExpiry() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// JD helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Try to load a cached job description from disk. If not found, fetch it.
+ * Returns the description text or null.
+ */
+async function getJobDescription(job) {
+  const dirId = jobDirId(job);
+  try {
+    const data = await loadJobData(dirId);
+    if (data?.description) return data.description;
+  } catch {
+    // Not on disk yet — fall through to fetch
+  }
+  try {
+    return await fetchJobDescription(job);
+  } catch (err) {
+    console.error(`[multi-user] Failed to fetch JD for ${dirId}: ${err.message}`);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Polling loop (every 10 seconds)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -668,17 +694,58 @@ async function runPollCycle() {
 
       if (matchedJobs.length === 0) continue;
 
+      const userTz = user.quiet_hours_tz || "America/New_York";
+      const needsJdFilter = Boolean(user.requires_sponsorship);
+
       for (const job of matchedJobs) {
+        // JD-based filtering for sponsorship users
+        let experienceYears = null;
+        if (needsJdFilter) {
+          const description = await getJobDescription(job);
+          const warnings = checkJobDescription(description);
+          const hasHard = warnings.some((w) => w.severity === "hard");
+          if (hasHard) {
+            // Silently skip — no sponsorship or clearance required
+            markJobNotified(user.id, job.key);
+            logDm(user.id, job.key, "filtered_jd");
+            continue;
+          }
+          const expWarn = warnings.find((w) => w.severity === "soft");
+          if (expWarn) {
+            const m = expWarn.text.match(/^(\d+)\+/);
+            if (m) experienceYears = parseInt(m[1], 10);
+          }
+        } else {
+          // Non-sponsorship users: still extract experience info if description is cached
+          try {
+            const dirId = jobDirId(job);
+            const data = await loadJobData(dirId);
+            if (data?.description) {
+              const warnings = checkJobDescription(data.description);
+              const expWarn = warnings.find((w) => w.severity === "soft");
+              if (expWarn) {
+                const m = expWarn.text.match(/^(\d+)\+/);
+                if (m) experienceYears = parseInt(m[1], 10);
+              }
+            }
+          } catch {
+            // No cached description — that's fine, skip experience info
+          }
+        }
+
         const action = getDeliveryAction(user, new Date());
+        const dmOptions = { timezone: userTz, experienceYears };
 
         if (action === "send") {
-          const result = await sendJobDm(client, user.discord_id, job, user.first_name);
+          const result = await sendJobDm(client, user.discord_id, job, user.first_name, dmOptions);
           markJobNotified(user.id, job.key);
           logDm(user.id, job.key, result ? "sent" : "failed");
           if (!result) {
             console.error(`[multi-user] DM to ${user.discord_id} (user ${user.id}) returned null for ${job.title}`);
           }
         } else {
+          // Store experience info on the job for digest delivery later
+          if (experienceYears) job._experienceYears = experienceYears;
           markJobNotified(user.id, job.key);
           logDm(user.id, job.key, "queued");
         }
@@ -752,7 +819,8 @@ async function runDigestCycle() {
             .prepare(`SELECT * FROM seen_jobs WHERE key IN (${placeholders})`)
             .all(...jobKeys);
 
-          await sendDigestDm(client, user.discord_id, queuedJobs, user.first_name);
+          const userTz = user.quiet_hours_tz || "America/New_York";
+          await sendDigestDm(client, user.discord_id, queuedJobs, user.first_name, { timezone: userTz });
 
           // Mark all queued DMs as sent
           db.prepare(
