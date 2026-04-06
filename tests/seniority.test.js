@@ -10,26 +10,37 @@ describe("detectSeniority", () => {
 
     // Entry
     ["Software Engineer, New Grad", "entry"],
-    ["SDE I", "entry"],
     ["Junior Software Engineer", "entry"],
     ["Entry Level Data Engineer", "entry"],
-    ["Associate Software Engineer", "entry"],
-    ["Software Engineer 1", "entry"],
+    ["Early Career Software Engineer", "entry"],
+
+    // Entry+Mid
+    ["SDE I", "entry_mid"],
+    ["Software Engineer 1", "entry_mid"],
+    ["Software Engineer I", "entry_mid"],
+    ["Software Development Engineer I", "entry_mid"],
 
     // Mid (default)
     ["Software Engineer II", "mid"],
     ["Software Engineer", "mid"],
     ["Data Engineer", "mid"],
     ["Software Engineer 2", "mid"],
-    ["Product Manager", "mid"],
+    ["Software Engineer III", "mid"],
+    ["Software Engineer 3", "mid"],
     ["Backend Developer", "mid"],
+    ["Associate Software Engineer", "mid"],
 
     // Senior
     ["Senior Software Engineer", "senior"],
     ["Sr. Data Engineer", "senior"],
-    ["Software Engineer III", "senior"],
     ["Lead Backend Engineer", "senior"],
-    ["Software Engineer 3", "senior"],
+    ["Product Manager", "senior"],
+    ["Engineering Manager", "senior"],
+
+    // Director
+    ["Director of Engineering", "director"],
+    ["Chief Technology Officer", "director"],
+    ["Managing Director", "director"],
 
     // Staff
     ["Staff Software Engineer", "staff"],
@@ -40,7 +51,7 @@ describe("detectSeniority", () => {
     // Banking titles
     ["Vice President, Software Engineer", "senior"],
     ["SVP, Technology", "staff"],
-    ["Associate, Technology", "entry"],
+    ["Associate, Technology", "mid"],
   ];
 
   for (const [title, expected] of cases) {
