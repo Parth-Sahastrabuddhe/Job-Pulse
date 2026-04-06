@@ -72,7 +72,7 @@ export function getUserApplications(discordId, { status, query, limit = 50, offs
   const total = d.prepare(`SELECT COUNT(*) as cnt FROM user_seen_jobs usj JOIN seen_jobs sj ON usj.job_key = sj.key ${where}`).get(...params).cnt;
   const applications = d.prepare(`SELECT usj.*, sj.title, sj.source_label, sj.source_key, sj.location, sj.url, sj.posted_at
     FROM user_seen_jobs usj JOIN seen_jobs sj ON usj.job_key = sj.key ${where}
-    ORDER BY usj.notified_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    ORDER BY COALESCE(usj.applied_at, usj.notified_at) DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
   return { applications, total };
 }
 

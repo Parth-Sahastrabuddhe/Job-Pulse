@@ -122,6 +122,23 @@ async function main() {
     }
   });
 
+    // Remove bot entries that duplicate a sheet entry (same company + title)
+    const dupes = db.prepare(`
+      DELETE FROM user_seen_jobs WHERE rowid IN (
+        SELECT usj.rowid FROM user_seen_jobs usj
+        JOIN seen_jobs sj ON sj.key = usj.job_key
+        WHERE usj.user_id = ? AND usj.job_key NOT LIKE 'sheet:%'
+        AND EXISTS (
+          SELECT 1 FROM user_seen_jobs usj2
+          JOIN seen_jobs sj2 ON sj2.key = usj2.job_key
+          WHERE usj2.user_id = usj.user_id AND usj2.job_key LIKE 'sheet:%'
+          AND sj2.source_label = sj.source_label AND sj2.title = sj.title
+        )
+      )
+    `).run(user.id).changes;
+    if (dupes) console.log(`Removed ${dupes} duplicate bot entries`);
+  });
+
   tx();
   console.log(`Done. Inserted: ${inserted}, Skipped: ${skipped}`);
   db.close();
