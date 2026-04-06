@@ -64,8 +64,8 @@ export function getUserApplications(discordId, { status, query, limit = 50, offs
   if (!user) return { applications: [], total: 0 };
   const isAdmin = discordId === "1038422401874145372";
   let where = isAdmin
-    ? "WHERE usj.user_id = ? AND usj.status NOT IN ('notified', 'skipped')"
-    : "WHERE usj.user_id = ? AND usj.status != 'notified'";
+    ? "WHERE usj.user_id = ? AND usj.status NOT IN ('notified', 'skipped', 'saved')"
+    : "WHERE usj.user_id = ? AND usj.status NOT IN ('notified', 'saved')";
   const params = [user.id];
   if (status) { where += " AND usj.status = ?"; params.push(status); }
   if (query) { where += " AND (sj.title LIKE ? OR sj.source_label LIKE ?)"; params.push(`%${query}%`, `%${query}%`); }
@@ -84,6 +84,41 @@ export function updateApplicationStatus(discordId, jobKey, status) {
   const appliedClause = status === "applied" ? ", applied_at = ?" : "";
   const params = status === "applied" ? [status, now, now, user.id, jobKey] : [status, now, user.id, jobKey];
   d.prepare(`UPDATE user_seen_jobs SET status = ?, updated_at = ?${appliedClause} WHERE user_id = ? AND job_key = ?`).run(...params);
+}
+
+export function getApplicationsByMonth(discordId, monthStr) {
+  const d = getDb();
+  const user = getUserProfile(discordId);
+  if (!user) return {};
+
+  // Parse "2026-04" into date range
+  const [year, month] = monthStr.split("-").map(Number);
+  const startDate = new Date(Date.UTC(year, month - 1, 1)).toISOString();
+  const endDate = new Date(Date.UTC(year, month, 1)).toISOString();
+
+  const rows = d.prepare(`
+    SELECT usj.job_key, usj.applied_at, sj.title, sj.source_label
+    FROM user_seen_jobs usj
+    JOIN seen_jobs sj ON usj.job_key = sj.key
+    WHERE usj.user_id = ?
+      AND usj.status IN ('applied', 'interviewing', 'offer', 'rejected')
+      AND usj.applied_at IS NOT NULL
+      AND usj.applied_at >= ? AND usj.applied_at < ?
+    ORDER BY usj.applied_at ASC
+  `).all(user.id, startDate, endDate);
+
+  // Group by date (YYYY-MM-DD)
+  const days = {};
+  for (const row of rows) {
+    const dateKey = row.applied_at.slice(0, 10);
+    if (!days[dateKey]) days[dateKey] = [];
+    days[dateKey].push({
+      title: row.title,
+      source_label: row.source_label,
+      job_key: row.job_key,
+    });
+  }
+  return days;
 }
 
 // --- OTP ---
