@@ -1,7 +1,7 @@
 import { getSession } from "@/lib/session";
 import { updateApplicationStatus } from "@/lib/db";
 
-const ALLOWED_STATUSES = ["notified", "applied", "skipped", "interviewing", "offer", "rejected"];
+const ALLOWED_STATUSES = ["notified", "saved", "applied", "skipped", "interviewing", "offer", "rejected"];
 
 export async function PUT(request, { params }) {
   const session = await getSession();

@@ -1,5 +1,6 @@
 const STATUS_STYLES = {
   notified: "bg-[rgba(124,127,147,0.12)] text-muted",
+  saved: "bg-[rgba(59,130,246,0.15)] text-info",
   applied: "bg-[rgba(34,197,94,0.15)] text-pulse",
   skipped: "bg-[rgba(78,81,102,0.15)] text-faint",
   interviewing: "bg-[rgba(59,130,246,0.15)] text-info",
@@ -9,6 +10,7 @@ const STATUS_STYLES = {
 
 const STATUS_LABELS = {
   notified: "Notified",
+  saved: "Saved",
   applied: "Applied",
   skipped: "Skipped",
   interviewing: "Interviewing",
