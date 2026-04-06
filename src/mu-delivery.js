@@ -34,18 +34,19 @@ export function jobButtonHash(jobKey) {
 }
 
 /**
- * Build the ActionRow with View Job / Applied / Skip buttons.
+ * Build the ActionRow with View Job / Applied / Save / Skip buttons.
  *
- * Prefixes use `mu_applied:` and `mu_skip:` to avoid collision with the
- * personal bot's `applied:` / `skip:` custom IDs.
+ * Prefixes use `mu_applied:`, `mu_save:`, and `mu_skip:` to avoid collision
+ * with the personal bot's `applied:` / `skip:` custom IDs.
  *
  * @param {string} hash    16-char button hash (from jobButtonHash)
  * @param {string} jobUrl  direct URL to the job posting
- * @param {"pending"|"applied"|"skipped"} status
+ * @param {"pending"|"notified"|"saved"|"applied"|"skipped"} status
  * @returns {ActionRowBuilder[]}
  */
 export function buildDmButtons(hash, jobUrl, status) {
   const isApplied = status === "applied";
+  const isSaved = status === "saved";
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -56,6 +57,11 @@ export function buildDmButtons(hash, jobUrl, status) {
       .setCustomId(`mu_applied:${hash}`)
       .setLabel(isApplied ? "\u2705 Applied" : "Applied")
       .setStyle(ButtonStyle.Success)
+      .setDisabled(isApplied),
+    new ButtonBuilder()
+      .setCustomId(`mu_save:${hash}`)
+      .setLabel(isSaved ? "\uD83D\uDCCC Saved" : "Save")
+      .setStyle(isSaved ? ButtonStyle.Primary : ButtonStyle.Secondary)
       .setDisabled(isApplied),
     new ButtonBuilder()
       .setCustomId(`mu_skip:${hash}`)

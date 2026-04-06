@@ -142,6 +142,7 @@ const searchCommand = new SlashCommandBuilder()
       .setName("status")
       .setDescription("Filter by status")
       .addChoices(
+        { name: "Saved",        value: "saved"        },
         { name: "Applied",      value: "applied"      },
         { name: "Skipped",      value: "skipped"      },
         { name: "Interviewing", value: "interviewing" },
@@ -158,12 +159,13 @@ const searchCommand = new SlashCommandBuilder()
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STATUS_EMOJI = {
-  notified:     "🔔",
-  applied:      "✅",
-  skipped:      "❌",
-  interviewing: "💬",
-  offer:        "🎉",
-  rejected:     "🚫",
+  notified:     "\uD83D\uDD14",
+  saved:        "\uD83D\uDCCC",
+  applied:      "\u2705",
+  skipped:      "\u274C",
+  interviewing: "\uD83D\uDCAC",
+  offer:        "\uD83C\uDF89",
+  rejected:     "\uD83D\uDEAB",
 };
 
 const PAGE_SIZE = 5;
@@ -324,6 +326,37 @@ client.on("interactionCreate", async (interaction) => {
       const db  = getDb();
       const row = db.prepare("SELECT url FROM seen_jobs WHERE key = ?").get(jobKey);
       const jobUrl = row?.url ?? "";
+
+      const updatedButtons = buildDmButtons(hash, jobUrl, newStatus);
+      await interaction.editReply({ components: updatedButtons });
+      return;
+    }
+
+    // ── mu_save ───────────────────────────────────────────────────────────
+    if (action === "mu_save") {
+      await interaction.deferUpdate();
+
+      const profile = getUserProfile(interaction.user.id);
+      if (!profile) {
+        await interaction.followUp({ content: "Profile not found.", ephemeral: true });
+        return;
+      }
+
+      const hash   = payload;
+      const jobKey = findJobKeyByHash(hash, profile.id);
+      if (!jobKey) {
+        await interaction.followUp({ content: "Job not found.", ephemeral: true });
+        return;
+      }
+
+      // Toggle: if already saved, unsave back to notified
+      const db  = getDb();
+      const row = db.prepare("SELECT status FROM user_seen_jobs WHERE user_id = ? AND job_key = ?").get(profile.id, jobKey);
+      const newStatus = row?.status === "saved" ? "notified" : "saved";
+      updateJobStatus(profile.id, jobKey, newStatus);
+
+      const urlRow = db.prepare("SELECT url FROM seen_jobs WHERE key = ?").get(jobKey);
+      const jobUrl = urlRow?.url ?? "";
 
       const updatedButtons = buildDmButtons(hash, jobUrl, newStatus);
       await interaction.editReply({ components: updatedButtons });
