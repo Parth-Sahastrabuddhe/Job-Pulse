@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import StatusBadge from "@/components/StatusBadge";
 
-const ALL_STATUSES = ["notified", "applied", "skipped", "interviewing", "offer", "rejected"];
+const ALL_STATUSES = ["applied", "skipped", "interviewing", "offer", "rejected"];
 
 function formatDate(dateStr) {
   if (!dateStr) return "\u2014";
@@ -19,19 +19,23 @@ export default function DashboardPage() {
   const router = useRouter();
   const [applications, setApplications] = useState([]);
   const [statusFilter, setStatusFilter] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatingKey, setUpdatingKey] = useState(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
+  const debounceRef = useRef(null);
 
-  const fetchApplications = useCallback(async (filter, pg) => {
+  const fetchApplications = useCallback(async (filter, pg, query) => {
     setLoading(true);
     setError("");
     try {
       const params = new URLSearchParams();
       if (filter) params.set("status", filter);
+      if (query) params.set("query", query);
       params.set("page", String(pg));
       const res = await fetch(`/api/applications?${params}`);
       if (res.status === 401) { router.push("/auth"); return; }
@@ -45,12 +49,22 @@ export default function DashboardPage() {
   }, [router]);
 
   useEffect(() => {
-    fetchApplications(statusFilter, page);
-  }, [statusFilter, page, fetchApplications]);
+    fetchApplications(statusFilter, page, searchQuery);
+  }, [statusFilter, page, searchQuery, fetchApplications]);
 
   function handleFilterChange(e) {
     setStatusFilter(e.target.value);
     setPage(1);
+  }
+
+  function handleSearchInput(e) {
+    const val = e.target.value;
+    setSearchInput(val);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setSearchQuery(val);
+      setPage(1);
+    }, 300);
   }
 
   async function handleStatusChange(jobKey, newStatus) {
@@ -66,9 +80,14 @@ export default function DashboardPage() {
         alert(data.error || "Failed to update status.");
         return;
       }
-      setApplications((prev) =>
-        prev.map((app) => app.job_key === jobKey ? { ...app, status: newStatus } : app)
-      );
+      if (statusFilter && newStatus !== statusFilter) {
+        setApplications((prev) => prev.filter((app) => app.job_key !== jobKey));
+        setTotal((t) => t - 1);
+      } else {
+        setApplications((prev) =>
+          prev.map((app) => app.job_key === jobKey ? { ...app, status: newStatus } : app)
+        );
+      }
     } catch { alert("Network error. Please try again."); }
     finally { setUpdatingKey(null); }
   }
@@ -86,12 +105,21 @@ export default function DashboardPage() {
             {totalPages > 1 ? ` \u2014 page ${page} of ${totalPages}` : ""}
           </p>
         </div>
-        <select id="statusFilter" value={statusFilter} onChange={handleFilterChange} className={selectClass}>
-          <option value="">All Statuses</option>
-          {ALL_STATUSES.map((s) => (
-            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-3">
+          <input
+            type="text"
+            value={searchInput}
+            onChange={handleSearchInput}
+            placeholder="Search jobs..."
+            className="bg-surface border border-line rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-faint focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)] w-48"
+          />
+          <select id="statusFilter" value={statusFilter} onChange={handleFilterChange} className={selectClass}>
+            <option value="">All Statuses</option>
+            {ALL_STATUSES.map((s) => (
+              <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {error && (
