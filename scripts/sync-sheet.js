@@ -110,7 +110,9 @@ async function main() {
       if (!company || !role) { skipped++; continue; }
 
       const cleanUrl = url.startsWith("http") ? url : "";
-      const appliedAt = parseDate(dateApplied);
+      const baseDate = parseDate(dateApplied);
+      // Add row index as seconds offset so within-day ordering is preserved (higher row = later)
+      const appliedAt = new Date(new Date(baseDate).getTime() + i * 1000).toISOString();
       const dbStatus = mapStatus(status);
       const slug = slugify(company);
       const key = `sheet:${slug}:row-${i}`;
