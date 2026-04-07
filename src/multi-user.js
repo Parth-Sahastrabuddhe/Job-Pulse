@@ -38,7 +38,6 @@ import {
   logError,
 } from "./multi-user-state.js";
 import { filterJobsForUser } from "./user-filter.js";
-import { jobIsFresh } from "./sources/shared.js";
 import { checkJobDescription } from "./jd-filter.js";
 import { fetchJobDescription, jobDirId, loadJobData } from "./job-description.js";
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
@@ -668,27 +667,16 @@ async function runPollCycle() {
     };
   });
 
-  // Filter stale jobs — mirrors the check in index.js processBatchResults()
-  const freshJobs = jobs.filter((job) =>
-    jobIsFresh(job, nowIso, {
-      maxPostAgeMinutes: Number(process.env.MAX_POST_AGE_MINUTES) || 180,
-      maxDateOnlyAgeDays: Number(process.env.MAX_DATE_ONLY_AGE_DAYS) || 1,
-      timezone: "America/New_York",
-    })
-  );
-
-  if (freshJobs.length < jobs.length) {
-    console.log(`[multi-user] Suppressed ${jobs.length - freshJobs.length} stale jobs.`);
-  }
-
-  if (freshJobs.length === 0) return;
+  // No freshness re-check — the personal bot already filters stale jobs
+  // before upserting to seen_jobs. The first_seen_at > cutoff query limits
+  // us to recently-discovered jobs.
 
   const users = getActiveUsers();
 
   for (const user of users) {
     try {
       const seenKeys    = getUserSeenJobKeys(user.id);
-      const matchedJobs = filterJobsForUser(freshJobs, user, seenKeys, {
+      const matchedJobs = filterJobsForUser(jobs, user, seenKeys, {
         sponsorLookup: isH1bSponsor,
       });
 
