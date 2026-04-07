@@ -12,10 +12,7 @@ function parseGreenhouseJob(raw, companyConfig) {
   let postedPrecision = "";
   const postedText = "";
 
-  if (raw.first_published) {
-    postedAt = new Date(raw.first_published).toISOString();
-    postedPrecision = "exact";
-  } else if (raw.updated_at) {
+  if (raw.updated_at) {
     postedAt = new Date(raw.updated_at).toISOString();
     postedPrecision = "exact";
   }
