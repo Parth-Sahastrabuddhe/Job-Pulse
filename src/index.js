@@ -35,6 +35,7 @@ import {
   getNewJobs, upsertJobs, pruneState, hasSeenJobs, expireSavedJobPosts
 } from "./state.js";
 import { checkJobDescription } from "./jd-filter.js";
+import { isJobUrlLive } from "./liveness.js";
 
 function timestamp() {
   return new Date().toISOString();
@@ -151,6 +152,13 @@ async function fetchDescriptionsAndFilter(jobs) {
   for (let i = 0; i < jobs.length; i += CONCURRENCY) {
     const batch = jobs.slice(i, i + CONCURRENCY);
     const batchResults = await Promise.all(batch.map(async (job) => {
+      // Check if the job URL is still live before processing
+      const live = await isJobUrlLive(job.url);
+      if (!live) {
+        log(`[liveness] Dead link: ${job.sourceLabel} — ${job.title} (${job.url})`);
+        return null;
+      }
+
       const dirId = jobDirId(job);
       let description = null;
       try {
@@ -162,7 +170,7 @@ async function fetchDescriptionsAndFilter(jobs) {
       const warnings = checkJobDescription(description);
       return { job, warnings };
     }));
-    results.push(...batchResults);
+    results.push(...batchResults.filter(Boolean));
   }
   return results;
 }
