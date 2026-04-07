@@ -129,7 +129,7 @@ export function detectSeniority(title) {
   if (/\bMD\b/.test(t)) return "director";
 
   // Staff / Principal (check before senior — most specific)
-  if (/\b((?<!technical\s)staff|princip(?:al|le)|distinguished|fellow)\b/i.test(t)) return "staff";
+  if (/\b((?<!technical\s)staff|princ\w*|distinguished|fellow)\b/i.test(t)) return "staff";
   if (/\barchitect\b/i.test(t) && !/\bsolution/i.test(t)) return "staff";
   if (/\bSVP\b/.test(t)) return "staff";
 
