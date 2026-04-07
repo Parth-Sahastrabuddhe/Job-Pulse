@@ -302,76 +302,56 @@ async function handleFitCheck(interaction, hash) {
 }
 
 async function handleApplied(interaction, hash) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferUpdate();
 
-  const details = extractJobInfoFromMessage(interaction.message);
+  const jobUrl = getJobUrlFromMessage(interaction.message);
+  if (!jobUrl) return;
 
-  if (!details.company || !details.role || !details.url) {
-    await interaction.editReply("Could not extract job details from this message.");
-    return;
-  }
-
-  // Encode original message ID in button so handleConfirmApply can find the job notification
-  const originalMessageId = interaction.message.id;
-
-  // Confirmation step — ask before updating tracker
+  // Swap buttons on the original message to show confirmation inline
   const confirmRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`confirmapply:${hash}:${originalMessageId}`)
+      .setLabel("View Job")
+      .setStyle(ButtonStyle.Link)
+      .setURL(jobUrl),
+    new ButtonBuilder()
+      .setCustomId(`confirmapply:${hash}:${interaction.message.id}`)
       .setLabel("Yes, mark as applied")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
-      .setCustomId(`cancelapply:${hash}:${originalMessageId}`)
+      .setCustomId(`cancelapply:${hash}:${interaction.message.id}`)
       .setLabel("Cancel")
       .setStyle(ButtonStyle.Secondary)
   );
 
-  await interaction.editReply({
-    content: `Mark **${details.company} — ${details.role}** as applied?\nThis will update your tracker.`,
-    components: [confirmRow]
-  });
+  await interaction.message.edit({ components: [confirmRow] });
 }
 
 async function handleConfirmApply(interaction, hash) {
   await interaction.deferUpdate();
 
-  // Find the original job message using the ID encoded in the button
-  const parts = interaction.customId.split(":");
-  const originalMessageId = parts[2];
-  const channel = interaction.channel;
-  let parentMessage;
-  try {
-    parentMessage = await channel.messages.fetch(originalMessageId);
-  } catch {}
-  if (!parentMessage) {
-    await interaction.followUp({ content: "Could not find the original job message.", ephemeral: true });
-    return;
-  }
-
-  const details = extractJobInfoFromMessage(parentMessage);
+  // The confirmation buttons are on the original job message itself
+  const message = interaction.message;
+  const details = extractJobInfoFromMessage(message);
   if (!details.company || !details.role || !details.url) {
     await interaction.followUp({ content: "Could not extract job details.", ephemeral: true });
     return;
   }
 
   try {
-    // Update tracker immediately — don't wait for the Google Sheet script
-    const applyKey = findJobKeyByMessageId(parentMessage.id);
+    const applyKey = findJobKeyByMessageId(message.id);
     if (applyKey) {
       updateJobPostStatus(applyKey, "applied");
       bridgeToTracker(applyKey, "applied");
     }
 
-    await interaction.editReply({ content: `✅ **Marked as applied**\n${details.company} — ${details.role}`, components: [] });
-
-    // Update buttons on the original message
-    const jobUrl = getJobUrlFromMessage(parentMessage);
+    // Restore buttons with applied state
+    const jobUrl = getJobUrlFromMessage(message);
     if (jobUrl) {
       const updatedRows = buildButtonRows(hash, jobUrl, "applied");
-      await parentMessage.edit({ components: updatedRows });
+      await message.edit({ components: updatedRows });
     }
 
-    // Update Google Sheet in background — don't block the tracker
+    // Update Google Sheet in background
     try {
       const scriptPath = path.resolve(__dirname, "..", "scripts", "add_application.py");
       const isLinux = process.platform === "linux";
@@ -388,10 +368,13 @@ async function handleConfirmApply(interaction, hash) {
 
 async function handleCancelApply(interaction, hash) {
   await interaction.deferUpdate();
-  await interaction.editReply({
-    content: "~~" + interaction.message.content + "~~\nCancelled.",
-    components: []
-  });
+
+  // Restore original buttons on the job message
+  const jobUrl = getJobUrlFromMessage(interaction.message);
+  if (jobUrl) {
+    const restoredRows = buildButtonRows(hash, jobUrl, "pending");
+    await interaction.message.edit({ components: restoredRows });
+  }
 }
 
 async function handleAddCompany(interaction) {
