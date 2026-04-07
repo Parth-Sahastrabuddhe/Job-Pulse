@@ -38,6 +38,7 @@ import {
   logError,
 } from "./multi-user-state.js";
 import { filterJobsForUser } from "./user-filter.js";
+import { isJobUrlLive } from "./liveness.js";
 import { jobIsFresh } from "./sources/shared.js";
 import { checkJobDescription } from "./jd-filter.js";
 import { fetchJobDescription, jobDirId, loadJobData } from "./job-description.js";
@@ -700,6 +701,15 @@ async function runPollCycle() {
       const needsJdFilter = Boolean(user.requires_sponsorship);
 
       for (const job of matchedJobs) {
+        // Check if job URL is still live — skip ghost listings
+        const live = await isJobUrlLive(job.url);
+        if (!live) {
+          console.log(`[multi-user] Dead link skipped: ${job.sourceLabel} — ${job.title}`);
+          markJobNotified(user.id, job.key);
+          logDm(user.id, job.key, "filtered_dead_link");
+          continue;
+        }
+
         // JD-based filtering for sponsorship users
         let experienceYears = null;
         if (needsJdFilter) {
