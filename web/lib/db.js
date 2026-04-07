@@ -97,7 +97,7 @@ export function getApplicationsByMonth(discordId, monthStr) {
   const endDate = new Date(Date.UTC(year, month, 1)).toISOString();
 
   const rows = d.prepare(`
-    SELECT usj.job_key, usj.applied_at, sj.title, sj.source_label
+    SELECT usj.job_key, usj.applied_at, sj.title, sj.source_label, sj.url
     FROM user_seen_jobs usj
     JOIN seen_jobs sj ON usj.job_key = sj.key
     WHERE usj.user_id = ?
@@ -115,6 +115,7 @@ export function getApplicationsByMonth(discordId, monthStr) {
     days[dateKey].push({
       title: row.title,
       source_label: row.source_label,
+      url: row.url,
       job_key: row.job_key,
     });
   }

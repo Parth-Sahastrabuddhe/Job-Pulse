@@ -173,7 +173,11 @@ export default function CalendarSidebar() {
                   <div key={i} className="text-xs text-muted">
                     <span className="text-foreground">{job.source_label}</span>
                     {" \u2014 "}
-                    {job.title}
+                    {job.url ? (
+                      <a href={job.url} target="_blank" rel="noopener noreferrer" className="text-pulse hover:text-pulse-hover hover:underline">{job.title}</a>
+                    ) : (
+                      job.title
+                    )}
                   </div>
                 ))}
               </div>
