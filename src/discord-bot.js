@@ -579,7 +579,7 @@ async function handleSavedAction(interaction, hash, action) {
 
   const newStatus = action === "saved_apply" ? "applied" : "pending";
   updateJobPostStatus(jobKey, newStatus);
-  bridgeToTracker(jobKey, newStatus);
+  bridgeToTracker(jobKey, newStatus === "pending" ? "notified" : newStatus);
 
   // Update buttons on the original notification message
   const post = getJobPost(jobKey);
@@ -616,7 +616,7 @@ async function handleSave(interaction, hash) {
       const post = getJobPost(saveKey);
       const newStatus = post?.status === "saved" ? "pending" : "saved";
       updateJobPostStatus(saveKey, newStatus);
-      bridgeToTracker(saveKey, newStatus);
+      bridgeToTracker(saveKey, newStatus === "pending" ? "notified" : newStatus);
 
       const jobUrl = getJobUrlFromMessage(interaction.message);
       if (jobUrl) {

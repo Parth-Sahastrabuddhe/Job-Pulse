@@ -8,13 +8,13 @@ import CalendarSidebar from "@/components/CalendarSidebar";
 const BASE_STATUSES = ["applied", "interviewing", "offer", "rejected"];
 const ALL_STATUSES_WITH_SKIP = ["applied", "skipped", "interviewing", "offer", "rejected"];
 
-function formatDate(dateStr) {
+function formatDate(dateStr, tz = "America/New_York") {
   if (!dateStr) return "\u2014";
   return new Date(dateStr).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-    timeZone: "UTC",
+    timeZone: tz,
   });
 }
 
@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [hideSkipped, setHideSkipped] = useState(false);
+  const [timezone, setTimezone] = useState("America/New_York");
   const debounceRef = useRef(null);
 
   const fetchApplications = useCallback(async (filter, pg, query) => {
@@ -49,6 +50,7 @@ export default function DashboardPage() {
       setTotalPages(data.totalPages || 1);
       setTotal(data.total || 0);
       if (data.hideSkipped !== undefined) setHideSkipped(data.hideSkipped);
+      if (data.timezone) setTimezone(data.timezone);
     } catch { setError("Network error. Please try again."); }
     finally { setLoading(false); }
   }, [router]);
@@ -182,7 +184,7 @@ export default function DashboardPage() {
                       </td>
                       <td className="px-4 py-3"><StatusBadge status={app.status} /></td>
                       <td className="px-4 py-3 text-muted whitespace-nowrap">
-                        {formatDate(app.applied_at || app.notified_at)}
+                        {formatDate(app.applied_at || app.notified_at, timezone)}
                       </td>
                       <td className="px-4 py-3">
                         <select

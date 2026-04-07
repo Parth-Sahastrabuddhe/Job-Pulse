@@ -1,5 +1,5 @@
 import { getSession } from "@/lib/session";
-import { getUserApplications } from "@/lib/db";
+import { getUserApplications, getUserProfile } from "@/lib/db";
 
 export async function GET(request) {
   const session = await getSession();
@@ -17,7 +17,9 @@ export async function GET(request) {
   try {
     const { applications, total } = getUserApplications(session.discordId, { status, query, limit, offset });
     const isAdmin = session.discordId === "1038422401874145372";
-    return Response.json({ applications, total, page, totalPages: Math.ceil(total / limit), hideSkipped: isAdmin });
+    const profile = getUserProfile(session.discordId);
+    const timezone = profile?.quiet_hours_tz || "America/New_York";
+    return Response.json({ applications, total, page, totalPages: Math.ceil(total / limit), hideSkipped: isAdmin, timezone });
   } catch (err) {
     console.error("Applications fetch error:", err);
     return Response.json({ error: "Failed to fetch applications" }, { status: 500 });
