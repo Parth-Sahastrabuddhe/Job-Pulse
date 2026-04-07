@@ -27,9 +27,9 @@ export const COMPANIES = [
   // === Slow lane — Playwright/HTML scrapers ===
   { key: "uber", label: "Uber", ats: "solo", lane: "slow", urlPattern: /uber\.com\/.*?careers\/list\/(\d+)/i },
   { key: "confluent", label: "Confluent", ats: "solo", lane: "slow", urlPattern: /careers\.confluent\.io\/jobs\/job\/([a-f0-9-]+)/i },
-  { key: "linkedin", label: "LinkedIn", ats: "solo", lane: "slow", urlPattern: /linkedin\.com\/jobs\/view\/(?:[^/]*-)?(\d+)/i },
-  { key: "intuit", label: "Intuit", ats: "solo", lane: "slow", urlPattern: /jobs\.intuit\.com\/job\/[^/]+\/[^/]+\/27595\/(\d+)/i },
-  { key: "bloomberg", label: "Bloomberg", ats: "solo", lane: "slow", urlPattern: /bloomberg\.avature\.net\/careers\/JobDetail\/[^/]+\/(\d+)/i },
+  { key: "linkedin", label: "LinkedIn", ats: "solo", lane: "normal", urlPattern: /linkedin\.com\/jobs\/view\/(?:[^/]*-)?(\d+)/i },
+  { key: "intuit", label: "Intuit", ats: "solo", lane: "normal", urlPattern: /jobs\.intuit\.com\/job\/[^/]+\/[^/]+\/27595\/(\d+)/i },
+  { key: "bloomberg", label: "Bloomberg", ats: "solo", lane: "normal", urlPattern: /bloomberg\.avature\.net\/careers\/JobDetail\/[^/]+\/(\d+)/i },
 
   // === Workday companies ===
   { key: "nvidia", label: "Nvidia", ats: "workday", lane: "normal", urlPattern: /nvidia\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
