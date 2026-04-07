@@ -38,6 +38,7 @@ import {
   logError,
 } from "./multi-user-state.js";
 import { filterJobsForUser } from "./user-filter.js";
+import { jobIsFresh } from "./sources/shared.js";
 import { checkJobDescription } from "./jd-filter.js";
 import { fetchJobDescription, jobDirId, loadJobData } from "./job-description.js";
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
@@ -667,16 +668,29 @@ async function runPollCycle() {
     };
   });
 
-  // No freshness re-check — the personal bot already filters stale jobs
-  // before upserting to seen_jobs. The first_seen_at > cutoff query limits
-  // us to recently-discovered jobs.
+  // Relaxed freshness filter — reject truly stale postings (weeks/months old)
+  // that Playwright scrapers can discover for the first time, but don't reject
+  // jobs posted a few hours ago (which the personal bot already accepted).
+  const freshJobs = jobs.filter((job) =>
+    jobIsFresh(job, nowIso, {
+      maxPostAgeMinutes: 24 * 60,    // 24 hours for timestamp-precision
+      maxDateOnlyAgeDays: 3,          // 3 days for date-only precision
+      timezone: "America/New_York",
+    })
+  );
+
+  if (freshJobs.length < jobs.length) {
+    console.log(`[multi-user] Filtered ${jobs.length - freshJobs.length} stale postings (posted >24h / >3d ago).`);
+  }
+
+  if (freshJobs.length === 0) return;
 
   const users = getActiveUsers();
 
   for (const user of users) {
     try {
       const seenKeys    = getUserSeenJobKeys(user.id);
-      const matchedJobs = filterJobsForUser(jobs, user, seenKeys, {
+      const matchedJobs = filterJobsForUser(freshJobs, user, seenKeys, {
         sponsorLookup: isH1bSponsor,
       });
 
