@@ -32,7 +32,7 @@ import { collectFordJobs } from "./sources/ford.js";
 import { collectCitiJobs } from "./sources/citi.js";
 import {
   initDb, closeDb, migrateFromJson,
-  getNewJobs, upsertJobs, pruneState, hasSeenJobs, expireSavedJobPosts
+  getNewJobs, getUnnotifiedJobs, upsertJobs, pruneState, hasSeenJobs, expireSavedJobPosts
 } from "./state.js";
 import { checkJobDescription } from "./jd-filter.js";
 import { isJobUrlLive } from "./liveness.js";
@@ -190,7 +190,7 @@ async function processBatchResults(config, flags, jobs, batchLabel) {
     return;
   }
 
-  const newJobs = getNewJobs(filtered);
+  const newJobs = getUnnotifiedJobs(filtered);
   const freshJobs = newJobs.filter((job) => jobIsFresh(job, now, config));
   const staleJobs = newJobs.filter((job) => !jobIsFresh(job, now, config));
 

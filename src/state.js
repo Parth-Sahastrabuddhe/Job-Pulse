@@ -286,6 +286,15 @@ export function getNewJobs(jobs) {
   });
 }
 
+// Per-process dedup: check job_posts (personal bot's notification ledger)
+// instead of seen_jobs, so two processes sharing the DB don't race.
+const _stmtByKeyPost = () => db.prepare("SELECT 1 FROM job_posts WHERE job_key = ?");
+
+export function getUnnotifiedJobs(jobs) {
+  const byKey = _stmtByKeyPost();
+  return jobs.filter((job) => !byKey.get(job.key));
+}
+
 // SQL-indexed upsert — no full table scan
 const _stmtGetFirstSeen = () => db.prepare("SELECT first_seen_at FROM seen_jobs WHERE key = ?");
 const _stmtGetBySourceId = () => db.prepare("SELECT key, first_seen_at FROM seen_jobs WHERE source_key = ? AND id = ? AND key != ?");
