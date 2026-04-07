@@ -701,19 +701,24 @@ async function runPollCycle() {
         // JD-based filtering for sponsorship users
         let experienceYears = null;
         if (needsJdFilter) {
-          const description = await getJobDescription(job);
-          const warnings = checkJobDescription(description);
-          const hasHard = warnings.some((w) => w.severity === "hard");
-          if (hasHard) {
-            // Silently skip — no sponsorship or clearance required
-            markJobNotified(user.id, job.key);
-            logDm(user.id, job.key, "filtered_jd");
-            continue;
-          }
-          const expWarn = warnings.find((w) => w.severity === "soft");
-          if (expWarn) {
-            const m = expWarn.text.match(/^(\d+)\+/);
-            if (m) experienceYears = parseInt(m[1], 10);
+          try {
+            const description = await getJobDescription(job);
+            const warnings = checkJobDescription(description);
+            const hasHard = warnings.some((w) => w.severity === "hard");
+            if (hasHard) {
+              // Silently skip — no sponsorship or clearance required
+              markJobNotified(user.id, job.key);
+              logDm(user.id, job.key, "filtered_jd");
+              continue;
+            }
+            const expWarn = warnings.find((w) => w.severity === "soft");
+            if (expWarn) {
+              const m = expWarn.text.match(/^(\d+)\+/);
+              if (m) experienceYears = parseInt(m[1], 10);
+            }
+          } catch (err) {
+            // Description fetch failed — deliver anyway rather than silently dropping
+            console.error(`[multi-user] JD fetch failed for ${job.key}: ${err.message}`);
           }
         } else {
           // Non-sponsorship users: still extract experience info if description is cached
