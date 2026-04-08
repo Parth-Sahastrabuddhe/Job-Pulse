@@ -37,6 +37,7 @@ import {
   expireSavedJobs,
   logDm,
   isH1bSponsor,
+  upsertH1bSponsor,
   getUserProfile,
   searchUserJobs,
   logError,
@@ -44,6 +45,7 @@ import {
 import { filterJobsForUser } from "./user-filter.js";
 import { isJobUrlLive } from "./liveness.js";
 import { jobIsFresh } from "./sources/shared.js";
+import { COMPANIES } from "./companies.js";
 import { checkJobDescription } from "./jd-filter.js";
 import { fetchJobDescription, jobDirId, loadJobData } from "./job-description.js";
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
@@ -722,6 +724,33 @@ async function getJobDescription(job) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Auto-seed h1b_sponsors from COMPANIES registry
+// ─────────────────────────────────────────────────────────────────────────────
+
+function seedMissingH1bSponsors() {
+  const db = getDb();
+  const existing = new Set(
+    db.prepare("SELECT company_key FROM h1b_sponsors").all().map((r) => r.company_key)
+  );
+  let added = 0;
+  for (const company of COMPANIES) {
+    if (!existing.has(company.key)) {
+      upsertH1bSponsor({
+        companyKey: company.key,
+        companyName: company.label,
+        sponsorsH1b: true,
+        lcaCount: 0,
+        avgSalary: 0,
+      });
+      added++;
+    }
+  }
+  if (added > 0) {
+    console.log(`[multi-user] Auto-seeded ${added} missing companies into h1b_sponsors.`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Polling loop (every 10 seconds)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1035,6 +1064,9 @@ client.once("ready", async () => {
   } catch (err) {
     console.error(`[multi-user] Failed to register slash commands: ${err.message}`);
   }
+
+  // Auto-seed h1b_sponsors for any companies missing from the table
+  seedMissingH1bSponsors();
 
   // Restore lastPollAt from DB so restarts don't lose pending jobs
   const saved = getDb().prepare("SELECT value FROM meta WHERE key = 'mu_lastPollAt'").get();
