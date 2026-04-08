@@ -129,6 +129,8 @@ function findJobKeyByHash(hash, userId) {
     .prepare("SELECT job_key FROM user_seen_jobs WHERE user_id = ?")
     .all(userId);
 
+  console.log(`[btn-debug] findJobKeyByHash: hash=${hash} userId=${userId} user_seen_jobs_count=${rows.length}`);
+
   for (const row of rows) {
     if (jobButtonHash(row.job_key) === hash) {
       return row.job_key;
@@ -137,14 +139,20 @@ function findJobKeyByHash(hash, userId) {
 
   // Fallback: scan seen_jobs for a matching hash and auto-heal user_seen_jobs
   const allKeys = db.prepare("SELECT key FROM seen_jobs").all();
+  console.log(`[btn-debug] Fallback: scanning ${allKeys.length} seen_jobs keys`);
   for (const row of allKeys) {
     if (jobButtonHash(row.key) === hash) {
-      console.log(`[multi-user] Auto-healing missing user_seen_jobs entry: user=${userId} key=${row.key}`);
-      markJobNotified(userId, row.key);
+      console.log(`[btn-debug] Auto-healing: user=${userId} key=${row.key}`);
+      try {
+        markJobNotified(userId, row.key);
+      } catch (err) {
+        console.error(`[btn-debug] markJobNotified failed: ${err.message}`);
+      }
       return row.key;
     }
   }
 
+  console.log(`[btn-debug] No match found in seen_jobs either`);
   return null;
 }
 
@@ -450,7 +458,7 @@ client.on("interactionCreate", async (interaction) => {
       const hash   = payload;
       const jobKey = findJobKeyByHash(hash, profile.id);
       if (!jobKey) {
-        await interaction.followUp({ content: "Job not found.", ephemeral: true });
+        await interaction.followUp({ content: "Job not found (MU).", ephemeral: true });
         return;
       }
 
@@ -480,7 +488,7 @@ client.on("interactionCreate", async (interaction) => {
       const hash   = payload;
       const jobKey = findJobKeyByHash(hash, profile.id);
       if (!jobKey) {
-        await interaction.followUp({ content: "Job not found.", ephemeral: true });
+        await interaction.followUp({ content: "Job not found (MU).", ephemeral: true });
         return;
       }
 
@@ -511,7 +519,7 @@ client.on("interactionCreate", async (interaction) => {
       const hash   = payload;
       const jobKey = findJobKeyByHash(hash, profile.id);
       if (!jobKey) {
-        await interaction.followUp({ content: "Job not found.", ephemeral: true });
+        await interaction.followUp({ content: "Job not found (MU).", ephemeral: true });
         return;
       }
 
