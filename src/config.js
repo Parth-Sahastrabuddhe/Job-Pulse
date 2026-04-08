@@ -616,6 +616,11 @@ export function getConfig() {
       sourceLabel: "Sanofi",
       companySlug: "Sanofi"
     },
+    mcdonalds: {
+      sourceKey: "mcdonalds",
+      sourceLabel: "McDonald's",
+      companySlug: "McDonaldsCorporation"
+    },
     // --- New Greenhouse companies (batch 2) ---
     duolingo: {
       sourceKey: "duolingo",
@@ -748,6 +753,25 @@ export function getConfig() {
       sourceLabel: "Dell",
       apiUrl: "https://dell.wd1.myworkdayjobs.com/wday/cxs/dell/External/jobs",
       baseUrl: "https://dell.wd1.myworkdayjobs.com/External"
+    },
+    // --- Solo companies (custom APIs) ---
+    mercedesbenz: {
+      sourceKey: "mercedesbenz",
+      sourceLabel: "Mercedes-Benz",
+      apiUrl: "https://mercedes-benz-beesite-production-gjb-intranet.app.beesite.de/search",
+      jobUrlBase: "https://jobs.mercedes-benz.com/?ac=jobad&id="
+    },
+    hexaware: {
+      sourceKey: "hexaware",
+      sourceLabel: "Hexaware",
+      apiUrl: "https://fa-etqo-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions",
+      jobUrlBase: "https://fa-etqo-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/"
+    },
+    dynatrace: {
+      sourceKey: "dynatrace",
+      sourceLabel: "Dynatrace",
+      apiUrl: "https://www.dynatrace.com/api/coveo/search/",
+      jobUrlBase: "https://www.dynatrace.com/careers/jobs/"
     }
   };
 }

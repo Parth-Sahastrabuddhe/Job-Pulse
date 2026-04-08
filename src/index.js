@@ -30,6 +30,9 @@ import { collectUberJobs } from "./sources/uber.js";
 import { collectConfluentJobs } from "./sources/confluent.js";
 import { collectFordJobs } from "./sources/ford.js";
 import { collectCitiJobs } from "./sources/citi.js";
+import { collectMercedesBenzJobs } from "./sources/mercedesbenz.js";
+import { collectHexawareJobs } from "./sources/hexaware.js";
+import { collectDynatraceJobs } from "./sources/dynatrace.js";
 import {
   initDb, closeDb, migrateFromJson,
   getNewJobs, getUnnotifiedJobs, upsertJobs, pruneState, hasSeenJobs, expireSavedJobPosts
@@ -75,6 +78,9 @@ function buildRegistry(config) {
   solo("jpmorgan", collectJPMorganJobs, "normal");
   solo("ford", collectFordJobs, "normal");
   solo("citi", collectCitiJobs, "normal");
+  solo("mercedesbenz", collectMercedesBenzJobs, "normal");
+  solo("hexaware", collectHexawareJobs, "normal");
+  solo("dynatrace", collectDynatraceJobs, "normal");
 
   // Slow lane — Playwright/HTML scrapers (run sequentially, less frequently)
   solo("uber", collectUberJobs, "slow");

@@ -23,6 +23,9 @@ export const COMPANIES = [
   { key: "jpmorgan", label: "JPMorgan Chase", ats: "solo", lane: "normal", banking: true, urlPattern: /jpmc\.fa\.oraclecloud\.com\/.*?job\/(\d+)/i },
   { key: "ford", label: "Ford Motor", ats: "solo", lane: "normal", urlPattern: /efds\.fa\.em5\.oraclecloud\.com\/.*?job\/(\d+)/i },
   { key: "citi", label: "Citi", ats: "solo", lane: "normal", banking: true, urlPattern: /jobs\.citi\.com\/job\/[^/]+\/[^/]+\/287\/(\d+)/i },
+  { key: "mercedesbenz", label: "Mercedes-Benz", ats: "solo", lane: "normal", urlPattern: /jobs\.mercedes-benz\.com\/.*?(?:\?ac=jobad&id=|---)(\d+)/i },
+  { key: "hexaware", label: "Hexaware", ats: "solo", lane: "normal", urlPattern: /fa-etqo-saasfaprod1\.fa\.ocs\.oraclecloud\.com\/.*?job\/(\d+)/i },
+  { key: "dynatrace", label: "Dynatrace", ats: "solo", lane: "normal", urlPattern: /dynatrace\.com\/careers\/jobs\/(\d+)/i },
 
   // === Slow lane — Playwright/HTML scrapers ===
   { key: "uber", label: "Uber", ats: "solo", lane: "slow", urlPattern: /uber\.com\/.*?careers\/list\/(\d+)/i },
@@ -148,6 +151,7 @@ export const COMPANIES = [
   { key: "aristanetworks", label: "Arista Networks", ats: "smartrecruiters", lane: "normal", board: "AristaNetworks", urlPattern: /jobs\.smartrecruiters\.com\/AristaNetworks\/([a-f0-9-]+)/i },
   { key: "bosch", label: "Bosch", ats: "smartrecruiters", lane: "normal", board: "BoschGroup", urlPattern: /jobs\.smartrecruiters\.com\/BoschGroup\/([a-f0-9-]+)/i },
   { key: "sanofi", label: "Sanofi", ats: "smartrecruiters", lane: "normal", board: "Sanofi", urlPattern: /jobs\.smartrecruiters\.com\/Sanofi\/([a-f0-9-]+)/i },
+  { key: "mcdonalds", label: "McDonald's", ats: "smartrecruiters", lane: "normal", board: "McDonaldsCorporation", urlPattern: /jobs\.smartrecruiters\.com\/McDonaldsCorporation\/([a-f0-9-]+)/i },
 ];
 
 // === Derived lists (auto-generated from COMPANIES) ===
