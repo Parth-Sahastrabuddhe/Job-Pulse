@@ -445,8 +445,34 @@ client.on("interactionCreate", async (interaction) => {
     // Only handle mu_ prefixed buttons
     if (!action.startsWith("mu_")) return;
 
-    // ── mu_applied / mu_skip ──────────────────────────────────────────────
-    if (action === "mu_applied" || action === "mu_skip") {
+    // ── mu_applied (show confirmation) ─────────────────────────────────────
+    if (action === "mu_applied") {
+      await interaction.deferUpdate();
+
+      // Extract job URL from the message embed
+      const jobUrl = interaction.message?.embeds?.[0]?.url ?? "";
+
+      const confirmRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setLabel("View Job")
+          .setStyle(ButtonStyle.Link)
+          .setURL(jobUrl || "https://example.com"),
+        new ButtonBuilder()
+          .setCustomId(`mu_confirmapply:${payload}`)
+          .setLabel("Yes, mark as applied")
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`mu_cancelapply:${payload}`)
+          .setLabel("Cancel")
+          .setStyle(ButtonStyle.Secondary)
+      );
+
+      await interaction.message.edit({ components: [confirmRow] });
+      return;
+    }
+
+    // ── mu_confirmapply (actually mark applied) ─────────────────────────────
+    if (action === "mu_confirmapply") {
       await interaction.deferUpdate();
 
       const profile = getUserProfile(interaction.user.id);
@@ -462,15 +488,51 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      const newStatus = action === "mu_applied" ? "applied" : "skipped";
-      updateJobStatus(profile.id, jobKey, newStatus);
+      updateJobStatus(profile.id, jobKey, "applied");
 
-      // Fetch job URL to rebuild buttons
       const db  = getDb();
       const row = db.prepare("SELECT url FROM seen_jobs WHERE key = ?").get(jobKey);
       const jobUrl = row?.url ?? "";
 
-      const updatedButtons = buildDmButtons(hash, jobUrl, newStatus);
+      const updatedButtons = buildDmButtons(hash, jobUrl, "applied");
+      await interaction.editReply({ components: updatedButtons });
+      return;
+    }
+
+    // ── mu_cancelapply (restore original buttons) ───────────────────────────
+    if (action === "mu_cancelapply") {
+      await interaction.deferUpdate();
+
+      const jobUrl = interaction.message?.embeds?.[0]?.url ?? "";
+      const restoredButtons = buildDmButtons(payload, jobUrl, "pending");
+      await interaction.message.edit({ components: restoredButtons });
+      return;
+    }
+
+    // ── mu_skip ──────────────────────────────────────────────────────────────
+    if (action === "mu_skip") {
+      await interaction.deferUpdate();
+
+      const profile = getUserProfile(interaction.user.id);
+      if (!profile) {
+        await interaction.followUp({ content: "Profile not found.", ephemeral: true });
+        return;
+      }
+
+      const hash   = payload;
+      const jobKey = findJobKeyByHash(hash, profile.id);
+      if (!jobKey) {
+        await interaction.followUp({ content: "Job not found (MU).", ephemeral: true });
+        return;
+      }
+
+      updateJobStatus(profile.id, jobKey, "skipped");
+
+      const db  = getDb();
+      const row = db.prepare("SELECT url FROM seen_jobs WHERE key = ?").get(jobKey);
+      const jobUrl = row?.url ?? "";
+
+      const updatedButtons = buildDmButtons(hash, jobUrl, "skipped");
       await interaction.editReply({ components: updatedButtons });
       return;
     }
