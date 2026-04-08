@@ -771,15 +771,17 @@ async function runPollCycle() {
     };
   });
 
-  // Relaxed freshness filter — reject truly stale postings (weeks/months old)
-  // that Playwright scrapers can discover for the first time, but don't reject
-  // jobs posted a few hours ago (which the personal bot already accepted).
+  // Freshness filter using first_seen_at (when the personal bot discovered it)
+  // as the reference — gives the exact same result the personal bot got, so no
+  // valid jobs are rejected. Stale jobs (posted months ago but newly scraped)
+  // are still blocked because posted_at vs first_seen_at age will be huge.
+  const freshConfig = {
+    maxPostAgeMinutes: Number(process.env.MAX_POST_AGE_MINUTES) || 180,
+    maxDateOnlyAgeDays: Number(process.env.MAX_DATE_ONLY_AGE_DAYS) || 1,
+    timezone: "America/New_York",
+  };
   const freshJobs = jobs.filter((job) =>
-    jobIsFresh(job, nowIso, {
-      maxPostAgeMinutes: 24 * 60,    // 24 hours for timestamp-precision
-      maxDateOnlyAgeDays: 3,          // 3 days for date-only precision
-      timezone: "America/New_York",
-    })
+    jobIsFresh(job, job.first_seen_at, freshConfig)
   );
 
   if (freshJobs.length < jobs.length) {
