@@ -115,6 +115,10 @@ let lastExpiryCheck = 0;
  * Given a 16-char button hash and a userId, scan user_seen_jobs to find the
  * matching job key by recomputing SHA1 on each key.
  *
+ * If the primary lookup fails (e.g. markJobNotified was lost due to a write
+ * error), fall back to matching the hash against seen_jobs and auto-heal
+ * the missing user_seen_jobs row so subsequent button clicks work.
+ *
  * @param {string} hash
  * @param {number} userId
  * @returns {string|null}
@@ -130,6 +134,17 @@ function findJobKeyByHash(hash, userId) {
       return row.job_key;
     }
   }
+
+  // Fallback: scan seen_jobs for a matching hash and auto-heal user_seen_jobs
+  const allKeys = db.prepare("SELECT key FROM seen_jobs").all();
+  for (const row of allKeys) {
+    if (jobButtonHash(row.key) === hash) {
+      console.log(`[multi-user] Auto-healing missing user_seen_jobs entry: user=${userId} key=${row.key}`);
+      markJobNotified(userId, row.key);
+      return row.key;
+    }
+  }
+
   return null;
 }
 
