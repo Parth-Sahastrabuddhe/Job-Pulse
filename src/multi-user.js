@@ -744,10 +744,13 @@ async function runPollCycle() {
   lastPollAt    = nowIso;
   db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(nowIso);
 
-  // Fetch newly seen jobs since last poll
+  // Fetch newly seen jobs since last poll, plus re-posted jobs
+  // (where posted_at was updated to a recent date on an old listing)
   const rawJobs = db
-    .prepare("SELECT * FROM seen_jobs WHERE first_seen_at > ?")
-    .all(cutoff);
+    .prepare(`SELECT * FROM seen_jobs
+              WHERE first_seen_at > ?
+                 OR (posted_at > ? AND last_seen_at > ?)`)
+    .all(cutoff, cutoff, cutoff);
 
   if (rawJobs.length === 0) return;
 
@@ -771,18 +774,20 @@ async function runPollCycle() {
     };
   });
 
-  // Freshness filter using first_seen_at (when the personal bot discovered it)
-  // as the reference — gives the exact same result the personal bot got, so no
-  // valid jobs are rejected. Stale jobs (posted months ago but newly scraped)
-  // are still blocked because posted_at vs first_seen_at age will be huge.
+  // Freshness filter — use first_seen_at as reference so we get the same result
+  // the personal bot had. For re-posted jobs (posted_at > first_seen_at), use
+  // nowIso since the job is effectively new again.
   const freshConfig = {
     maxPostAgeMinutes: Number(process.env.MAX_POST_AGE_MINUTES) || 180,
     maxDateOnlyAgeDays: Number(process.env.MAX_DATE_ONLY_AGE_DAYS) || 1,
     timezone: "America/New_York",
   };
-  const freshJobs = jobs.filter((job) =>
-    jobIsFresh(job, job.first_seen_at, freshConfig)
-  );
+  const freshJobs = jobs.filter((job) => {
+    const postedMs = Date.parse(job.postedAt ?? "");
+    const firstSeenMs = Date.parse(job.first_seen_at ?? "");
+    const reposted = Number.isFinite(postedMs) && Number.isFinite(firstSeenMs) && postedMs > firstSeenMs;
+    return jobIsFresh(job, reposted ? nowIso : job.first_seen_at, freshConfig);
+  });
 
   if (freshJobs.length < jobs.length) {
     console.log(`[multi-user] Filtered ${jobs.length - freshJobs.length} stale postings (posted >24h / >3d ago).`);
