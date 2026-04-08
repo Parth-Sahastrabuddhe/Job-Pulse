@@ -184,7 +184,7 @@ export default function DashboardPage() {
                       </td>
                       <td className="px-4 py-3"><StatusBadge status={app.status} /></td>
                       <td className="px-4 py-3 text-muted whitespace-nowrap">
-                        {formatDate(app.applied_at || app.notified_at, timezone)}
+                        {formatDate(app.applied_at || app.notified_at, app.job_key?.startsWith("sheet:") ? "UTC" : timezone)}
                       </td>
                       <td className="px-4 py-3">
                         <select

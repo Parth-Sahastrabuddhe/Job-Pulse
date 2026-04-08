@@ -112,7 +112,8 @@ export function getApplicationsByMonth(discordId, monthStr) {
   const days = {};
   for (const row of rows) {
     const d2 = new Date(row.applied_at);
-    const dateKey = d2.toLocaleDateString("en-CA", { timeZone: tz }); // en-CA gives YYYY-MM-DD
+    const rowTz = row.job_key.startsWith("sheet:") ? "UTC" : tz;
+    const dateKey = d2.toLocaleDateString("en-CA", { timeZone: rowTz }); // en-CA gives YYYY-MM-DD
     if (!days[dateKey]) days[dateKey] = [];
     days[dateKey].push({
       title: row.title,
