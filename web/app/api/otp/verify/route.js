@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { getSession, createSession } from "@/lib/session";
-import { verifyOtp, createUserProfile } from "@/lib/db";
+import { verifyOtp, createUserProfile, getUserProfile, getUserProfileByEmail } from "@/lib/db";
 
 export async function POST(request) {
   const session = await getSession();
@@ -41,6 +41,18 @@ export async function POST(request) {
     return Response.json({ error: "Invalid or expired code" }, { status: 400 });
   }
 
+  // Check if this Discord account is already registered
+  const existingByDiscord = getUserProfile(session.discordId);
+  if (existingByDiscord) {
+    return Response.json({ error: "You already have an account. Please log in instead." }, { status: 409 });
+  }
+
+  // Check if this email is taken by another account
+  const existingByEmail = getUserProfileByEmail(normalizedEmail);
+  if (existingByEmail) {
+    return Response.json({ error: "This email is already associated with another account." }, { status: 409 });
+  }
+
   // Hash password
   const passwordHash = await bcrypt.hash(password, 10);
 
@@ -55,6 +67,7 @@ export async function POST(request) {
     });
   } catch (err) {
     console.error("createUserProfile error:", err);
+    return Response.json({ error: "Failed to create account. Please try again." }, { status: 500 });
   }
 
   // Update session

@@ -29,9 +29,13 @@ const UPDATABLE_PROFILE_FIELDS = new Set([
 
 /**
  * Create a new user profile.
- * @returns {number} lastInsertRowid
+ * Returns existing profile id if already registered.
+ * @returns {number} profile id
  */
 export function createUserProfile({ discordId, discordUsername, firstName, email }) {
+  const existing = getUserProfile(discordId);
+  if (existing) return existing.id;
+
   const now = new Date().toISOString();
   const result = getDb()
     .prepare(

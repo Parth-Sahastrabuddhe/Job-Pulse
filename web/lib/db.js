@@ -16,6 +16,12 @@ export function getDb() {
 
 export function createUserProfile({ discordId, discordUsername, firstName, email, passwordHash }) {
   const d = getDb();
+  const existing = getUserProfile(discordId);
+  if (existing) throw new Error("ALREADY_REGISTERED");
+
+  const existingEmail = getUserProfileByEmail(email);
+  if (existingEmail) throw new Error("EMAIL_TAKEN");
+
   const now = new Date().toISOString();
   const result = d.prepare(`
     INSERT INTO user_profiles (discord_id, discord_username, first_name, email, email_verified, password_hash, created_at, updated_at)
