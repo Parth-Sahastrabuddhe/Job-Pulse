@@ -1,7 +1,8 @@
 """Add a job application entry to the Google Sheets tracker."""
 import sys
-from datetime import date
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -21,14 +22,14 @@ def get_sheet():
     return gc.open_by_key(SHEET_ID).worksheet(TAB_NAME)
 
 
-def add_application(company, role, url):
+def add_application(company, role, url, timezone="America/New_York"):
     ws = get_sheet()
 
     # Find next empty row (check column A)
     col_a = ws.col_values(1)
     next_row = len(col_a) + 1
 
-    d = date.today()
+    d = datetime.now(ZoneInfo(timezone))
     today = f"{d.month}/{d.day}/{d.year}"
 
     # Update row: A=Company, B=Role, D=Date Applied, E=Status, G=URL
@@ -53,7 +54,8 @@ def add_application(company, role, url):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print("Usage: add_application.py <company> <role> <url>", file=sys.stderr)
+    if len(sys.argv) < 4:
+        print("Usage: add_application.py <company> <role> <url> [timezone]", file=sys.stderr)
         sys.exit(1)
-    add_application(sys.argv[1], sys.argv[2], sys.argv[3])
+    tz = sys.argv[4] if len(sys.argv) > 4 else "America/New_York"
+    add_application(sys.argv[1], sys.argv[2], sys.argv[3], tz)
