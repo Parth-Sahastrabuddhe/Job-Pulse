@@ -449,7 +449,12 @@ function killOldProcess() {
 function acquireLock() {
   try {
     fs.mkdirSync(path.dirname(LOCK_FILE), { recursive: true });
-    killOldProcess();
+    // Skip killing old process when managed by pm2 — pm2 handles restarts.
+    // The kill-old-process logic causes an infinite restart loop under pm2:
+    // new instance kills old → pm2 restarts old → old kills new → repeat.
+    if (!process.env.PM2_HOME && !process.env.pm_id) {
+      killOldProcess();
+    }
     lockFd = fs.openSync(LOCK_FILE, "wx");
     fs.writeSync(lockFd, String(process.pid));
     return true;
