@@ -18,9 +18,13 @@ import {
   ButtonStyle,
 } from "discord.js";
 import crypto from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+const execFileAsync = promisify(execFile);
 import { initDb, getDb, closeDb, cleanupExpiredOtps } from "./state.js";
 import {
   getActiveUsers,
@@ -491,11 +495,24 @@ client.on("interactionCreate", async (interaction) => {
       updateJobStatus(profile.id, jobKey, "applied");
 
       const db  = getDb();
-      const row = db.prepare("SELECT url FROM seen_jobs WHERE key = ?").get(jobKey);
+      const row = db.prepare("SELECT url, source_label, title FROM seen_jobs WHERE key = ?").get(jobKey);
       const jobUrl = row?.url ?? "";
 
       const updatedButtons = buildDmButtons(hash, jobUrl, "applied");
       await interaction.editReply({ components: updatedButtons });
+
+      // Update Google Sheet in background
+      if (row?.source_label && row?.title) {
+        try {
+          const scriptPath = path.resolve(PROJECT_ROOT, "scripts", "add_application.py");
+          const isLinux = process.platform === "linux";
+          const pythonCmd = isLinux ? path.resolve(process.env.HOME, "venv", "bin", "python") : "python";
+          const tz = profile.quiet_hours_tz || "America/New_York";
+          await execFileAsync(pythonCmd, [scriptPath, row.source_label, row.title, jobUrl, tz]);
+        } catch (sheetErr) {
+          console.error(`[mu-applied] Sheet update failed: ${sheetErr.message}`);
+        }
+      }
       return;
     }
 

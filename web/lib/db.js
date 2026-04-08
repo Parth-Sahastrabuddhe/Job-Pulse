@@ -107,10 +107,12 @@ export function getApplicationsByMonth(discordId, monthStr) {
     ORDER BY usj.applied_at ASC
   `).all(user.id, startDate, endDate);
 
-  // Group by date (YYYY-MM-DD)
+  // Group by date in user's timezone (YYYY-MM-DD)
+  const tz = user.quiet_hours_tz || "America/New_York";
   const days = {};
   for (const row of rows) {
-    const dateKey = row.applied_at.slice(0, 10);
+    const d2 = new Date(row.applied_at);
+    const dateKey = d2.toLocaleDateString("en-CA", { timeZone: tz }); // en-CA gives YYYY-MM-DD
     if (!days[dateKey]) days[dateKey] = [];
     days[dateKey].push({
       title: row.title,

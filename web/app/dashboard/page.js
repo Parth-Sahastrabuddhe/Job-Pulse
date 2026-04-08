@@ -8,14 +8,13 @@ import CalendarSidebar from "@/components/CalendarSidebar";
 const BASE_STATUSES = ["applied", "interviewing", "offer", "rejected"];
 const ALL_STATUSES_WITH_SKIP = ["applied", "skipped", "interviewing", "offer", "rejected"];
 
-function formatDate(dateStr) {
+function formatDate(dateStr, tz = "America/New_York") {
   if (!dateStr) return "\u2014";
-  // Dates from sheets sync are midnight UTC (date-only) — use UTC to avoid timezone shift
   return new Date(dateStr).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-    timeZone: "UTC",
+    timeZone: tz,
   });
 }
 
