@@ -839,11 +839,10 @@ async function runPollCycle() {
 
       for (const job of matchedJobs) {
         // Check if job URL is still live — skip ghost listings
+        // Don't mark as notified so it retries next cycle (URL may be temporarily down)
         const live = await isJobUrlLive(job.url);
         if (!live) {
-          console.log(`[multi-user] Dead link skipped: ${job.sourceLabel} — ${job.title}`);
-          markJobNotified(user.id, job.key);
-          logDm(user.id, job.key, "filtered_dead_link");
+          console.log(`[multi-user] Dead link skipped (will retry): ${job.sourceLabel} — ${job.title}`);
           continue;
         }
 

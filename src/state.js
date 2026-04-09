@@ -335,7 +335,12 @@ export function upsertJobs(jobs, seenAt) {
        @firstSeenAt, @lastSeenAt)
     ON CONFLICT(key) DO UPDATE SET
       last_seen_at = @lastSeenAt,
-      archetype = COALESCE(seen_jobs.archetype, excluded.archetype)
+      posted_at = CASE WHEN excluded.posted_at != '' THEN excluded.posted_at ELSE seen_jobs.posted_at END,
+      posted_precision = CASE WHEN excluded.posted_precision != '' THEN excluded.posted_precision ELSE seen_jobs.posted_precision END,
+      country_code = CASE WHEN excluded.country_code != '' THEN excluded.country_code ELSE seen_jobs.country_code END,
+      seniority_level = CASE WHEN excluded.seniority_level != '' THEN excluded.seniority_level ELSE seen_jobs.seniority_level END,
+      role_categories = CASE WHEN excluded.role_categories != '[]' THEN excluded.role_categories ELSE seen_jobs.role_categories END,
+      archetype = COALESCE(excluded.archetype, seen_jobs.archetype)
   `);
 
   const run = db.transaction(() => {
