@@ -895,6 +895,7 @@ async function runPollCycle() {
           logDm(user.id, job.key, result ? "sent" : "failed");
           if (!result) {
             console.error(`[multi-user] DM to ${user.discord_id} (user ${user.id}) returned null for ${job.title}`);
+            try { logError("dm-failed", `user=${user.id} discord=${user.discord_id} job=${job.title} (${job.sourceLabel})`); } catch (_) { /* DB may be busy */ }
           }
         } else {
           // Store experience info on the job for digest delivery later
