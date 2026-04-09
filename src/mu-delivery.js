@@ -151,7 +151,9 @@ export async function sendJobDm(client, discordId, job, firstName, options = {})
     const embed   = buildJobEmbed(job, options);
     const buttons = buildDmButtons(hash, jobUrl, "pending");
 
+    const company = job.source_label ?? job.sourceLabel ?? "";
     const message = await user.send({
+      content: company ? `**${company}**` : undefined,
       embeds: [embed],
       components: buttons,
     });

@@ -6,15 +6,15 @@
 
 const NO_SPONSORSHIP_PATTERNS = [
   /\bno\s+(?:visa\s+)?sponsorship\b/i,
-  /\bnot\s+(?:able\s+to\s+)?sponsor/i,
-  /\bunable\s+to\s+sponsor/i,
+  /\bnot\s+(?:able\s+to\s+)?(?:(?:provide|offer)\s+(?:(?:visa|immigration|employment)\s+)?)?sponsor/i,
+  /\bunable\s+to\s+(?:(?:provide|offer)\s+(?:(?:visa|immigration|employment)\s+)?)?sponsor/i,
   /\bwithout\s+(?:visa\s+)?sponsorship\b(?!\s+for\s+an?\s+export)/i,
   /\bdo(?:es)?\s+not\s+(?:offer\s+|provide\s+)?(?:visa\s+|employment\s+visa\s+)?sponsor/i,
   /\bdo(?:es)?\s+not\s+(?:offer\s+|provide\s+)?(?:employment\s+)?visa\s+sponsorship/i,
   /\bwill\s+not\s+(?:be\s+)?sponsor/i,
   /\bwon'?t\s+sponsor/i,
-  /\bcannot\s+sponsor/i,
-  /\bcan(?:'t| ?not)\s+sponsor/i,
+  /\bcannot\s+(?:(?:provide|offer)\s+(?:(?:visa|immigration|employment)\s+)?)?sponsor/i,
+  /\bcan(?:'t| ?not)\s+(?:(?:provide|offer)\s+(?:(?:visa|immigration|employment)\s+)?)?sponsor/i,
   /\bsponsorship\s+(?:is\s+)?not\s+(?:available|offered|provided)/i,
   /\bno\s+immigration\s+sponsorship/i,
   /\bmust\s+be\s+(?:a\s+)?(?:US|U\.S\.)?\s*citizen/i,
@@ -37,6 +37,8 @@ const NO_SPONSORSHIP_PATTERNS = [
   /\bnow\s+or\s+in\s+the\s+future\s+require\s+sponsorship/i,
   /\bmay\s+not\s+be\s+able\s+to\s+(?:employ|hire)\s+candidates\s+(?:who\s+have\s+)?(?:.*?\s+)?(?:visa|work\s+authorization)/i,
   /\bnot\s+(?:able\s+to\s+)?(?:employ|hire)\s+(?:candidates|individuals|applicants)\s+(?:.*?\s+)?(?:visa\s+categor|work\s+authorization)/i,
+  /\bnot\s+eligible\s+for\s+(?:(?:visa|employment|immigration|work)\s+)*sponsorship/i,
+  /\bwill\s+not\s+(?:be\s+)?(?:(?:provide|offer)\w*\s+)?(?:(?:visa|immigration|employment)\s+)?sponsor/i,
 ];
 
 const CLEARANCE_PATTERNS = [
@@ -66,8 +68,11 @@ export function checkJobDescription(description) {
 
   if (!description) return warnings;
 
+  // Normalize common misspellings of "sponsor" so patterns match
+  const normalized = description.replace(/\bsponser/gi, "sponsor").replace(/\bsponsership/gi, "sponsorship");
+
   for (const pattern of NO_SPONSORSHIP_PATTERNS) {
-    const match = description.match(pattern);
+    const match = normalized.match(pattern);
     if (match) {
       warnings.push({ text: `No sponsorship: "${match[0].trim()}"`, severity: "hard" });
       break;

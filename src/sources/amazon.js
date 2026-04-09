@@ -9,7 +9,7 @@ const AMAZON_BASE_URL = "https://www.amazon.jobs";
 
 // Direct API endpoint — append .json to the search URL
 const AMAZON_API_URL =
-  "https://www.amazon.jobs/en/search.json?category%5B%5D=Software+Development&normalized_country_code%5B%5D=USA&sort=recent&result_limit=20&offset=0";
+  "https://www.amazon.jobs/en/search.json?category%5B%5D=Software+Development&normalized_country_code%5B%5D=USA&sort=recent&result_limit=100&offset=0";
 
 function normalizeAmazonUrl(rawPath, fallbackId) {
   if (rawPath) {

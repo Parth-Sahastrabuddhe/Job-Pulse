@@ -65,7 +65,7 @@ export function normalizeCountryCode(value) {
 
 // --- Role category patterns (one per supported category) ---
 const ROLE_CATEGORY_PATTERNS = {
-  software_engineer: /(?:(?:software|full[\s-]?stack|systems|cloud)\s+(?:engineer|develop)|application\s+(?:software\s+)?develop|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i,
+  software_engineer: /(?:(?:software|backend|back[\s-]?end|full[\s-]?stack|systems|cloud)\s+(?:engineer|develop)|application\s+(?:software\s+)?develop|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i,
   data_engineer: /(?:data\s+(?:engineer|platform|infrastructure)|analytics\s+engineer|\bETL\b)/i,
   ml_engineer: /(?:machine\s+learning|(?:ML|AI)\s+engineer|deep\s+learning|\bNLP\b|computer\s+vision)/i,
   frontend: /(?:front[\s-]?end|UI\s+engineer|web\s+develop)/i,
@@ -165,7 +165,7 @@ export function detectSeniority(title) {
 
   // Senior
   if (/\b(senior|sr\.?)\b/i.test(t)) return "senior";
-  if (/\blead\b/i.test(t)) return "senior";
+  if (/\blead\w*\b/i.test(t)) return "senior";
   if (/\bvice\s+president\b|\bVP\b/i.test(t)) return "senior";
   if (/\bmanager\b/i.test(t)) return "senior";
 
