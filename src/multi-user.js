@@ -760,7 +760,7 @@ async function pollLoop() {
       await runPollCycle();
     } catch (err) {
       console.error(`[multi-user] Poll cycle error: ${err.message}`);
-      logError("multi-user-poll", err.message);
+      try { logError("multi-user-poll", err.message); } catch (_) { /* DB may be busy */ }
     }
     await new Promise((resolve) => setTimeout(resolve, 10_000));
   }
@@ -770,8 +770,6 @@ async function runPollCycle() {
   const db      = getDb();
   const cutoff  = lastPollAt;
   const nowIso  = new Date().toISOString();
-  lastPollAt    = nowIso;
-  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(nowIso);
 
   // Fetch newly seen jobs since last poll, plus re-posted jobs
   // (where posted_at was updated to a recent date on an old listing)
@@ -913,6 +911,12 @@ async function runPollCycle() {
       try { logError("multi-user-poll-user", `user=${user.id} ${err.message}`); } catch (_) { /* DB may be busy */ }
     }
   }
+
+  // Advance lastPollAt only AFTER the cycle completes successfully —
+  // if the cycle throws (e.g. "database is locked"), the cutoff stays put
+  // so those jobs are retried next cycle instead of being permanently skipped.
+  lastPollAt = nowIso;
+  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(nowIso);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
