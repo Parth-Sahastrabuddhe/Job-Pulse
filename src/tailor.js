@@ -3,6 +3,7 @@ import path from "node:path";
 import childProcess from "node:child_process";
 import { PROJECT_ROOT } from "./config.js";
 import { loadJobData } from "./job-description.js";
+import { getGeminiApiKey, runGemini } from "./gemini.js";
 
 const RESUME_DIR = path.join(PROJECT_ROOT, "resume");
 
@@ -41,57 +42,22 @@ This is being run in an automated pipeline. ONLY perform Step 1 (Fit Assessment)
 
 5. **Stack gap analysis**: If the JD requires Java/Go/Python as primary and candidate's primary is C#/.NET, note this as a gap but acknowledge transferability if the systems concepts align.
 
-Output ONLY the fit assessment block in the exact format specified in Step 1, then stop. Do not output anything after the closing ═══ line.
+Output ONLY the fit assessment block in the exact format specified in Step 1.
+
+6. **Structured scores**: After the closing ═══ line, output exactly one line in this format (valid JSON, no markdown):
+FIT_SCORES:{"score":82,"skills":85,"experience":75,"domain":90,"level":78}
+
+Where:
+- score = weighted total (skills*0.4 + experience*0.25 + domain*0.2 + level*0.15, rounded)
+- skills = technical skills keyword match (0-100)
+- experience = experience type match (0-100)
+- domain = domain/industry alignment (0-100)
+- level = seniority/years alignment (0-100)
+
+If sponsorship is blocked, set score to 0. Output nothing after the FIT_SCORES line.
 `;
 
-async function getGeminiApiKey() {
-  const key = process.env.GEMINI_API_KEY?.trim();
-  if (key) return key;
-
-  // Try reading from .env file directly
-  try {
-    const envContent = await fs.readFile(path.join(PROJECT_ROOT, ".env"), "utf8");
-    const match = envContent.match(/GEMINI_API_KEY=(.+)/);
-    if (match) return match[1].trim();
-  } catch {}
-
-  return null;
-}
-
-async function runGemini(prompt) {
-  const apiKey = await getGeminiApiKey();
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY not set in .env");
-  }
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 8192
-        }
-      })
-    }
-  );
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Gemini API error (${response.status}): ${error.slice(0, 300)}`);
-  }
-
-  const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error("Gemini returned empty response");
-  }
-
-  return text;
-}
+// getGeminiApiKey and runGemini are now imported from ./gemini.js
 
 // Fallback to Claude CLI if Gemini is not configured
 function runClaude(prompt) {
@@ -186,6 +152,8 @@ function parseFitCheckOutput(output) {
   const result = {
     fitAssessment: "",
     shouldApply: "UNKNOWN",
+    fitScore: null,
+    fitScores: null,
   };
 
   // Extract fit assessment block
@@ -201,6 +169,18 @@ function parseFitCheckOutput(output) {
     result.shouldApply = "STRETCH";
   } else if (/Should Apply:\s*NO/i.test(output)) {
     result.shouldApply = "NO";
+  }
+
+  // Extract structured scores
+  const scoresMatch = output.match(/FIT_SCORES:\s*(\{[^}]+\})/);
+  if (scoresMatch) {
+    try {
+      const scores = JSON.parse(scoresMatch[1]);
+      if (typeof scores.score === "number") {
+        result.fitScore = scores.score;
+        result.fitScores = scores;
+      }
+    } catch {}
   }
 
   return result;

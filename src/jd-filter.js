@@ -81,7 +81,7 @@ export function checkJobDescription(description) {
     let match;
     let found = false;
     while ((match = re.exec(description)) !== null) {
-      const prefix = description.slice(Math.max(0, match.index - 40), match.index).toLowerCase();
+      const prefix = description.slice(Math.max(0, match.index - 80), match.index).toLowerCase();
       if (/\b(no|not|don'?t|doesn'?t|without|neither)\b/.test(prefix)) {
         continue;
       }

@@ -7,7 +7,10 @@ export async function GET() {
       `${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/auth/callback`
   );
 
-  const discordAuthUrl = `https://discord.com/api/oauth2/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=identify%20email`;
+  const scopes = process.env.DISCORD_GUILD_ID
+    ? "identify%20email%20guilds.join"
+    : "identify%20email";
+  const discordAuthUrl = `https://discord.com/api/oauth2/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scopes}`;
 
   redirect(discordAuthUrl);
 }

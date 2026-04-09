@@ -1,4 +1,7 @@
-﻿const MAX_MESSAGE_LENGTH = 1800;
+﻿import { fetchWithTimeout, delay } from "../sources/shared.js";
+
+const MAX_MESSAGE_LENGTH = 1800;
+const MAX_RETRIES = 3;
 
 function formatJob(job) {
   const parts = [`[${job.sourceLabel}] ${job.title}`];
@@ -52,17 +55,25 @@ export async function sendDiscordNotification(webhookUrl, jobs, options = {}) {
       continue;
     }
 
-    const response = await fetch(webhookUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({ content })
-    });
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const response = await fetchWithTimeout(webhookUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content })
+      }, 10000);
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Discord webhook failed with status ${response.status}: ${body.slice(0, 200)}`);
+      if (response.ok) break;
+
+      const retryable = response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === MAX_RETRIES) {
+        const body = await response.text();
+        throw new Error(`Discord webhook failed with status ${response.status}: ${body.slice(0, 200)}`);
+      }
+
+      const retryAfter = response.headers.get("retry-after");
+      const delayMs = retryAfter ? Math.min(parseInt(retryAfter, 10) * 1000 || 1000, 10000) : 1000 * 2 ** attempt;
+      console.error(`[discord] HTTP ${response.status}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await delay(delayMs);
     }
   }
 }

@@ -1,4 +1,7 @@
-﻿const MAX_MESSAGE_LENGTH = 3900;
+﻿import { fetchWithTimeout, delay } from "../sources/shared.js";
+
+const MAX_MESSAGE_LENGTH = 3900;
+const MAX_RETRIES = 3;
 
 function formatJob(job) {
   const parts = [`[${job.sourceLabel}] ${job.title}`];
@@ -52,21 +55,29 @@ export async function sendTelegramNotification(botToken, chatId, jobs, options =
       continue;
     }
 
-    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-        disable_web_page_preview: false
-      })
-    });
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const response = await fetchWithTimeout(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text,
+          disable_web_page_preview: false
+        })
+      }, 10000);
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Telegram notification failed with status ${response.status}: ${body.slice(0, 200)}`);
+      if (response.ok) break;
+
+      const retryable = response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === MAX_RETRIES) {
+        const body = await response.text();
+        throw new Error(`Telegram notification failed with status ${response.status}: ${body.slice(0, 200)}`);
+      }
+
+      const retryAfter = response.headers.get("retry-after");
+      const delayMs = retryAfter ? Math.min(parseInt(retryAfter, 10) * 1000 || 1000, 10000) : 1000 * 2 ** attempt;
+      console.error(`[telegram] HTTP ${response.status}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await delay(delayMs);
     }
   }
 }

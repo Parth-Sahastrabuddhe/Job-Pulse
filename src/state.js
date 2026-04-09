@@ -63,6 +63,15 @@ export function initDb(dbFile) {
   if (!seenJobsCols.includes("role_categories")) {
     db.exec("ALTER TABLE seen_jobs ADD COLUMN role_categories TEXT DEFAULT '[]'");
   }
+  if (!seenJobsCols.includes("archetype")) {
+    db.exec("ALTER TABLE seen_jobs ADD COLUMN archetype TEXT DEFAULT NULL");
+  }
+  if (!seenJobsCols.includes("fit_score")) {
+    db.exec("ALTER TABLE seen_jobs ADD COLUMN fit_score INTEGER DEFAULT NULL");
+  }
+  if (!seenJobsCols.includes("fit_scores_json")) {
+    db.exec("ALTER TABLE seen_jobs ADD COLUMN fit_scores_json TEXT DEFAULT NULL");
+  }
 
   // Add password_hash column to user_profiles (idempotent)
   const userCols = db.pragma("table_info(user_profiles)").map((c) => c.name);
@@ -182,6 +191,13 @@ export function initDb(dbFile) {
     CREATE INDEX IF NOT EXISTS idx_user_seen_jobs_user ON user_seen_jobs(user_id);
     CREATE INDEX IF NOT EXISTS idx_dm_log_user ON dm_log(user_id);
     CREATE INDEX IF NOT EXISTS idx_otp_email ON otp_codes(email);
+
+    CREATE TABLE IF NOT EXISTS company_research (
+      company_key TEXT PRIMARY KEY,
+      company_name TEXT NOT NULL,
+      research_json TEXT NOT NULL,
+      researched_at TEXT NOT NULL
+    );
   `);
 
   return db;
@@ -310,15 +326,16 @@ export function upsertJobs(jobs, seenAt) {
     INSERT INTO seen_jobs
       (key, source_key, source_label, id, title, location, url,
        posted_text, posted_at, posted_precision, country_code,
-       seniority_level, role_categories,
+       seniority_level, role_categories, archetype,
        first_seen_at, last_seen_at)
     VALUES
       (@key, @sourceKey, @sourceLabel, @id, @title, @location, @url,
        @postedText, @postedAt, @postedPrecision, @countryCode,
-       @seniorityLevel, @roleCategories,
+       @seniorityLevel, @roleCategories, @archetype,
        @firstSeenAt, @lastSeenAt)
     ON CONFLICT(key) DO UPDATE SET
-      last_seen_at = @lastSeenAt
+      last_seen_at = @lastSeenAt,
+      archetype = COALESCE(seen_jobs.archetype, excluded.archetype)
   `);
 
   const run = db.transaction(() => {
@@ -352,6 +369,7 @@ export function upsertJobs(jobs, seenAt) {
         countryCode: job.countryCode || "",
         seniorityLevel: job.seniorityLevel || "mid",
         roleCategories: JSON.stringify(job.roleCategories || []),
+        archetype: job.archetype || null,
         firstSeenAt: existingFirstSeen || seenAt,
         lastSeenAt: seenAt
       });
@@ -450,4 +468,67 @@ export function updateCompanyQueueStatus(id, status, notes) {
 export function cleanupExpiredOtps() {
   if (!db) return;
   db.prepare("DELETE FROM otp_codes WHERE expires_at < ?").run(new Date().toISOString());
+}
+
+// --- Funnel analytics ---
+export function getFunnelStats(periodDays = null) {
+  const cutoff = periodDays
+    ? new Date(Date.now() - periodDays * 86400000).toISOString()
+    : null;
+
+  const discovered = cutoff
+    ? db.prepare("SELECT COUNT(*) as cnt FROM seen_jobs WHERE first_seen_at >= ?").get(cutoff).cnt
+    : db.prepare("SELECT COUNT(*) as cnt FROM seen_jobs").get().cnt;
+
+  const statusRows = cutoff
+    ? db.prepare(`
+        SELECT jp.status, COUNT(*) as cnt FROM job_posts jp
+        JOIN seen_jobs sj ON sj.key = jp.job_key
+        WHERE sj.first_seen_at >= ?
+        GROUP BY jp.status
+      `).all(cutoff)
+    : db.prepare("SELECT status, COUNT(*) as cnt FROM job_posts GROUP BY status").all();
+
+  const byStatus = {};
+  let notified = 0;
+  for (const row of statusRows) {
+    byStatus[row.status] = row.cnt;
+    notified += row.cnt;
+  }
+
+  return {
+    discovered,
+    notified,
+    pending: byStatus.pending || 0,
+    fitchecked: byStatus.fitchecked || 0,
+    saved: byStatus.saved || 0,
+    applied: byStatus.applied || 0,
+    skipped: byStatus.skipped || 0,
+  };
+}
+
+// --- Fit score CRUD ---
+export function updateJobFitScore(jobKey, score, scoresJson) {
+  db.prepare("UPDATE seen_jobs SET fit_score = ?, fit_scores_json = ? WHERE key = ?")
+    .run(score, scoresJson, jobKey);
+}
+
+export function getJobFitScore(jobKey) {
+  return db.prepare("SELECT fit_score, fit_scores_json FROM seen_jobs WHERE key = ?").get(jobKey);
+}
+
+// --- Company research cache ---
+export function getCachedResearch(companyKey) {
+  const row = db.prepare("SELECT * FROM company_research WHERE company_key = ?").get(companyKey);
+  if (!row) return null;
+  const age = Date.now() - new Date(row.researched_at).getTime();
+  if (age > 7 * 86400000) return null;
+  return JSON.parse(row.research_json);
+}
+
+export function cacheResearch(companyKey, companyName, researchData) {
+  db.prepare(`
+    INSERT OR REPLACE INTO company_research (company_key, company_name, research_json, researched_at)
+    VALUES (?, ?, ?, ?)
+  `).run(companyKey, companyName, JSON.stringify(researchData), new Date().toISOString());
 }

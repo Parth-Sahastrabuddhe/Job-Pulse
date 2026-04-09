@@ -23,7 +23,7 @@ function parseLinkedInCards(html) {
     let postedPrecision = "";
     if (postedDate) {
       postedAt = new Date(postedDate).toISOString();
-      postedPrecision = "day";
+      postedPrecision = "exact";
     }
 
     const url = `https://www.linkedin.com/jobs/view/${id}`;

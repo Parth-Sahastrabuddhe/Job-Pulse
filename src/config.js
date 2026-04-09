@@ -93,6 +93,13 @@ export function getConfig() {
       telegramBotToken: process.env.TELEGRAM_BOT_TOKEN?.trim() || "",
       telegramChatId: process.env.TELEGRAM_CHAT_ID?.trim() || ""
     },
+    applicant: {
+      name: process.env.APPLICANT_NAME?.trim() || "",
+      email: process.env.APPLICANT_EMAIL?.trim() || "",
+      phone: process.env.APPLICANT_PHONE?.trim() || "",
+      linkedin: process.env.APPLICANT_LINKEDIN?.trim() || "",
+      resumePath: resolveProjectPath(process.env.APPLICANT_RESUME_PATH, "resume/base.pdf"),
+    },
     amazon: {
       sourceKey: "amazon",
       sourceLabel: "Amazon",

@@ -55,6 +55,24 @@ export async function GET(request) {
     return NextResponse.redirect(new URL("/auth?error=invalid_user", request.url));
   }
 
+  // Auto-join user to the Discord server (best-effort, don't block login)
+  const guildId = process.env.DISCORD_GUILD_ID;
+  const botToken = process.env.MULTI_USER_BOT_TOKEN;
+  if (guildId && botToken && tokenData.access_token) {
+    try {
+      await fetch(`https://discord.com/api/v10/guilds/${guildId}/members/${discordUser.id}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bot ${botToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ access_token: tokenData.access_token }),
+      });
+    } catch {
+      // Non-fatal — user can still join manually
+    }
+  }
+
   // Check if user exists in DB
   let existingUser = null;
   try {

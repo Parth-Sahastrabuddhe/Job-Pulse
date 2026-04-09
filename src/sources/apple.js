@@ -72,7 +72,7 @@ export async function collectAppleJobs(_unused, config, log) {
     let data;
     try {
       // Decode the escaped JSON string
-      const raw = match[1].replace(/\\"/g, '"').replace(/\\\\"/g, '\\"');
+      const raw = match[1].replace(/\\\\"/g, '\\"').replace(/\\"/g, '"');
       data = JSON.parse(raw);
     } catch {
       // Fallback: try with unicode_escape-style decoding

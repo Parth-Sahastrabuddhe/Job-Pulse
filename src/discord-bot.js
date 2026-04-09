@@ -17,20 +17,23 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { fetchJobDescription, saveJobData, jobDirId } from "./job-description.js";
 import { fitCheckResume } from "./tailor.js";
-import { upsertJobPost, updateJobPostStatus, bridgeToTracker, getDb, addToCompanyQueue, getPendingCompanies, getJobPost } from "./state.js";
+import { upsertJobPost, updateJobPostStatus, bridgeToTracker, getDb, addToCompanyQueue, getPendingCompanies, getJobPost, getFunnelStats, updateJobFitScore } from "./state.js";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let client = null;
 let channelId = null;
+const activeFitChecks = new Set();
 
 function jobButtonId(job) {
   const hash = crypto.createHash("sha1").update(job.key).digest("hex").slice(0, 16);
   return hash;
 }
 
-function buildButtonRows(hash, jobUrl, status) {
+const ADMIN_DISCORD_ID = "1038422401874145372";
+
+function buildButtonRows(hash, jobUrl, status, isAdmin = false) {
   // status: "pending" | "fitchecked" | "applied" | "skipped" | "saved"
   const isApplied = status === "applied";
   const isSaved = status === "saved";
@@ -62,7 +65,27 @@ function buildButtonRows(hash, jobUrl, status) {
       .setDisabled(isApplied)
   );
 
-  return [row];
+  const rows = [row];
+
+  if (isAdmin) {
+    const adminRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`research:${hash}`)
+        .setLabel("Research")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`contacts:${hash}`)
+        .setLabel("Contacts")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`autofill:${hash}`)
+        .setLabel("Auto-Fill")
+        .setStyle(ButtonStyle.Secondary)
+    );
+    rows.push(adminRow);
+  }
+
+  return rows;
 }
 
 function getJobUrlFromMessage(message) {
@@ -99,6 +122,8 @@ export async function startDiscordBot(config) {
         await handleShowQueue(interaction);
       } else if (interaction.commandName === "saved") {
         await handleSavedCommand(interaction);
+      } else if (interaction.commandName === "stats") {
+        await handleStatsCommand(interaction);
       }
       return;
     }
@@ -125,6 +150,12 @@ export async function startDiscordBot(config) {
         await handleConfirmApply(interaction, hash);
       } else if (action === "cancelapply") {
         await handleCancelApply(interaction, hash);
+      } else if (action === "research") {
+        await handleResearch(interaction, hash);
+      } else if (action === "contacts") {
+        await handleContacts(interaction, hash);
+      } else if (action === "autofill") {
+        await handleAutoFill(interaction, hash);
       }
     } catch (error) {
       console.error(`[interaction] Error handling ${action}: ${error.message}`);
@@ -134,7 +165,7 @@ export async function startDiscordBot(config) {
         } else if (interaction.deferred) {
           await interaction.followUp({ content: `Error: ${error.message.slice(0, 200)}`, ephemeral: true });
         }
-      } catch {}
+      } catch (e) { console.error(`[interaction] Failed to send error reply: ${e.message}`); }
     }
   });
 
@@ -164,6 +195,18 @@ export async function startDiscordBot(config) {
       new SlashCommandBuilder()
         .setName("saved")
         .setDescription("Show your saved jobs"),
+      new SlashCommandBuilder()
+        .setName("stats")
+        .setDescription("Show your application funnel statistics")
+        .addStringOption((opt) =>
+          opt.setName("period")
+            .setDescription("Time period")
+            .addChoices(
+              { name: "This week", value: "week" },
+              { name: "This month", value: "month" },
+              { name: "All time", value: "all" }
+            )
+        ),
     ].map((c) => c.toJSON());
 
     const channel = await client.channels.fetch(channelId);
@@ -209,6 +252,13 @@ function extractJobFromMessage(urlOrText) {
 }
 
 async function handleFitCheck(interaction, hash) {
+  if (activeFitChecks.has(hash)) {
+    await interaction.reply({ content: "Fit check already in progress for this job.", ephemeral: true });
+    return;
+  }
+  activeFitChecks.add(hash);
+
+  try {
   await interaction.deferReply({ ephemeral: true });
 
   const jobUrl = getJobUrlFromMessage(interaction.message);
@@ -282,9 +332,24 @@ async function handleFitCheck(interaction, hash) {
     const result = await fitCheckResume(dirId, (msg) => console.log(`[fit-check] ${msg}`));
     const fitEmoji = result.shouldApply === "YES" ? "✅" : result.shouldApply === "STRETCH" ? "⚠️" : "❌";
     let assessmentMsg = `${fitEmoji} **Fit Assessment: ${result.shouldApply}**\n*Powered by ${result.engine || "unknown"}*`;
+
+    // Show structured scores if available
+    if (result.fitScore != null) {
+      const s = result.fitScores || {};
+      const scoreEmoji = result.fitScore >= 80 ? ":green_circle:" : result.fitScore >= 60 ? ":yellow_circle:" : ":red_circle:";
+      assessmentMsg += `\n${scoreEmoji} **Fit Score: ${result.fitScore}/100** (Skills ${s.skills ?? "?"} | Exp ${s.experience ?? "?"} | Domain ${s.domain ?? "?"} | Level ${s.level ?? "?"})`;
+
+      // Save to DB
+      const jobKey = findJobKeyByMessageId(interaction.message.id);
+      if (jobKey) {
+        try { updateJobFitScore(jobKey, result.fitScore, JSON.stringify(result.fitScores)); } catch (e) { console.error(`[fit-check] Failed to save fit score: ${e.message}`); }
+      }
+    }
+
     if (result.fitAssessment) {
-      const trimmed = result.fitAssessment.length > 1500
-        ? result.fitAssessment.slice(0, 1500) + "..."
+      const maxLen = result.fitScore != null ? 1350 : 1500;
+      const trimmed = result.fitAssessment.length > maxLen
+        ? result.fitAssessment.slice(0, maxLen) + "..."
         : result.fitAssessment;
       assessmentMsg += `\n\`\`\`\n${trimmed}\n\`\`\``;
     }
@@ -292,12 +357,15 @@ async function handleFitCheck(interaction, hash) {
 
     // Update buttons to show fit check was done
     if (jobUrl) {
-      const updatedRows = buildButtonRows(hash, jobUrl, "fitchecked");
+      const updatedRows = buildButtonRows(hash, jobUrl, "fitchecked", true);
       await interaction.message.edit({ components: updatedRows });
     }
   } catch (error) {
     console.error(`[fit-check] Error for ${sourceKey}-${jobId}: ${error.message}`);
     await interaction.editReply(`Could not complete fit check for **${jobCompany} — ${jobTitle}**.\nUse the View Job button to check the listing directly.`);
+  }
+  } finally {
+    activeFitChecks.delete(hash);
   }
 }
 
@@ -347,7 +415,7 @@ async function handleConfirmApply(interaction, hash) {
     // Restore buttons with applied state
     const jobUrl = getJobUrlFromMessage(message);
     if (jobUrl) {
-      const updatedRows = buildButtonRows(hash, jobUrl, "applied");
+      const updatedRows = buildButtonRows(hash, jobUrl, "applied", true);
       await message.edit({ components: updatedRows });
     }
 
@@ -372,7 +440,7 @@ async function handleCancelApply(interaction, hash) {
   // Restore original buttons on the job message
   const jobUrl = getJobUrlFromMessage(interaction.message);
   if (jobUrl) {
-    const restoredRows = buildButtonRows(hash, jobUrl, "pending");
+    const restoredRows = buildButtonRows(hash, jobUrl, "pending", true);
     await interaction.message.edit({ components: restoredRows });
   }
 }
@@ -434,11 +502,11 @@ async function handleSkip(interaction, hash) {
   try {
     const skipKey = findJobKeyByMessageId(interaction.message.id);
     updateJobPostStatus(skipKey, "skipped");
-  } catch {}
+  } catch (e) { console.error(`[skip] Error updating status: ${e.message}`); }
 
   const jobUrl = getJobUrlFromMessage(interaction.message);
   if (jobUrl) {
-    const updatedRows = buildButtonRows(hash, jobUrl, "skipped");
+    const updatedRows = buildButtonRows(hash, jobUrl, "skipped", true);
     await interaction.message.edit({ components: updatedRows });
   }
 
@@ -572,10 +640,10 @@ async function handleSavedAction(interaction, hash, action) {
       const msg = await ch.messages.fetch(post.message_id);
       const jobUrl = getJobUrlFromMessage(msg);
       if (jobUrl) {
-        const updatedRows = buildButtonRows(savedJobHash(jobKey), jobUrl, newStatus);
+        const updatedRows = buildButtonRows(savedJobHash(jobKey), jobUrl, newStatus, true);
         await msg.edit({ components: updatedRows });
       }
-    } catch {}
+    } catch (e) { console.error(`[saved] Failed to update original message: ${e.message}`); }
   }
 
   // Refresh the /saved list
@@ -603,7 +671,7 @@ async function handleSave(interaction, hash) {
 
       const jobUrl = getJobUrlFromMessage(interaction.message);
       if (jobUrl) {
-        const updatedRows = buildButtonRows(hash, jobUrl, newStatus);
+        const updatedRows = buildButtonRows(hash, jobUrl, newStatus, true);
         await interaction.message.edit({ components: updatedRows });
       }
     }
@@ -620,6 +688,155 @@ function findJobKeyByMessageId(messageId) {
     return row?.job_key || null;
   } catch {
     return null;
+  }
+}
+
+// --- /stats command handler ---
+async function handleStatsCommand(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  const period = interaction.options.getString("period") || "week";
+  const periodDays = period === "all" ? null : period === "month" ? 30 : 7;
+  const periodLabel = period === "all" ? "All Time" : period === "month" ? "This Month" : "This Week";
+
+  const stats = getFunnelStats(periodDays);
+
+  const notToSaved = stats.notified > 0 ? ((stats.saved / stats.notified) * 100).toFixed(1) + "%" : "N/A";
+  const savedToApplied = stats.saved > 0 ? ((stats.applied / stats.saved) * 100).toFixed(1) + "%" : "N/A";
+  const overall = stats.notified > 0 ? ((stats.applied / stats.notified) * 100).toFixed(1) + "%" : "N/A";
+
+  const embed = new EmbedBuilder()
+    .setTitle(`Application Funnel (${periodLabel})`)
+    .setColor(0x5865F2)
+    .addFields(
+      { name: "Discovered", value: String(stats.discovered), inline: true },
+      { name: "Notified", value: String(stats.notified), inline: true },
+      { name: "Fit Checked", value: String(stats.fitchecked), inline: true },
+      { name: "Saved", value: String(stats.saved), inline: true },
+      { name: "Applied", value: String(stats.applied), inline: true },
+      { name: "Skipped", value: String(stats.skipped), inline: true },
+    )
+    .setFooter({ text: `Notified\u2192Saved: ${notToSaved} | Saved\u2192Applied: ${savedToApplied} | Overall: ${overall}` });
+
+  await interaction.editReply({ embeds: [embed] });
+}
+
+// --- Admin-only button handlers ---
+async function handleResearch(interaction, hash) {
+  if (interaction.user.id !== ADMIN_DISCORD_ID) {
+    await interaction.reply({ content: "Admin only.", ephemeral: true });
+    return;
+  }
+  await interaction.deferReply({ ephemeral: true });
+
+  const embedDetails = extractJobInfoFromMessage(interaction.message);
+  const companyName = embedDetails.company || "Unknown";
+  const jobTitle = embedDetails.role || "";
+
+  try {
+    const { researchCompany } = await import("./company-research.js");
+    const jobKey = findJobKeyByMessageId(interaction.message.id);
+    let sourceKey = "";
+    if (jobKey) {
+      const db = getDb();
+      const row = db.prepare("SELECT source_key FROM seen_jobs WHERE key = ?").get(jobKey);
+      if (row) sourceKey = row.source_key;
+    }
+
+    const data = await researchCompany(companyName, sourceKey || companyName.toLowerCase().replace(/\s+/g, "-"), jobTitle);
+
+    const embed = new EmbedBuilder()
+      .setTitle(`Research: ${companyName}`)
+      .setColor(0x57F287)
+      .setDescription(data.overview || "No overview available.");
+
+    if (data.h1bSponsorship) embed.addFields({ name: "H1B Sponsorship", value: data.h1bSponsorship, inline: false });
+    if (data.techStack?.length) embed.addFields({ name: "Tech Stack", value: data.techStack.join(", "), inline: false });
+    if (data.recentNews?.length) embed.addFields({ name: "Recent News", value: data.recentNews.slice(0, 5).map((n) => `- ${n}`).join("\n"), inline: false });
+    if (data.interviewProcess) embed.addFields({ name: "Interview Process", value: data.interviewProcess, inline: false });
+    if (data.ratingsOverview) embed.addFields({ name: "Ratings", value: data.ratingsOverview, inline: false });
+
+    await interaction.editReply({ embeds: [embed] });
+  } catch (err) {
+    await interaction.editReply(`Research failed: ${err.message.slice(0, 200)}`);
+  }
+}
+
+async function handleContacts(interaction, hash) {
+  if (interaction.user.id !== ADMIN_DISCORD_ID) {
+    await interaction.reply({ content: "Admin only.", ephemeral: true });
+    return;
+  }
+  await interaction.deferReply({ ephemeral: true });
+
+  const embedDetails = extractJobInfoFromMessage(interaction.message);
+  const companyName = embedDetails.company || "Unknown";
+  const jobTitle = embedDetails.role || "";
+
+  try {
+    const { findContacts } = await import("./contact-finder.js");
+    const data = await findContacts(companyName, jobTitle);
+
+    const contactLines = (data.contacts || []).map((c, i) =>
+      `${i + 1}. **${c.name}** — ${c.title}${c.linkedinUrl ? ` ([LinkedIn](${c.linkedinUrl}))` : ""}`
+    ).join("\n") || "No contacts found.";
+
+    const embed = new EmbedBuilder()
+      .setTitle(`Contacts: ${companyName}`)
+      .setColor(0x5865F2)
+      .addFields(
+        { name: "Potential Contacts", value: contactLines.slice(0, 1024), inline: false },
+      );
+
+    if (data.outreachTemplate?.body) {
+      embed.addFields({
+        name: `Outreach Template${data.outreachTemplate.subject ? ` \u2014 "${data.outreachTemplate.subject}"` : ""}`,
+        value: data.outreachTemplate.body.slice(0, 1024),
+        inline: false
+      });
+    }
+
+    await interaction.editReply({ embeds: [embed] });
+  } catch (err) {
+    await interaction.editReply(`Contact search failed: ${err.message.slice(0, 200)}`);
+  }
+}
+
+async function handleAutoFill(interaction, hash) {
+  if (interaction.user.id !== ADMIN_DISCORD_ID) {
+    await interaction.reply({ content: "Admin only.", ephemeral: true });
+    return;
+  }
+  await interaction.deferReply({ ephemeral: true });
+
+  const jobUrl = getJobUrlFromMessage(interaction.message);
+  const embedDetails = extractJobInfoFromMessage(interaction.message);
+
+  if (!jobUrl) {
+    await interaction.editReply("Could not find job URL.");
+    return;
+  }
+
+  try {
+    const { autoFillApplication } = await import("./auto-apply.js");
+    await interaction.editReply("Opening application form... This may take 15-30 seconds.");
+    const result = await autoFillApplication(jobUrl, embedDetails.company || "", embedDetails.role || "");
+
+    if (result.screenshot) {
+      const { AttachmentBuilder } = await import("discord.js");
+      const attachment = new AttachmentBuilder(result.screenshot, { name: "application-form.png" });
+      const embed = new EmbedBuilder()
+        .setTitle(`Auto-Fill: ${embedDetails.company || "Unknown"}`)
+        .setDescription(result.success
+          ? `ATS: **${result.ats}**\nForm pre-filled. Review and complete manually.`
+          : `ATS: **${result.ats}**\nPartial fill (${result.error || "unknown error"})`)
+        .setImage("attachment://application-form.png")
+        .setColor(result.success ? 0x57F287 : 0xED4245);
+      await interaction.editReply({ content: null, embeds: [embed], files: [attachment] });
+    } else {
+      await interaction.editReply(`Auto-fill completed (ATS: ${result.ats}). ${result.success ? "Form pre-filled." : `Error: ${result.error}`}`);
+    }
+  } catch (err) {
+    await interaction.editReply(`Auto-fill failed: ${err.message.slice(0, 200)}`);
   }
 }
 
@@ -641,6 +858,7 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
     const hasHardWarnings = hasWarnings && warnings.some((w) => w.severity === "hard");
 
     const descParts = [];
+    if (job.archetype) descParts.push(`**${job.archetype}**`);
     if (job.location) descParts.push(job.location);
     if (job.postedAt) {
       const d = new Date(job.postedAt);
@@ -667,7 +885,7 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
       embed.setDescription(descParts.join("\n"));
     }
 
-    const rows = buildButtonRows(hash, job.url, "pending");
+    const rows = buildButtonRows(hash, job.url, "pending", true);
 
     try {
       const message = await channel.send({

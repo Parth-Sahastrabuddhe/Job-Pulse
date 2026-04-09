@@ -1,83 +1,105 @@
 ---
 name: add-company
-description: Add a new company to the JobPulse job aggregation pipeline. Use this skill whenever the user mentions adding, integrating, or onboarding a new company, even if they just say a company name like "add Tesla" or "integrate Netflix". Also trigger when the user references the /add Discord command queue, when they ask about companies from the future-scope list, or when they want to expand the pipeline to track more companies. This is a multi-step procedure — never skip steps. Every step must be executed and its output shown to the user.
+description: Add a new company to the JobPulse job aggregation pipeline. Use this skill whenever the user mentions adding, integrating, or onboarding a new company, even if they just say a company name like "add Tesla" or "integrate Netflix". Also trigger when the user references the /add Discord command queue, when they ask about companies from the future-scope list, or when they want to expand the pipeline to track more companies. This is a multi-step procedure — never skip steps.
 ---
 
 # Add Company to JobPulse Pipeline
 
-Every step below is MANDATORY. Do not skip any step. Do not say "skipping because..." — if a step seems unnecessary, explain why to the user and get explicit approval to skip. The Amazon description bug, the Goldman Sachs flood, the Accenture non-US spam, and the duplicate notification bug all happened from skipping steps.
+Every step is MANDATORY. Do not skip any. Past bugs (Amazon descriptions, Goldman floods, Accenture non-US spam) all came from skipped steps.
 
 ## Step 1: Identify the ATS Platform
 
-Run these commands and show the results:
+Test these in order, show status codes:
 
 - **Greenhouse**: `curl -s -o /dev/null -w "%{http_code}" "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"`
 - **Lever**: `curl -s -o /dev/null -w "%{http_code}" "https://api.lever.co/v0/postings/{slug}?mode=json"`
 - **Ashby**: `curl -s -o /dev/null -w "%{http_code}" "https://api.ashbyhq.com/posting-api/job-board/{slug}"`
-- **SmartRecruiters**: `curl -s "https://api.smartrecruiters.com/v1/companies/{Slug}/postings?limit=1" -H "accept: application/json"`
-- **Workday**: Check the [job-board-aggregator](https://github.com/Feashliaa/job-board-aggregator/tree/main/data) workday_companies.json
+- **SmartRecruiters**: `curl -s "https://api.smartrecruiters.com/v1/companies/{Slug}/postings?limit=1"`
+- **Workday**: Check [job-board-aggregator](https://github.com/Feashliaa/job-board-aggregator/tree/main/data) workday_companies.json
 - **Oracle HCM**: Check if company uses `*.oraclecloud.com/hcmRestApi`
-- If none match: check career site HTML for platform clues, try TalentBrew, Eightfold, or Playwright
+- If none match: inspect career site HTML for platform clues, consider Playwright scraper
 
 ## Step 2: Verify the API Returns Jobs
 
-Run the API call and show actual job data — not just the status code:
-
-- Greenhouse/Lever/Ashby: show job count AND 2-3 sample titles
-- Workday: `curl -s -X POST "{apiUrl}" -H "Content-Type: application/json" -d '{"limit":3,"searchText":"software engineer"}'` — show total and titles
-- SmartRecruiters: show `totalFound` and sample titles
+Show actual job data (count + 2-3 sample titles), not just status codes.
 
 ## Step 3: Add to Central Registry (`src/companies.js`)
 
-Add ONE entry to the `COMPANIES` array with: key, label, ats, lane, board (if applicable), urlPattern. This automatically registers the URL pattern and description fetcher lists.
+Add ONE entry to the `COMPANIES` array: `{ key, label, ats, lane, board, urlPattern }`. This auto-registers URL patterns and description fetchers — no other files need manual list updates.
 
 ## Step 4: Add Config (`src/config.js`)
 
-Each platform has a specific config shape:
+Platform-specific config shapes:
 
-- **Greenhouse**: `{ sourceKey, sourceLabel, apiUrl, jobUrlBase }`
-- **Workday**: `{ sourceKey, sourceLabel, apiUrl, baseUrl }`
-- **Lever**: `{ sourceKey, sourceLabel, apiUrl }`
-- **Ashby**: `{ sourceKey, sourceLabel, apiUrl, boardSlug }`
-- **SmartRecruiters**: `{ sourceKey, sourceLabel, companySlug }`
+| Platform | Fields |
+|----------|--------|
+| Greenhouse | `sourceKey, sourceLabel, apiUrl, jobUrlBase` |
+| Workday | `sourceKey, sourceLabel, apiUrl, baseUrl` |
+| Lever | `sourceKey, sourceLabel, apiUrl` |
+| Ashby | `sourceKey, sourceLabel, apiUrl, boardSlug` |
+| SmartRecruiters | `sourceKey, sourceLabel, companySlug` |
+
+Solo/Playwright scrapers also need an import + entry in `buildRegistry()` in `src/index.js`.
 
 ## Step 5: Verify Non-US Filtering
 
-Check the company's location data format. If it returns only city names (no country), verify `inferCountryCodeFromLocation` in `src/sources/shared.js` catches them. Add new non-US cities to `NON_US_CITIES` regex if needed. Show the verification output.
+Check location data format. If the company returns city-only locations (no country), verify `inferCountryCodeFromLocation` in `src/sources/shared.js` catches them. Add new non-US cities to `NON_US_CITIES` if needed.
 
-## Step 6: Run /quality-check
+## Step 6: Verify Seniority & Role Classification
 
-Invoke the `/quality-check` skill. Every check must pass. If any fail, fix before proceeding. Do NOT skip this step.
-
-## Step 7: Push to GitHub
+Test that sample job titles from the new company are classified correctly:
 
 ```bash
-git add src/companies.js src/config.js && git commit -m "Add {company names}" && git push origin main
+node -e "
+import { detectSeniority, detectRoleCategories } from './src/sources/shared.js';
+const titles = ['<paste 3-4 sample titles>'];
+for (const t of titles) console.log(detectSeniority(t), detectRoleCategories(t), '←', t);
+"
 ```
 
-## Step 8: Deploy to AWS
+This matters for the multi-user bot (JobPulseBot) — jobs are filtered by seniority and role category per user profile. If titles don't classify correctly, users won't receive them.
 
-The bot runs on AWS EC2, not locally. Deploy with:
+## Step 7: Run Quality Check
+
+Invoke the `/quality-check` skill. Every check must pass before proceeding.
+
+## Step 8: Run Verification
+
+Invoke `/verification-before-completion` — run `npm run check`, then `--dry-run` to confirm the new company returns data and no existing collectors break.
+
+## Step 9: Push & Deploy
 
 ```bash
-ssh -i <key.pem> ubuntu@<elastic-ip> "cd ~/Job-Pulse && git pull && pm2 restart jobpulse"
+git add src/companies.js src/config.js && git commit -m "Add {company}" && git push origin main
 ```
 
-Verify the bot started with the new company count in the logs.
-
-## Step 9: Verify on AWS
-
-Check AWS logs to confirm the new companies are returning data:
+Deploy to AWS EC2 (bot runs there, NEVER locally):
 
 ```bash
-ssh -i <key.pem> ubuntu@<elastic-ip> "pm2 logs jobpulse --lines 20 --nostream" | grep -i "{company_name}"
+ssh -i "C:\Users\sahas\job-alert-bot\data\jobpulse.pem" -o StrictHostKeyChecking=no ubuntu@3.138.62.29 \
+  "cd ~/Job-Pulse && git pull && pm2 restart jobpulse-bot"
 ```
 
-## What Changed from the Old Process
+Only restart `jobpulse-bot`. Do NOT touch `micro-bot` or `jobpulse-web`.
 
-Previously, adding a company required editing 5 files (config.js, index.js, discord-bot.js, job-description.js, shared.js). Now it requires editing 2 files:
+## Step 10: Verify on AWS
 
-1. `src/companies.js` — the central registry entry (URL pattern + description fetcher registration is automatic)
-2. `src/config.js` — the API URL/base URL config
+Check logs to confirm the new company returns data:
 
-The `index.js`, `discord-bot.js`, and `job-description.js` files auto-derive their lists from `companies.js`. No manual updates needed.
+```bash
+ssh -i "C:\Users\sahas\job-alert-bot\data\jobpulse.pem" -o StrictHostKeyChecking=no ubuntu@3.138.62.29 \
+  "pm2 logs jobpulse-bot --lines 30 --nostream" | grep -i "{company}"
+```
+
+## Superpowers Skills Referenced
+
+- `/quality-check` — Step 7, mandatory pre-deployment checks
+- `/verification-before-completion` — Step 8, syntax + dry-run before push
+- `/systematic-debugging` — use if any step fails unexpectedly (API errors, classification bugs, deploy issues)
+
+## Files Changed Summary
+
+| ATS type | Files to edit |
+|----------|--------------|
+| Parameterized (greenhouse, workday, ashby, lever, smartrecruiters) | `src/companies.js` + `src/config.js` (2 files) |
+| Solo/Playwright scrapers | `src/companies.js` + `src/config.js` + `src/index.js` + new `src/sources/{company}.js` (3-4 files) |

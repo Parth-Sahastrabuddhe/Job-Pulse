@@ -5,6 +5,7 @@ import {
   GREENHOUSE_BOARDS, ASHBY_BOARDS, SMARTRECRUITERS_SLUGS,
   WORKDAY_KEYS, ASHBY_KEYS, LEVER_KEYS, SMARTRECRUITERS_KEYS
 } from "./companies.js";
+import { fetchWithTimeout } from "./sources/shared.js";
 
 const JOBS_DIR = path.join(PROJECT_ROOT, "data", "jobs");
 
@@ -32,14 +33,14 @@ export function getJobDir(job) {
 
 async function fetchMicrosoftDescription(job) {
   const url = `https://apply.careers.microsoft.com/api/pcsx/position_details?position_id=${job.id}&domain=microsoft.com`;
-  const resp = await fetch(url, {
+  const resp = await fetchWithTimeout(url, {
     headers: {
       "accept": "application/json",
       "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       "referer": `https://apply.careers.microsoft.com/careers/job/${job.id}`,
       "origin": "https://apply.careers.microsoft.com"
     }
-  });
+  }, 20000);
   if (!resp.ok) return null;
 
   const data = await resp.json();
@@ -76,9 +77,9 @@ async function fetchAmazonDescription(job, rawJobData) {
 
   // Fallback: fetch via Amazon search.json API by job ID
   try {
-    const apiResp = await fetch(`https://www.amazon.jobs/en/search.json?job_ids=${job.id}`, {
+    const apiResp = await fetchWithTimeout(`https://www.amazon.jobs/en/search.json?job_ids=${job.id}`, {
       headers: { accept: "application/json", "user-agent": "Mozilla/5.0" }
-    });
+    }, 20000);
     if (apiResp.ok) {
       const apiData = await apiResp.json();
       const apiJob = apiData.jobs?.find((j) => String(j.id_icims ?? j.id) === String(job.id));
@@ -93,7 +94,7 @@ async function fetchAmazonDescription(job, rawJobData) {
         return parts.join("\n");
       }
     }
-  } catch {}
+  } catch (e) { console.error(`[jd] Amazon fallback fetch failed: ${e.message}`); }
 
   return null;
 }
@@ -137,13 +138,14 @@ async function fetchGoogleDescription(job, rawJobData) {
     const outerPayload = JSON.stringify([[["r06xKb", innerPayload, null, "3"]]]);
     const body = "f.req=" + encodeURIComponent(outerPayload);
 
-    const resp = await fetch(
+    const resp = await fetchWithTimeout(
       "https://www.google.com/about/careers/applications/_/HiringCportalFrontendUi/data/batchexecute?rpcids=r06xKb&source-path=/about/careers/applications/jobs/results&hl=en-US&soc-app=1&soc-platform=1&soc-device=1&_reqid=1000&rt=c",
       {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded;charset=UTF-8", "user-agent": "Mozilla/5.0" },
         body
-      }
+      },
+      20000
     );
 
     if (resp.ok) {
@@ -171,15 +173,15 @@ async function fetchGoogleDescription(job, rawJobData) {
         } catch {}
       }
     }
-  } catch {}
+  } catch (e) { console.error(`[jd] Google batchexecute fallback failed: ${e.message}`); }
 
   return null;
 }
 
 async function fetchMetaDescription(job) {
-  const resp = await fetch(`https://www.metacareers.com/jobs/${job.id}`, {
+  const resp = await fetchWithTimeout(`https://www.metacareers.com/jobs/${job.id}`, {
     headers: { "user-agent": "Mozilla/5.0" }
-  });
+  }, 20000);
   if (!resp.ok) return null;
 
   const html = await resp.text();
@@ -208,9 +210,9 @@ async function fetchGreenhouseDescription(job) {
   if (!board) return null;
 
   try {
-    const resp = await fetch(`https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${job.id}`, {
+    const resp = await fetchWithTimeout(`https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${job.id}`, {
       headers: { accept: "application/json" }
-    });
+    }, 20000);
     if (!resp.ok) return null;
 
     const data = await resp.json();
@@ -231,9 +233,9 @@ async function fetchLeverDescription(job) {
     const leverMatch = job.url?.match(/jobs\.lever\.co\/([^/]+)\/([a-f0-9-]+)/i);
     const company = leverMatch?.[1] || job.sourceKey;
 
-    const resp = await fetch(`https://api.lever.co/v0/postings/${company}/${job.id}?mode=json`, {
+    const resp = await fetchWithTimeout(`https://api.lever.co/v0/postings/${company}/${job.id}?mode=json`, {
       headers: { accept: "application/json" }
-    });
+    }, 20000);
     if (!resp.ok) return null;
 
     const data = await resp.json();
@@ -368,9 +370,9 @@ async function fetchSmartRecruitersDescription(job) {
     const companySlug = SMARTRECRUITERS_SLUGS[job.sourceKey];
     if (!companySlug) return null;
 
-    const response = await fetch(`https://api.smartrecruiters.com/v1/companies/${companySlug}/postings/${job.id}`, {
+    const response = await fetchWithTimeout(`https://api.smartrecruiters.com/v1/companies/${companySlug}/postings/${job.id}`, {
       headers: { "accept": "application/json" }
-    });
+    }, 20000);
     if (!response.ok) return null;
 
     const data = await response.json();
@@ -392,9 +394,9 @@ async function fetchSmartRecruitersDescription(job) {
 
 async function fetchAppleDescription(job) {
   try {
-    const response = await fetch(job.url, {
+    const response = await fetchWithTimeout(job.url, {
       headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
-    });
+    }, 20000);
     if (!response.ok) return null;
 
     const html = await response.text();
@@ -429,10 +431,10 @@ async function fetchDescriptionFallback(job) {
   if (!url || !url.startsWith("http")) return null;
 
   try {
-    const resp = await fetch(url, {
+    const resp = await fetchWithTimeout(url, {
       headers: { "user-agent": "Mozilla/5.0", accept: "text/html" },
       redirect: "follow"
-    });
+    }, 20000);
     if (!resp.ok) return null;
 
     const html = await resp.text();
@@ -491,7 +493,7 @@ async function fetchDescriptionFallback(job) {
     }
 
     if (metaParts.length > 0) return metaParts.join("\n");
-  } catch {}
+  } catch (e) { console.error(`[jd] HTML fallback failed for ${job.url}: ${e.message}`); }
 
   return null;
 }
@@ -515,9 +517,9 @@ async function fetchWorkdayDescription(job) {
   // Workday exposes a JSON API at the /wday/cxs/ prefixed URL
   try {
     const apiUrl = workdayApiUrl(job.url);
-    const resp = await fetch(apiUrl, {
+    const resp = await fetchWithTimeout(apiUrl, {
       headers: { accept: "application/json", "content-type": "application/json" }
-    });
+    }, 20000);
     if (!resp.ok) return null;
 
     const data = await resp.json();
@@ -529,7 +531,7 @@ async function fetchWorkdayDescription(job) {
     if (info.location) parts.push(`Location: ${info.location}`);
     if (info.jobDescription) parts.push(`\nDescription:\n${stripHtml(info.jobDescription)}`);
     return parts.length > 1 ? parts.join("\n") : null;
-  } catch {}
+  } catch (e) { console.error(`[jd] Workday description fetch failed: ${e.message}`); }
 
   return null;
 }
@@ -547,7 +549,7 @@ async function fetchAshbyDescription(job) {
 
   // Use Ashby GraphQL API for full description
   try {
-    const resp = await fetch("https://jobs.ashbyhq.com/api/non-user-graphql", {
+    const resp = await fetchWithTimeout("https://jobs.ashbyhq.com/api/non-user-graphql", {
       method: "POST",
       headers: { "content-type": "application/json", "user-agent": "Mozilla/5.0" },
       body: JSON.stringify({
@@ -559,7 +561,7 @@ async function fetchAshbyDescription(job) {
           }
         }`
       })
-    });
+    }, 20000);
     if (!resp.ok) return null;
 
     const data = await resp.json();
@@ -573,7 +575,7 @@ async function fetchAshbyDescription(job) {
       posting.descriptionHtml && `\nDescription:\n${stripHtml(posting.descriptionHtml)}`
     ].filter(Boolean);
     return parts.length > 1 ? parts.join("\n") : null;
-  } catch {}
+  } catch (e) { console.error(`[jd] Ashby description fetch failed: ${e.message}`); }
 
   return null;
 }

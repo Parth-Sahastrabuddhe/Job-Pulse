@@ -119,6 +119,33 @@ export function detectRoleCategories(title) {
   return categories;
 }
 
+// Priority order: most specific archetype wins
+const ARCHETYPE_PRIORITY = [
+  ["ml_engineer", "ML/AI"],
+  ["data_engineer", "Data"],
+  ["mobile", "Mobile"],
+  ["devops_sre", "DevOps"],
+  ["frontend", "Frontend"],
+  ["backend", "Backend"],
+  ["product_manager", "PM"],
+];
+
+export function detectArchetype(title) {
+  if (!title) return null;
+  const categories = detectRoleCategories(title);
+  if (categories.length === 0) return null;
+
+  if (PLATFORM_ENGINEER_PATTERN.test(title.trim())) return "Platform";
+
+  for (const [cat, label] of ARCHETYPE_PRIORITY) {
+    if (categories.includes(cat)) return label;
+  }
+
+  // Fallback: generic software_engineer → "Fullstack"
+  if (categories.includes("software_engineer")) return "Fullstack";
+  return null;
+}
+
 export function detectSeniority(title) {
   if (!title) return "mid";
   const t = title.trim();
@@ -194,7 +221,8 @@ export function finalizeJob(job) {
     ...normalizedJob,
     key: createHash("sha1").update(identity).digest("hex"),
     seniorityLevel: detectSeniority(normalizedJob.title),
-    roleCategories: detectRoleCategories(normalizedJob.title)
+    roleCategories: detectRoleCategories(normalizedJob.title),
+    archetype: detectArchetype(normalizedJob.title)
   };
 }
 
@@ -324,17 +352,21 @@ function getDateStampForTz(dateLike, tz) {
   const parsedMs = typeof dateLike === "number" ? dateLike : Date.parse(dateLike);
   if (!Number.isFinite(parsedMs)) return null;
 
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(parsedMs));
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(parsedMs));
 
-  const y = +parts.find((p) => p.type === "year").value;
-  const m = +parts.find((p) => p.type === "month").value - 1;
-  const d = +parts.find((p) => p.type === "day").value;
-  return Date.UTC(y, m, d);
+    const y = +parts.find((p) => p.type === "year").value;
+    const m = +parts.find((p) => p.type === "month").value - 1;
+    const d = +parts.find((p) => p.type === "day").value;
+    return Date.UTC(y, m, d);
+  } catch {
+    return getUtcDateStamp(parsedMs);
+  }
 }
 
 export function jobIsFresh(job, referenceTime, config) {
@@ -368,12 +400,19 @@ export function jobIsFresh(job, referenceTime, config) {
   }
 
   const ageMinutes = (referenceMs - postedMs) / (60 * 1000);
-  return ageMinutes >= 0 && ageMinutes <= config.maxPostAgeMinutes;
+  // Allow up to 5 minutes of clock skew (future-dated jobs from ATS servers)
+  return ageMinutes >= -5 && ageMinutes <= config.maxPostAgeMinutes;
 }
 
 export function delay(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+export function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 

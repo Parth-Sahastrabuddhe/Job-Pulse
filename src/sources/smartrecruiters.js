@@ -7,7 +7,7 @@ function parseSmartRecruitersJob(raw, companyConfig) {
   const id = String(raw.uuid || raw.id || "");
   const loc = raw.location || {};
   const locationParts = [loc.city, loc.region, loc.country].filter(Boolean);
-  const location = loc.fullLocation || locationParts.join(", ");
+  const location = loc.fullLocation ?? locationParts.join(", ");
   // SmartRecruiters API returns 2-letter ISO codes (e.g. "us", "in", "br"), not full names
   const rawCountry = (loc.country || loc.countryCode || "").toLowerCase();
   const countryCode = rawCountry === "us" ? "US" : rawCountry ? "NON-US" : "";
