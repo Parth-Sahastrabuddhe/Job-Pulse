@@ -504,8 +504,8 @@ client.on("interactionCreate", async (interaction) => {
       const updatedButtons = buildDmButtons(hash, jobUrl, "applied");
       await interaction.editReply({ components: updatedButtons });
 
-      // Update Google Sheet in background
-      if (row?.source_label && row?.title) {
+      // Update Google Sheet in background — only for the sheet owner
+      if (row?.source_label && row?.title && profile.discord_id === "1038422401874145372") {
         try {
           const scriptPath = path.resolve(PROJECT_ROOT, "scripts", "add_application.py");
           const isLinux = process.platform === "linux";
