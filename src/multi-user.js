@@ -29,6 +29,7 @@ import { initDb, getDb, closeDb, cleanupExpiredOtps } from "./state.js";
 import {
   getActiveUsers,
   getUserSeenJobKeys,
+  getMuDeliveredJobKeys,
   markJobNotified,
   updateJobStatus,
   getSavedJobs,
@@ -826,7 +827,7 @@ async function runPollCycle() {
 
   for (const user of users) {
     try {
-      const seenKeys    = getUserSeenJobKeys(user.id);
+      const seenKeys    = getMuDeliveredJobKeys(user.id);
       const matchedJobs = filterJobsForUser(freshJobs, user, seenKeys, {
         sponsorLookup: isH1bSponsor,
       });

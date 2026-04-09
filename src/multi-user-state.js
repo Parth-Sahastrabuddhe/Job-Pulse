@@ -167,6 +167,28 @@ export function getUserSeenJobKeys(userId) {
 }
 
 /**
+ * Get job keys the multi-user bot has already processed for a user.
+ * Uses dm_log (the mu bot's own delivery ledger) plus user actions
+ * (applied/saved/skipped) from user_seen_jobs. This avoids false dedup
+ * caused by bridgeToTracker inserting "notified" rows from the personal bot.
+ * @returns {Set<string>}
+ */
+export function getMuDeliveredJobKeys(userId) {
+  const db = getDb();
+  // Jobs the mu bot delivered (or filtered)
+  const dmRows = db
+    .prepare("SELECT DISTINCT job_key FROM dm_log WHERE user_id = ?")
+    .all(userId);
+  // Jobs the user acted on (should not re-notify regardless of source)
+  const actionRows = db
+    .prepare("SELECT job_key FROM user_seen_jobs WHERE user_id = ? AND status IN ('applied','saved','skipped')")
+    .all(userId);
+  const keys = new Set(dmRows.map((r) => r.job_key));
+  for (const r of actionRows) keys.add(r.job_key);
+  return keys;
+}
+
+/**
  * Get a user's application history joined with full job details.
  * @param {number} userId
  * @param {{ status?: string, limit?: number, offset?: number }} opts
