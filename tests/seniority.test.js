@@ -50,6 +50,7 @@ describe("detectSeniority", () => {
 
     // Banking titles
     ["Vice President, Software Engineer", "senior"],
+    ["AVP, Software Engineer", "senior"],
     ["SVP, Technology", "staff"],
     ["Associate, Technology", "mid"],
   ];

@@ -167,6 +167,7 @@ export function detectSeniority(title) {
   if (/\b(senior|sr\.?)\b/i.test(t)) return "senior";
   if (/\blead\w*\b/i.test(t)) return "senior";
   if (/\bvice\s+president\b|\bVP\b/i.test(t)) return "senior";
+  if (/\bAVP\b/.test(t)) return "senior";
   if (/\bmanager\b/i.test(t)) return "senior";
 
   // Entry+Mid composite — SWE I / SDE I / Engineer 1 / Roman numeral I (no II/III suffix)
