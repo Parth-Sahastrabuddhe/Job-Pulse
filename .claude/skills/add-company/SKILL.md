@@ -73,14 +73,14 @@ Invoke `/verification-before-completion` — run `npm run check`, then `--dry-ru
 git add src/companies.js src/config.js && git commit -m "Add {company}" && git push origin main
 ```
 
-Deploy to AWS EC2 (bot runs there, NEVER locally):
+Deploy to AWS EC2 (bots run there, NEVER locally):
 
 ```bash
 ssh -i "C:\Users\sahas\job-alert-bot\data\jobpulse.pem" -o StrictHostKeyChecking=no ubuntu@3.138.62.29 \
-  "cd ~/Job-Pulse && git pull && pm2 restart jobpulse-bot"
+  "cd ~/Job-Pulse && git pull && pm2 restart micro-bot jobpulse-mu"
 ```
 
-Only restart `jobpulse-bot`. Do NOT touch `micro-bot` or `jobpulse-web`.
+Restart both `micro-bot` and `jobpulse-mu` so both bots pick up the new company. Do NOT touch `jobpulse-web`.
 
 ## Step 10: Verify on AWS
 
@@ -88,7 +88,7 @@ Check logs to confirm the new company returns data:
 
 ```bash
 ssh -i "C:\Users\sahas\job-alert-bot\data\jobpulse.pem" -o StrictHostKeyChecking=no ubuntu@3.138.62.29 \
-  "pm2 logs jobpulse-bot --lines 30 --nostream" | grep -i "{company}"
+  "pm2 logs jobpulse-mu --lines 30 --nostream" | grep -i "{company}"
 ```
 
 ## Superpowers Skills Referenced
