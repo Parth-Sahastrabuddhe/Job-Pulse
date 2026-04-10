@@ -43,7 +43,7 @@ import {
   searchUserJobs,
   logError,
 } from "./multi-user-state.js";
-import { filterJobsForUser } from "./user-filter.js";
+import { filterJobForUser } from "./filter.js";
 import { isJobUrlLive } from "./liveness.js";
 import { jobIsFresh } from "./sources/shared.js";
 import { COMPANIES } from "./companies.js";
@@ -828,9 +828,11 @@ async function runPollCycle() {
   for (const user of users) {
     try {
       const seenKeys    = getMuDeliveredJobKeys(user.id);
-      const matchedJobs = filterJobsForUser(freshJobs, user, seenKeys, {
-        sponsorLookup: isH1bSponsor,
-      });
+      const matchedJobs = freshJobs.filter(
+        (job) =>
+          !seenKeys.has(job.key) &&
+          filterJobForUser(job, user, { sponsorLookup: isH1bSponsor }).pass
+      );
 
       if (matchedJobs.length === 0) continue;
 
