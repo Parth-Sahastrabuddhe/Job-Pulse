@@ -227,6 +227,7 @@ export async function sendDigestDm(client, discordId, jobs, firstName, options =
       const embed   = buildJobEmbed(job, {
         timezone: options.timezone,
         experienceYears: job._experienceYears,
+        warnings: job._warnings ?? [],
       });
       const buttons = buildDmButtons(hash, jobUrl, "pending");
 

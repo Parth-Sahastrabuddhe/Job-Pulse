@@ -724,6 +724,52 @@ async function getJobDescription(job) {
   }
 }
 
+/**
+ * Fetch the JD for a job and derive warnings + education-aware experience
+ * years for a given user profile. Returns `{ warnings: [], experienceYears: null }`
+ * on JD fetch failure (never throws).
+ *
+ * Used by both the immediate-send path in runPollCycle and the delayed-
+ * delivery paths in runDigestCycle to keep warning generation consistent.
+ */
+async function computeJobEnrichment(job, user) {
+  let experienceYears = null;
+  let warnings = [];
+  try {
+    const description = await getJobDescription(job);
+    if (description) {
+      const rawWarnings = checkJobDescription(description);
+
+      warnings = rawWarnings.filter((w) => {
+        // Sponsorship warnings → only shown to users requiring sponsorship
+        if (w.text.startsWith("No sponsorship")) {
+          return Boolean(user.requires_sponsorship);
+        }
+        // Strip generic experience warning — replaced with education-aware below
+        if (/^\d+\+ years required/.test(w.text)) {
+          return false;
+        }
+        return true;
+      });
+
+      const tierInfo = extractExperienceTiers(description);
+      const yearsForUser = pickTierYearsForUser(
+        tierInfo.tiers,
+        tierInfo.fallbackMax,
+        user.education_level
+      );
+      if (yearsForUser >= 5) {
+        experienceYears = yearsForUser;
+        warnings.push({ text: `${yearsForUser}+ years required`, severity: "soft" });
+      }
+    }
+  } catch (err) {
+    console.error(`[multi-user] JD processing failed for ${job.key}: ${err.message}`);
+    // Fall through — return empty warnings rather than throwing
+  }
+  return { warnings, experienceYears };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Auto-seed h1b_sponsors from COMPANIES registry
 // ─────────────────────────────────────────────────────────────────────────────
@@ -827,12 +873,21 @@ async function runPollCycle() {
 
   for (const user of users) {
     try {
-      const seenKeys    = getMuDeliveredJobKeys(user.id);
-      const matchedJobs = freshJobs.filter(
-        (job) =>
-          !seenKeys.has(job.key) &&
-          filterJobForUser(job, user, { sponsorLookup: isH1bSponsor }).pass
-      );
+      const seenKeys = getMuDeliveredJobKeys(user.id);
+      let profileInvalid = false;
+      const matchedJobs = freshJobs.filter((job) => {
+        if (seenKeys.has(job.key)) return false;
+        const result = filterJobForUser(job, user, { sponsorLookup: isH1bSponsor });
+        if (result.reason === "invalid_profile") profileInvalid = true;
+        return result.pass;
+      });
+
+      if (profileInvalid) {
+        try {
+          logError("filter-bad-profile", `user=${user.id}`);
+        } catch (_) { /* DB may be busy */ }
+        continue;
+      }
 
       if (matchedJobs.length === 0) continue;
 
@@ -847,46 +902,8 @@ async function runPollCycle() {
           continue;
         }
 
-        // Fetch JD and compute warnings + experience years for ALL users.
-        // No silent drops — warnings are always delivered (filtered by profile).
-        let experienceYears = null;
-        let warnings = [];
-        try {
-          const description = await getJobDescription(job);
-          if (description) {
-            const rawWarnings = checkJobDescription(description);
-
-            // Profile-aware warning filtering:
-            //   - Sponsorship warnings → only shown to users requiring sponsorship
-            //   - Clearance warnings → always shown
-            //   - Strip the generic experience warning — replaced with the
-            //     education-aware version below
-            warnings = rawWarnings.filter((w) => {
-              if (w.text.startsWith("No sponsorship")) {
-                return Boolean(user.requires_sponsorship);
-              }
-              if (/^\d+\+ years required/.test(w.text)) {
-                return false;
-              }
-              return true;
-            });
-
-            // Education-aware experience tier picking
-            const tierInfo = extractExperienceTiers(description);
-            const yearsForUser = pickTierYearsForUser(
-              tierInfo.tiers,
-              tierInfo.fallbackMax,
-              user.education_level
-            );
-            if (yearsForUser >= 5) {
-              experienceYears = yearsForUser;
-              warnings.push({ text: `${yearsForUser}+ years required`, severity: "soft" });
-            }
-          }
-        } catch (err) {
-          console.error(`[multi-user] JD processing failed for ${job.key}: ${err.message}`);
-          // Fall through — deliver without warnings
-        }
+        // Compute JD-based warnings + education-aware experience years
+        const { warnings, experienceYears } = await computeJobEnrichment(job, user);
 
         const action = getDeliveryAction(user, new Date());
         const dmOptions = { timezone: userTz, experienceYears, warnings };
@@ -900,8 +917,6 @@ async function runPollCycle() {
             try { logError("dm-failed", `user=${user.id} discord=${user.discord_id} job=${job.title} (${job.sourceLabel})`); } catch (_) { /* DB may be busy */ }
           }
         } else {
-          // Store experience info on the job for digest delivery later
-          if (experienceYears) job._experienceYears = experienceYears;
           markJobNotified(user.id, job.key);
           logDm(user.id, job.key, "queued");
         }
@@ -982,7 +997,24 @@ async function runDigestCycle() {
             .all(...jobKeys);
 
           const userTz = user.quiet_hours_tz || "America/New_York";
-          await sendDigestDm(client, user.discord_id, queuedJobs, user.first_name, { timezone: userTz });
+
+          // Compute warnings + experience per job before sending the digest
+          const enrichedJobs = [];
+          for (const job of queuedJobs) {
+            const normalisedJob = {
+              ...job,
+              sourceKey: job.source_key,
+              sourceLabel: job.source_label,
+            };
+            const enrichment = await computeJobEnrichment(normalisedJob, user);
+            enrichedJobs.push({
+              ...job,
+              _warnings: enrichment.warnings,
+              _experienceYears: enrichment.experienceYears,
+            });
+          }
+
+          await sendDigestDm(client, user.discord_id, enrichedJobs, user.first_name, { timezone: userTz });
 
           // Mark all queued DMs as sent
           db.prepare(
@@ -1013,24 +1045,19 @@ async function runDigestCycle() {
             const job = db.prepare("SELECT * FROM seen_jobs WHERE key = ?").get(row.job_key);
             if (!job) continue;
 
-            // Try to extract experience info from cached description
-            let experienceYears = null;
-            try {
-              const dirId = jobDirId({ sourceKey: job.source_key, id: job.id });
-              const data = await loadJobData(dirId);
-              if (data?.description) {
-                const warnings = checkJobDescription(data.description);
-                const expWarn = warnings.find((w) => w.severity === "soft");
-                if (expWarn) {
-                  const m = expWarn.text.match(/^(\d+)\+/);
-                  if (m) experienceYears = parseInt(m[1], 10);
-                }
-              }
-            } catch {
-              // No cached description — skip experience info
-            }
+            // Normalise the DB row into the shape computeJobEnrichment expects
+            const normalisedJob = {
+              ...job,
+              sourceKey: job.source_key,
+              sourceLabel: job.source_label,
+            };
+            const { warnings, experienceYears } = await computeJobEnrichment(normalisedJob, user);
 
-            const result = await sendJobDm(client, user.discord_id, job, user.first_name, { timezone: tz, experienceYears });
+            const result = await sendJobDm(client, user.discord_id, job, user.first_name, {
+              timezone: tz,
+              experienceYears,
+              warnings,
+            });
             if (result) {
               db.prepare(
                 "UPDATE dm_log SET status = 'sent' WHERE user_id = ? AND job_key = ? AND status = 'queued'"
