@@ -837,10 +837,9 @@ async function runPollCycle() {
       if (matchedJobs.length === 0) continue;
 
       const userTz = user.quiet_hours_tz || "America/New_York";
-      const needsJdFilter = Boolean(user.requires_sponsorship);
 
       for (const job of matchedJobs) {
-        // Check if job URL is still live — skip ghost listings
+        // Check if job URL is still live — skip ghost listings.
         // Don't mark as notified so it retries next cycle (URL may be temporarily down)
         const live = await isJobUrlLive(job.url);
         if (!live) {
@@ -848,45 +847,49 @@ async function runPollCycle() {
           continue;
         }
 
-        // JD-based filtering for sponsorship users
+        // Fetch JD and compute warnings + experience years for ALL users.
+        // No silent drops — warnings are always delivered (filtered by profile).
         let experienceYears = null;
-        if (needsJdFilter) {
-          try {
-            const description = await getJobDescription(job);
-            const warnings = checkJobDescription(description);
-            const hasHard = warnings.some((w) => w.severity === "hard");
-            if (hasHard) {
-              // Silently skip — no sponsorship or clearance required
-              markJobNotified(user.id, job.key);
-              logDm(user.id, job.key, "filtered_jd");
-              continue;
-            }
-            // Education-aware experience selection: pick the tier matching the user's
-            // education level, so users with a higher degree see the right requirement.
+        let warnings = [];
+        try {
+          const description = await getJobDescription(job);
+          if (description) {
+            const rawWarnings = checkJobDescription(description);
+
+            // Profile-aware warning filtering:
+            //   - Sponsorship warnings → only shown to users requiring sponsorship
+            //   - Clearance warnings → always shown
+            //   - Strip the generic experience warning — replaced with the
+            //     education-aware version below
+            warnings = rawWarnings.filter((w) => {
+              if (w.text.startsWith("No sponsorship")) {
+                return Boolean(user.requires_sponsorship);
+              }
+              if (/^\d+\+ years required/.test(w.text)) {
+                return false;
+              }
+              return true;
+            });
+
+            // Education-aware experience tier picking
             const tierInfo = extractExperienceTiers(description);
-            const yearsForUser = pickTierYearsForUser(tierInfo.tiers, tierInfo.fallbackMax, user.education_level);
-            if (yearsForUser >= 5) experienceYears = yearsForUser;
-          } catch (err) {
-            // Description fetch failed — deliver anyway rather than silently dropping
-            console.error(`[multi-user] JD fetch failed for ${job.key}: ${err.message}`);
-          }
-        } else {
-          // Non-sponsorship users: still extract experience info if description is cached
-          try {
-            const dirId = jobDirId(job);
-            const data = await loadJobData(dirId);
-            if (data?.description) {
-              const tierInfo = extractExperienceTiers(data.description);
-              const yearsForUser = pickTierYearsForUser(tierInfo.tiers, tierInfo.fallbackMax, user.education_level);
-              if (yearsForUser >= 5) experienceYears = yearsForUser;
+            const yearsForUser = pickTierYearsForUser(
+              tierInfo.tiers,
+              tierInfo.fallbackMax,
+              user.education_level
+            );
+            if (yearsForUser >= 5) {
+              experienceYears = yearsForUser;
+              warnings.push({ text: `${yearsForUser}+ years required`, severity: "soft" });
             }
-          } catch {
-            // No cached description — that's fine, skip experience info
           }
+        } catch (err) {
+          console.error(`[multi-user] JD processing failed for ${job.key}: ${err.message}`);
+          // Fall through — deliver without warnings
         }
 
         const action = getDeliveryAction(user, new Date());
-        const dmOptions = { timezone: userTz, experienceYears };
+        const dmOptions = { timezone: userTz, experienceYears, warnings };
 
         if (action === "send") {
           const result = await sendJobDm(client, user.discord_id, job, user.first_name, dmOptions);
