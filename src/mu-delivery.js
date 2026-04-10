@@ -85,7 +85,7 @@ export function buildDmButtons(hash, jobUrl, status) {
  * @param {number} [options.experienceYears] max years of experience found in JD
  * @returns {EmbedBuilder}
  */
-export function buildJobEmbed(job, { timezone, experienceYears } = {}) {
+export function buildJobEmbed(job, { timezone, experienceYears, warnings = [] } = {}) {
   // Normalise field names — prefer snake_case (DB), fall back to camelCase
   const company   = job.source_label    ?? job.sourceLabel    ?? "Unknown Company";
   const title     = job.title           ?? "Untitled";
@@ -94,7 +94,7 @@ export function buildJobEmbed(job, { timezone, experienceYears } = {}) {
   const postedAt  = job.posted_at       ?? job.postedAt       ?? "";
   const precision = job.posted_precision ?? job.postedPrecision ?? "";
 
-  // Build description lines (plain text, matching micro bot style)
+  // Build description lines
   const descParts = [];
   if (location) descParts.push(location);
 
@@ -111,12 +111,26 @@ export function buildJobEmbed(job, { timezone, experienceYears } = {}) {
     descParts.push(`Experience: ${experienceYears}+ years`);
   }
 
+  // Render JD warnings inline (sponsorship, clearance, etc.)
+  if (warnings.length > 0) {
+    descParts.push(""); // blank line separator
+    for (const w of warnings) {
+      const icon = w.severity === "hard" ? "🛑" : "⚠️";
+      descParts.push(`${icon} ${w.text}`);
+    }
+  }
+
   const description = descParts.join("\n") || undefined;
+
+  // Color reflects the most severe warning present
+  const hasHard = warnings.some((w) => w.severity === "hard");
+  const hasSoft = warnings.some((w) => w.severity === "soft");
+  const color = hasHard ? 0xED4245 : hasSoft ? 0xFFA500 : 0x5865F2;
 
   const embed = new EmbedBuilder()
     .setAuthor({ name: company })
     .setTitle(title)
-    .setColor(0x5865F2);
+    .setColor(color);
 
   if (url) embed.setURL(url);
   if (description) embed.setDescription(description);
