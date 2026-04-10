@@ -37,7 +37,7 @@ import {
   initDb, closeDb, migrateFromJson,
   getNewJobs, getUnnotifiedJobs, upsertJobs, pruneState, hasSeenJobs, expireSavedJobPosts
 } from "./state.js";
-import { checkJobDescription } from "./jd-filter.js";
+import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } from "./jd-filter.js";
 import { isJobUrlLive } from "./liveness.js";
 
 function timestamp() {
@@ -173,7 +173,24 @@ async function fetchDescriptionsAndFilter(jobs) {
       } catch (error) {
         log(`Failed to fetch description for ${dirId}: ${error.message}`);
       }
-      const warnings = checkJobDescription(description);
+      const rawWarnings = checkJobDescription(description);
+
+      // Strip the generic experience warning — we'll add an education-aware
+      // one below that picks the tier matching PERSONAL_PROFILE.education_level
+      const warnings = rawWarnings.filter((w) => !/^\d+\+ years required/.test(w.text));
+
+      if (description) {
+        const tierInfo = extractExperienceTiers(description);
+        const yearsForUser = pickTierYearsForUser(
+          tierInfo.tiers,
+          tierInfo.fallbackMax,
+          PERSONAL_PROFILE.education_level
+        );
+        if (yearsForUser >= 5) {
+          warnings.push({ text: `${yearsForUser}+ years required`, severity: "soft" });
+        }
+      }
+
       return { job, warnings };
     }));
     results.push(...batchResults.filter(Boolean));
