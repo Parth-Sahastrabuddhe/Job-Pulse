@@ -23,6 +23,12 @@ const SENIORITY_LEVELS = [
   { value: "staff", label: "Staff+" },
 ];
 
+const EDUCATION_LEVELS = [
+  { value: "bachelors", label: "Bachelor's" },
+  { value: "masters", label: "Master's" },
+  { value: "phd", label: "PhD" },
+];
+
 const NOTIFICATION_MODES = [
   { value: "realtime", label: "Real-time", desc: "Notified the moment a job is posted" },
   { value: "daily", label: "Daily Digest", desc: "One summary per day" },
@@ -178,6 +184,30 @@ export default function ProfilePage() {
                     {s.label}
                   </label>
                 ))}
+              </div>
+            </section>
+
+            {/* Education */}
+            <section className="bg-surface rounded-xl border border-line p-5">
+              <h2 className="text-sm font-semibold text-foreground mb-3 font-display uppercase tracking-wider">Education</h2>
+              <p className="text-xs text-muted mb-3">Used to pick the right experience tier when a job lists requirements like &ldquo;Bachelor&rsquo;s + 5 years OR Master&rsquo;s + 3 years&rdquo;.</p>
+              <div className="flex flex-wrap gap-3">
+                {EDUCATION_LEVELS.map((e) => (
+                  <label key={e.value} className="flex items-center gap-2 text-sm text-muted cursor-pointer hover:text-foreground transition-colors">
+                    <input type="radio" name="educationLevel" value={e.value}
+                      checked={profile.educationLevel === e.value}
+                      onChange={() => setProfile((p) => ({ ...p, educationLevel: e.value }))}
+                      className="w-4 h-4 border-line bg-background accent-pulse" />
+                    {e.label}
+                  </label>
+                ))}
+                <label className="flex items-center gap-2 text-sm text-muted cursor-pointer hover:text-foreground transition-colors">
+                  <input type="radio" name="educationLevel" value=""
+                    checked={!profile.educationLevel}
+                    onChange={() => setProfile((p) => ({ ...p, educationLevel: "" }))}
+                    className="w-4 h-4 border-line bg-background accent-pulse" />
+                  Prefer not to say
+                </label>
               </div>
             </section>
 

@@ -24,6 +24,7 @@ export async function GET() {
     quietHoursEnd: profile.quiet_hours_end || "",
     quietHoursTz: profile.quiet_hours_tz || "America/New_York",
     isActive: profile.is_active === 1,
+    educationLevel: profile.education_level || "",
     hasPassword: !!profile.password_hash,
   });
 }
@@ -52,6 +53,7 @@ export async function PUT(request) {
   if (body.quietHoursEnd !== undefined) fields.quiet_hours_end = body.quietHoursEnd;
   if (body.quietHoursTz !== undefined) fields.quiet_hours_tz = body.quietHoursTz;
   if (body.isActive !== undefined) fields.is_active = body.isActive ? 1 : 0;
+  if (body.educationLevel !== undefined) fields.education_level = body.educationLevel;
 
   // Handle password setting/changing
   if (body.newPassword) {

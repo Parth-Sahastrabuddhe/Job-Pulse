@@ -79,6 +79,11 @@ export function initDb(dbFile) {
     db.exec("ALTER TABLE user_profiles ADD COLUMN password_hash TEXT DEFAULT NULL");
   }
 
+  // Add education_level column to user_profiles (idempotent)
+  if (userCols.length > 0 && !userCols.includes("education_level")) {
+    db.exec("ALTER TABLE user_profiles ADD COLUMN education_level TEXT DEFAULT ''");
+  }
+
   // Add applied_at column to user_seen_jobs (idempotent)
   const usjCols = db.pragma("table_info(user_seen_jobs)").map((c) => c.name);
   if (usjCols.length > 0 && !usjCols.includes("applied_at")) {
@@ -116,6 +121,7 @@ export function initDb(dbFile) {
       is_active BOOLEAN DEFAULT 1,
       role TEXT DEFAULT 'user',
       password_hash TEXT DEFAULT NULL,
+      education_level TEXT DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

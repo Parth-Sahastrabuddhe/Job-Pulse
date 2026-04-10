@@ -48,7 +48,8 @@ export function updateUserProfile(discordId, fields) {
   const allowed = [
     "first_name", "email", "email_verified", "role_categories", "seniority_levels",
     "company_selections", "country", "requires_sponsorship", "notification_mode",
-    "quiet_hours_start", "quiet_hours_end", "quiet_hours_tz", "is_active"
+    "quiet_hours_start", "quiet_hours_end", "quiet_hours_tz", "is_active",
+    "education_level"
   ];
   const updates = [];
   const values = [];

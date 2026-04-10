@@ -25,6 +25,7 @@ const UPDATABLE_PROFILE_FIELDS = new Set([
   "quiet_hours_tz",
   "is_active",
   "role",
+  "education_level",
 ]);
 
 /**

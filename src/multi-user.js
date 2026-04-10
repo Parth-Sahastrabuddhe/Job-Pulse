@@ -47,7 +47,7 @@ import { filterJobsForUser } from "./user-filter.js";
 import { isJobUrlLive } from "./liveness.js";
 import { jobIsFresh } from "./sources/shared.js";
 import { COMPANIES } from "./companies.js";
-import { checkJobDescription } from "./jd-filter.js";
+import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } from "./jd-filter.js";
 import { fetchJobDescription, jobDirId, loadJobData } from "./job-description.js";
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
 import { sendJobDm, sendDigestDm, jobButtonHash, buildDmButtons } from "./mu-delivery.js";
@@ -859,11 +859,11 @@ async function runPollCycle() {
               logDm(user.id, job.key, "filtered_jd");
               continue;
             }
-            const expWarn = warnings.find((w) => w.severity === "soft");
-            if (expWarn) {
-              const m = expWarn.text.match(/^(\d+)\+/);
-              if (m) experienceYears = parseInt(m[1], 10);
-            }
+            // Education-aware experience selection: pick the tier matching the user's
+            // education level, so users with a higher degree see the right requirement.
+            const tierInfo = extractExperienceTiers(description);
+            const yearsForUser = pickTierYearsForUser(tierInfo.tiers, tierInfo.fallbackMax, user.education_level);
+            if (yearsForUser >= 5) experienceYears = yearsForUser;
           } catch (err) {
             // Description fetch failed — deliver anyway rather than silently dropping
             console.error(`[multi-user] JD fetch failed for ${job.key}: ${err.message}`);
@@ -874,12 +874,9 @@ async function runPollCycle() {
             const dirId = jobDirId(job);
             const data = await loadJobData(dirId);
             if (data?.description) {
-              const warnings = checkJobDescription(data.description);
-              const expWarn = warnings.find((w) => w.severity === "soft");
-              if (expWarn) {
-                const m = expWarn.text.match(/^(\d+)\+/);
-                if (m) experienceYears = parseInt(m[1], 10);
-              }
+              const tierInfo = extractExperienceTiers(data.description);
+              const yearsForUser = pickTierYearsForUser(tierInfo.tiers, tierInfo.fallbackMax, user.education_level);
+              if (yearsForUser >= 5) experienceYears = yearsForUser;
             }
           } catch {
             // No cached description — that's fine, skip experience info
