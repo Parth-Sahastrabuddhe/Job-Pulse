@@ -40,7 +40,7 @@ pm2 save
 echo ""
 echo "=== Deployment complete ==="
 echo "Micro-Bot:    pm2 logs micro-bot"
-echo "JobPulse Bot: pm2 logs jobpulse-bot"
+echo "JobPulse MU:  pm2 logs jobpulse-mu"
 echo "Website:      pm2 logs jobpulse-web"
 echo ""
 echo "For SSL: sudo certbot --nginx -d jobpulse.app -d www.jobpulse.app"

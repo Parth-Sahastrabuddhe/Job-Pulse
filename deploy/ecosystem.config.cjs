@@ -9,7 +9,7 @@ module.exports = {
       env: { NODE_ENV: "production" }
     },
     {
-      name: "jobpulse-bot",
+      name: "jobpulse-mu",
       script: "src/multi-user.js",
       cwd: "/home/ubuntu/Job-Pulse",
       env: { NODE_ENV: "production" }
