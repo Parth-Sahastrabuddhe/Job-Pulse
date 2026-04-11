@@ -74,10 +74,6 @@ function buildButtonRows(hash, jobUrl, status, isAdmin = false) {
         .setLabel("Research")
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId(`contacts:${hash}`)
-        .setLabel("Contacts")
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
         .setCustomId(`autofill:${hash}`)
         .setLabel("Auto-Fill")
         .setStyle(ButtonStyle.Secondary)
@@ -152,8 +148,6 @@ export async function startDiscordBot(config) {
         await handleCancelApply(interaction, hash);
       } else if (action === "research") {
         await handleResearch(interaction, hash);
-      } else if (action === "contacts") {
-        await handleContacts(interaction, hash);
       } else if (action === "autofill") {
         await handleAutoFill(interaction, hash);
       }
@@ -758,46 +752,6 @@ async function handleResearch(interaction, hash) {
     await interaction.editReply({ embeds: [embed] });
   } catch (err) {
     await interaction.editReply(`Research failed: ${err.message.slice(0, 200)}`);
-  }
-}
-
-async function handleContacts(interaction, hash) {
-  if (interaction.user.id !== ADMIN_DISCORD_ID) {
-    await interaction.reply({ content: "Admin only.", ephemeral: true });
-    return;
-  }
-  await interaction.deferReply({ ephemeral: true });
-
-  const embedDetails = extractJobInfoFromMessage(interaction.message);
-  const companyName = embedDetails.company || "Unknown";
-  const jobTitle = embedDetails.role || "";
-
-  try {
-    const { findContacts } = await import("./contact-finder.js");
-    const data = await findContacts(companyName, jobTitle);
-
-    const contactLines = (data.contacts || []).map((c, i) =>
-      `${i + 1}. **${c.name}** — ${c.title}${c.linkedinUrl ? ` ([LinkedIn](${c.linkedinUrl}))` : ""}`
-    ).join("\n") || "No contacts found.";
-
-    const embed = new EmbedBuilder()
-      .setTitle(`Contacts: ${companyName}`)
-      .setColor(0x5865F2)
-      .addFields(
-        { name: "Potential Contacts", value: contactLines.slice(0, 1024), inline: false },
-      );
-
-    if (data.outreachTemplate?.body) {
-      embed.addFields({
-        name: `Outreach Template${data.outreachTemplate.subject ? ` \u2014 "${data.outreachTemplate.subject}"` : ""}`,
-        value: data.outreachTemplate.body.slice(0, 1024),
-        inline: false
-      });
-    }
-
-    await interaction.editReply({ embeds: [embed] });
-  } catch (err) {
-    await interaction.editReply(`Contact search failed: ${err.message.slice(0, 200)}`);
   }
 }
 
