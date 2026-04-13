@@ -800,6 +800,7 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
   const channel = await client.channels.fetch(channelId);
   if (!channel) return;
 
+  const legitimacyMap = options.legitimacyMap instanceof Map ? options.legitimacyMap : new Map();
   for (const [index, job] of jobs.entries()) {
     if (options.dryRun) {
       console.log(`[dry-run][discord-bot] Would send: ${job.title}`);
@@ -810,6 +811,8 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
     const warnings = warningsMap.get(job.key);
     const hasWarnings = warnings && warnings.length > 0;
     const hasHardWarnings = hasWarnings && warnings.some((w) => w.severity === "hard");
+    const legitimacy = legitimacyMap.get(job.key);
+    const isCaution = legitimacy?.tier === "caution";
 
     const descParts = [];
     if (job.archetype) descParts.push(`**${job.archetype}**`);
@@ -828,12 +831,15 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
       );
       descParts.push(`\n${parts.join("\n")}`);
     }
+    if (isCaution && legitimacy.topSignal) {
+      descParts.push(`\n:warning: ${legitimacy.topSignal}`);
+    }
 
     const embed = new EmbedBuilder()
       .setAuthor({ name: job.sourceLabel })
       .setTitle(job.title)
       .setURL(job.url)
-      .setColor(hasHardWarnings ? 0xED4245 : hasWarnings ? 0xFFA500 : 0x5865F2);
+      .setColor(hasHardWarnings ? 0xED4245 : (hasWarnings || isCaution) ? 0xFFA500 : 0x5865F2);
 
     if (descParts.length > 0) {
       embed.setDescription(descParts.join("\n"));
