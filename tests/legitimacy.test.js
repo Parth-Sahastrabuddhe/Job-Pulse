@@ -44,6 +44,21 @@ describe("checkLegitimacy — posting age", () => {
     const postedAt = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
     expect(checkLegitimacy(makeJob({ postedAt, seniorityLevel: "staff" }), null, opts0).tier).toBe("high_confidence");
   });
+
+  it("no age signal for director jobs (200 days old)", () => {
+    const postedAt = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    expect(checkLegitimacy(makeJob({ postedAt, seniorityLevel: "director" }), null, opts0).tier).toBe("high_confidence");
+  });
+
+  it("caution when entry job posted 35 days ago", () => {
+    const postedAt = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString();
+    expect(checkLegitimacy(makeJob({ postedAt, seniorityLevel: "entry" }), null, opts0).tier).toBe("caution");
+  });
+
+  it("suspicious when entry_mid job posted 70 days ago", () => {
+    const postedAt = new Date(Date.now() - 70 * 24 * 60 * 60 * 1000).toISOString();
+    expect(checkLegitimacy(makeJob({ postedAt, seniorityLevel: "entry_mid" }), null, opts0).tier).toBe("suspicious");
+  });
 });
 
 // --- Signal 2: Reposting ---
@@ -147,6 +162,20 @@ describe("checkLegitimacy — topSignal priority", () => {
     const postedAt = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString();
     const result = checkLegitimacy(makeJob({ postedAt }), null, { getRepostCountFn: stubRepost1 });
     expect(result.topSignal).toMatch(/Reposted/);
+  });
+
+  it("prefers age over thin JD when both caution", () => {
+    // age: mid + 35 days → caution; thin JD: 450 chars → caution; age should win
+    const postedAt = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString();
+    const result = checkLegitimacy(makeJob({ postedAt }), "A".repeat(450), opts0);
+    expect(result.topSignal).toMatch(/Posted/);
+  });
+
+  it("prefers thin JD over evergreen when both caution", () => {
+    // thin JD: 450 chars → caution; evergreen keyword → caution; thin should win
+    const desc = "talent pool " + "A".repeat(450);
+    const result = checkLegitimacy(makeJob(), desc, opts0);
+    expect(result.topSignal).toMatch(/Thin job description/);
   });
 });
 
