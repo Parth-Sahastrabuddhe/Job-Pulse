@@ -26,6 +26,7 @@ import { collectIntuitJobs } from "./sources/intuit.js";
 import { collectSmartRecruitersJobs } from "./sources/smartrecruiters.js";
 import { collectBloombergJobs } from "./sources/bloomberg.js";
 import { collectGoldmanSachsJobs } from "./sources/goldmansachs.js";
+import { collectAppleJobs } from "./sources/apple.js";
 import { collectUberJobs } from "./sources/uber.js";
 import { collectConfluentJobs } from "./sources/confluent.js";
 import { collectFordJobs } from "./sources/ford.js";
@@ -85,6 +86,7 @@ function buildRegistry(config) {
   solo("dynatrace", collectDynatraceJobs, "normal");
 
   // Slow lane — Playwright/HTML scrapers (run sequentially, less frequently)
+  solo("apple", collectAppleJobs, "slow");
   solo("uber", collectUberJobs, "slow");
   solo("confluent", collectConfluentJobs, "slow");
   solo("linkedin", collectLinkedInJobs, "slow");

@@ -28,6 +28,7 @@ export const COMPANIES = [
   { key: "dynatrace", label: "Dynatrace", ats: "solo", lane: "normal", urlPattern: /dynatrace\.com\/careers\/jobs\/(\d+)/i },
 
   // === Slow lane — Playwright/HTML scrapers ===
+  { key: "apple", label: "Apple", ats: "solo", lane: "slow", urlPattern: /jobs\.apple\.com\/en-us\/details\/(\d+)/i },
   { key: "uber", label: "Uber", ats: "solo", lane: "slow", urlPattern: /uber\.com\/.*?careers\/list\/(\d+)/i },
   { key: "confluent", label: "Confluent", ats: "solo", lane: "slow", urlPattern: /careers\.confluent\.io\/jobs\/job\/([a-f0-9-]+)/i },
   { key: "linkedin", label: "LinkedIn", ats: "solo", lane: "normal", urlPattern: /linkedin\.com\/jobs\/view\/(?:[^/]*-)?(\d+)/i },
