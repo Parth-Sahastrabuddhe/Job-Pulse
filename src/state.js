@@ -538,13 +538,17 @@ export function getJobFitScore(jobKey) {
 export function getRepostCount(sourceLabel, titleCore, excludeKey, lookbackDays = 90) {
   try {
     const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
+    // Exclude jobs first seen within the last day — prevents same-batch multi-location
+    // postings (e.g. same title in San Diego AND Cupertino) from flagging each other.
+    const batchCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const row = db.prepare(`
       SELECT COUNT(*) as cnt FROM seen_jobs
       WHERE source_label = ?
         AND title LIKE '%' || ? || '%'
         AND first_seen_at >= ?
+        AND first_seen_at < ?
         AND key != ?
-    `).get(sourceLabel, titleCore, cutoff, excludeKey);
+    `).get(sourceLabel, titleCore, cutoff, batchCutoff, excludeKey);
     return row?.cnt ?? 0;
   } catch (err) {
     console.warn(`[legitimacy] getRepostCount failed: ${err.message}`);
