@@ -35,9 +35,11 @@ import { collectHexawareJobs } from "./sources/hexaware.js";
 import { collectDynatraceJobs } from "./sources/dynatrace.js";
 import {
   initDb, closeDb, migrateFromJson,
-  getNewJobs, getUnnotifiedJobs, upsertJobs, pruneState, hasSeenJobs, expireSavedJobPosts
+  getNewJobs, getUnnotifiedJobs, upsertJobs, pruneState, hasSeenJobs, expireSavedJobPosts,
+  updateJobLegitimacy
 } from "./state.js";
 import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } from "./jd-filter.js";
+import { checkLegitimacy } from "./legitimacy.js";
 import { isJobUrlLive } from "./liveness.js";
 
 function timestamp() {
@@ -191,7 +193,16 @@ async function fetchDescriptionsAndFilter(jobs) {
         }
       }
 
-      return { job, warnings };
+      let legitimacy;
+      try {
+        legitimacy = checkLegitimacy(job, description);
+        updateJobLegitimacy(job.key, legitimacy.tier, JSON.stringify(legitimacy.signals));
+      } catch (err) {
+        log(`[legitimacy] Error for ${job.key}: ${err.message}`);
+        legitimacy = { tier: "high_confidence", topSignal: null, signals: [] };
+      }
+
+      return { job, warnings, legitimacy };
     }));
     results.push(...batchResults.filter(Boolean));
   }
@@ -238,7 +249,16 @@ async function processBatchResults(config, flags, jobs, batchLabel) {
       log(`${job.sourceLabel}: ${job.title} | ${job.location || "Location not mentioned"}${flag}`);
     }
 
-    await sendNotifications(config, filteredJobs.map((r) => r.job), filteredJobs, { dryRun: flags.dryRun });
+    const notifiableJobs = filteredJobs.filter((r) => r.legitimacy?.tier !== "suspicious");
+    const suppressed = filteredJobs.length - notifiableJobs.length;
+    if (suppressed > 0) log(`[legitimacy] Suppressed ${suppressed} suspicious job(s)`);
+
+    const legitimacyMap = new Map();
+    for (const { job, legitimacy } of notifiableJobs) {
+      if (legitimacy) legitimacyMap.set(job.key, legitimacy);
+    }
+
+    await sendNotifications(config, notifiableJobs.map((r) => r.job), notifiableJobs, { dryRun: flags.dryRun, legitimacyMap });
   }
 }
 
