@@ -72,6 +72,12 @@ export function initDb(dbFile) {
   if (!seenJobsCols.includes("fit_scores_json")) {
     db.exec("ALTER TABLE seen_jobs ADD COLUMN fit_scores_json TEXT DEFAULT NULL");
   }
+  if (!seenJobsCols.includes("legitimacy_tier")) {
+    db.exec("ALTER TABLE seen_jobs ADD COLUMN legitimacy_tier TEXT DEFAULT NULL");
+  }
+  if (!seenJobsCols.includes("legitimacy_signals_json")) {
+    db.exec("ALTER TABLE seen_jobs ADD COLUMN legitimacy_signals_json TEXT DEFAULT NULL");
+  }
 
   // Add password_hash column to user_profiles (idempotent)
   const userCols = db.pragma("table_info(user_profiles)").map((c) => c.name);
@@ -526,6 +532,33 @@ export function updateJobFitScore(jobKey, score, scoresJson) {
 
 export function getJobFitScore(jobKey) {
   return db.prepare("SELECT fit_score, fit_scores_json FROM seen_jobs WHERE key = ?").get(jobKey);
+}
+
+// --- Legitimacy CRUD ---
+export function getRepostCount(sourceLabel, titleCore, excludeKey, lookbackDays = 90) {
+  try {
+    const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
+    const row = db.prepare(`
+      SELECT COUNT(*) as cnt FROM seen_jobs
+      WHERE source_label = ?
+        AND title LIKE '%' || ? || '%'
+        AND first_seen_at >= ?
+        AND key != ?
+    `).get(sourceLabel, titleCore, cutoff, excludeKey);
+    return row?.cnt ?? 0;
+  } catch (err) {
+    console.warn(`[legitimacy] getRepostCount failed: ${err.message}`);
+    return 0;
+  }
+}
+
+export function updateJobLegitimacy(jobKey, tier, signalsJson) {
+  try {
+    db.prepare("UPDATE seen_jobs SET legitimacy_tier = ?, legitimacy_signals_json = ? WHERE key = ?")
+      .run(tier, signalsJson, jobKey);
+  } catch (err) {
+    console.warn(`[legitimacy] updateJobLegitimacy failed: ${err.message}`);
+  }
 }
 
 // --- Company research cache ---
