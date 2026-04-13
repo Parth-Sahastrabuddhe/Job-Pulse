@@ -7,7 +7,9 @@ import CompanySelector from "@/components/CompanySelector";
 const ROLE_CATEGORIES = [
   { value: "software_engineer", label: "Software Engineer" },
   { value: "data_engineer", label: "Data Engineer" },
-  { value: "ml_engineer", label: "ML Engineer" },
+  { value: "data_analyst", label: "Data Analyst" },
+  { value: "data_scientist", label: "Data Scientist" },
+  { value: "ml_engineer", label: "ML / AI Engineer" },
   { value: "frontend", label: "Frontend" },
   { value: "backend", label: "Backend" },
   { value: "devops_sre", label: "DevOps / SRE" },

@@ -67,7 +67,9 @@ export function normalizeCountryCode(value) {
 const ROLE_CATEGORY_PATTERNS = {
   software_engineer: /(?:(?:software|backend|back[\s-]?end|full[\s-]?stack|systems|cloud)\s+(?:engineer|develop)|application\s+(?:software\s+)?develop|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i,
   data_engineer: /(?:data\s+(?:engineer|platform|infrastructure)|analytics\s+engineer|\bETL\b)/i,
-  ml_engineer: /(?:machine\s+learning|(?:ML|AI)\s+engineer|deep\s+learning|\bNLP\b|computer\s+vision)/i,
+  data_analyst: /(?:data\s+analyst|business\s+(?:intelligence\s+)?analyst|\bBI\s+analyst\b|analytics\s+analyst|product\s+analyst)/i,
+  data_scientist: /(?:data\s+scientist|applied\s+scientist|research\s+scientist)/i,
+  ml_engineer: /(?:machine\s+learning|(?:ML|AI)\s+engineer|deep\s+learning|\bNLP\b|computer\s+vision|\bGenAI\b|generative\s+AI|LLM\s+engineer|prompt\s+engineer|foundation\s+model)/i,
   frontend: /(?:front[\s-]?end|UI\s+engineer|web\s+develop)/i,
   backend: /(?:back[\s-]?end|server\s+engineer|API\s+engineer)/i,
   devops_sre: /(?:\bdevops\b|\bSRE\b|site\s+reliability|(?:infrastructure|cloud)\s+engineer)/i,
@@ -106,6 +108,8 @@ export function detectRoleCategories(title) {
 
 // Priority order: most specific archetype wins
 const ARCHETYPE_PRIORITY = [
+  ["data_scientist", "DS"],
+  ["data_analyst", "DA"],
   ["ml_engineer", "ML/AI"],
   ["data_engineer", "Data"],
   ["mobile", "Mobile"],
