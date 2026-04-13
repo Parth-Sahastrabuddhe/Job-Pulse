@@ -87,7 +87,6 @@ export const COMPANIES = [
   { key: "waymo", label: "Waymo", ats: "greenhouse", lane: "normal", board: "waymo", urlPattern: /(?:waymo\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
   { key: "rubrik", label: "Rubrik", ats: "greenhouse", lane: "normal", board: "rubrik", urlPattern: /(?:rubrik\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
   { key: "dropbox", label: "Dropbox", ats: "greenhouse", lane: "normal", board: "dropbox", urlPattern: /(?:dropbox\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { key: "spacex", label: "SpaceX", ats: "greenhouse", lane: "normal", board: "spacex", urlPattern: /(?:spacex\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
   { key: "okta", label: "Okta", ats: "greenhouse", lane: "normal", board: "okta", urlPattern: /(?:okta\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
   { key: "deepmind", label: "DeepMind", ats: "greenhouse", lane: "normal", board: "deepmind", urlPattern: /(?:deepmind\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },
   { key: "duolingo", label: "Duolingo", ats: "greenhouse", lane: "normal", board: "duolingo", urlPattern: /(?:duolingo\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },

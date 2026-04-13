@@ -530,12 +530,6 @@ export function getConfig() {
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/hudl/jobs",
       jobUrlBase: "https://boards.greenhouse.io/hudl/jobs/"
     },
-    spacex: {
-      sourceKey: "spacex",
-      sourceLabel: "SpaceX",
-      apiUrl: "https://boards-api.greenhouse.io/v1/boards/spacex/jobs",
-      jobUrlBase: "https://boards.greenhouse.io/spacex/jobs/"
-    },
     okta: {
       sourceKey: "okta",
       sourceLabel: "Okta",
