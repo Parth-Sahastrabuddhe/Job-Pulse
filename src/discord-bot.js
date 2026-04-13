@@ -843,7 +843,7 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
 
     try {
       const message = await channel.send({
-        content: `**${job.sourceLabel}**`,
+        content: `**${job.sourceLabel}** — ${job.title}`,
         embeds: [embed],
         components: rows
       });
