@@ -44,10 +44,19 @@ function parseAppleJob(raw) {
   });
 }
 
-export async function collectAppleJobs(_unused, config, log) {
-  try {
-    const searchUrl = "https://jobs.apple.com/en-us/search?search=software+engineer&sort=newest&location=united-states-USA";
+// Search terms covering all supported role categories
+const APPLE_SEARCH_TERMS = [
+  "software+engineer",
+  "data+analyst",
+  "data+scientist",
+  "machine+learning",
+  "data+engineer",
+  "product+manager",
+];
 
+async function fetchAppleSearchResults(term, log) {
+  const searchUrl = `https://jobs.apple.com/en-us/search?search=${term}&sort=newest&location=united-states-USA`;
+  try {
     const response = await fetch(searchUrl, {
       headers: {
         "accept": "text/html",
@@ -56,26 +65,23 @@ export async function collectAppleJobs(_unused, config, log) {
     });
 
     if (!response.ok) {
-      log(`Apple careers returned status ${response.status}`);
+      log(`Apple [${term}]: returned status ${response.status}`);
       return [];
     }
 
     const html = await response.text();
 
-    // Extract hydration data from SSR page
     const match = html.match(/__staticRouterHydrationData\s*=\s*JSON\.parse\("(.+?)"\);/);
     if (!match) {
-      log("Apple: could not find hydration data in page");
+      log(`Apple [${term}]: could not find hydration data`);
       return [];
     }
 
     let data;
     try {
-      // Decode the escaped JSON string
       const raw = match[1].replace(/\\\\"/g, '\\"').replace(/\\"/g, '"');
       data = JSON.parse(raw);
     } catch {
-      // Fallback: try with unicode_escape-style decoding
       try {
         const raw = match[1]
           .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
@@ -84,24 +90,38 @@ export async function collectAppleJobs(_unused, config, log) {
           .replace(/\\\\/g, '\\');
         data = JSON.parse(raw);
       } catch (e2) {
-        log(`Apple: failed to parse hydration data: ${e2.message}`);
+        log(`Apple [${term}]: failed to parse hydration data: ${e2.message}`);
         return [];
       }
     }
 
     const searchData = data?.loaderData?.search;
-    if (!searchData?.searchResults) {
-      log("Apple: no searchResults in hydration data");
-      return [];
+    if (!searchData?.searchResults) return [];
+
+    return searchData.searchResults;
+  } catch (err) {
+    log(`Apple [${term}]: fetch error: ${err.message}`);
+    return [];
+  }
+}
+
+export async function collectAppleJobs(_unused, config, log) {
+  try {
+    const allRaw = [];
+    for (const term of APPLE_SEARCH_TERMS) {
+      const results = await fetchAppleSearchResults(term, log);
+      allRaw.push(...results);
+      // Small delay to avoid hammering Apple's servers
+      await new Promise((r) => setTimeout(r, 300));
     }
 
-    const rawJobs = searchData.searchResults;
-    const jobs = rawJobs
+    const jobs = allRaw
       .map((raw) => parseAppleJob(raw))
       .filter(Boolean);
 
-    log(`Apple returned ${rawJobs.length} results (${searchData.totalRecords} total), ${jobs.length} matched filters.`);
-    return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
+    const deduped = dedupeJobs(jobs);
+    log(`Apple returned ${allRaw.length} raw results across ${APPLE_SEARCH_TERMS.length} queries, ${deduped.length} unique matched.`);
+    return deduped.slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Apple API error: ${error.message}`);
     return [];
