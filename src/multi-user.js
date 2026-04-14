@@ -114,6 +114,12 @@ let running = true;
 let lastPollAt = null;
 let lastExpiryCheck = 0;
 
+/** Track consecutive liveness failures per user+job.
+ *  After DEAD_LINK_ABANDON_AFTER failures, the job is logged as dead_link
+ *  in dm_log so it stops being retried every cycle. */
+const deadLinkFailures = new Map(); // `${userId}:${jobKey}` → count
+const DEAD_LINK_ABANDON_AFTER = 3;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: find job key from a short button hash
 // ─────────────────────────────────────────────────────────────────────────────
@@ -848,9 +854,10 @@ async function runPollCycle() {
     };
   });
 
-  // Freshness filter — use first_seen_at as reference so we get the same result
-  // the personal bot had. For re-posted jobs (posted_at > first_seen_at), use
-  // nowIso since the job is effectively new again.
+  // Freshness filter — use first_seen_at as reference for normal jobs.
+  // For re-posted jobs (posted_at > first_seen_at), use nowIso. Exception:
+  // if posted_at is in the future (ATS clock drift), use posted_at itself so
+  // ageMinutes = 0 rather than a large negative value that causes stale rejection.
   const freshConfig = {
     maxPostAgeMinutes: Number(process.env.MAX_POST_AGE_MINUTES) || 180,
     maxDateOnlyAgeDays: Number(process.env.MAX_DATE_ONLY_AGE_DAYS) || 1,
@@ -860,7 +867,14 @@ async function runPollCycle() {
     const postedMs = Date.parse(job.postedAt ?? "");
     const firstSeenMs = Date.parse(job.first_seen_at ?? "");
     const reposted = Number.isFinite(postedMs) && Number.isFinite(firstSeenMs) && postedMs > firstSeenMs;
-    return jobIsFresh(job, reposted ? nowIso : job.first_seen_at, freshConfig);
+    if (reposted) {
+      // When the ATS timestamp is in the future (clock drift / scheduled posting),
+      // using nowIso gives a large negative ageMinutes → incorrectly stale.
+      // Use postedMs itself as reference so ageMinutes = 0 (always fresh).
+      const nowMs = Date.now();
+      return jobIsFresh(job, postedMs > nowMs ? postedMs : nowMs, freshConfig);
+    }
+    return jobIsFresh(job, job.first_seen_at, freshConfig);
   });
 
   if (freshJobs.length < jobs.length) {
@@ -872,35 +886,56 @@ async function runPollCycle() {
   const users = getActiveUsers();
 
   for (const user of users) {
+    // ── Setup phase (per-user) ──────────────────────────────────────────────
+    let seenKeys, profileInvalid, matchedJobs, userTz;
     try {
-      const seenKeys = getMuDeliveredJobKeys(user.id);
-      let profileInvalid = false;
-      const matchedJobs = freshJobs.filter((job) => {
+      seenKeys = getMuDeliveredJobKeys(user.id);
+      profileInvalid = false;
+      matchedJobs = freshJobs.filter((job) => {
         if (seenKeys.has(job.key)) return false;
         const result = filterJobForUser(job, user, { sponsorLookup: isH1bSponsor });
         if (result.reason === "invalid_profile") profileInvalid = true;
         return result.pass;
       });
+      userTz = user.quiet_hours_tz || "America/New_York";
+    } catch (err) {
+      console.error(`[multi-user] Setup error for user ${user.id}: ${err.message}`);
+      try { logError("multi-user-poll-user", `user=${user.id} ${err.message}`); } catch (_) { /* DB may be busy */ }
+      continue;
+    }
 
-      if (profileInvalid) {
-        try {
-          logError("filter-bad-profile", `user=${user.id}`);
-        } catch (_) { /* DB may be busy */ }
-        continue;
-      }
+    if (profileInvalid) {
+      try { logError("filter-bad-profile", `user=${user.id}`); } catch (_) { /* DB may be busy */ }
+      continue;
+    }
 
-      if (matchedJobs.length === 0) continue;
+    if (matchedJobs.length === 0) continue;
 
-      const userTz = user.quiet_hours_tz || "America/New_York";
+    // ── Per-job delivery (isolated try-catch per job) ───────────────────────
+    // A failure on one job (e.g. SQLITE_BUSY on logDm) must NOT skip the
+    // remaining jobs in this poll window — they would become permanently
+    // invisible once lastPollAt advances past their first_seen_at.
+    for (const job of matchedJobs) {
+      try {
+        const liveKey = `${user.id}:${job.key}`;
 
-      for (const job of matchedJobs) {
         // Check if job URL is still live — skip ghost listings.
-        // Don't mark as notified so it retries next cycle (URL may be temporarily down)
         const live = await isJobUrlLive(job.url);
         if (!live) {
-          console.log(`[multi-user] Dead link skipped (will retry): ${job.sourceLabel} — ${job.title}`);
+          const fails = (deadLinkFailures.get(liveKey) ?? 0) + 1;
+          deadLinkFailures.set(liveKey, fails);
+          if (fails >= DEAD_LINK_ABANDON_AFTER) {
+            // After N strikes, record as dead_link so it stops retrying.
+            markJobNotified(user.id, job.key);
+            logDm(user.id, job.key, "dead_link");
+            deadLinkFailures.delete(liveKey);
+            console.log(`[multi-user] Dead link abandoned after ${fails} tries: ${job.sourceLabel} — ${job.title}`);
+          } else {
+            console.log(`[multi-user] Dead link skipped (attempt ${fails}/${DEAD_LINK_ABANDON_AFTER}): ${job.sourceLabel} — ${job.title}`);
+          }
           continue;
         }
+        deadLinkFailures.delete(liveKey); // reset on success
 
         // Compute JD-based warnings + education-aware experience years
         const { warnings, experienceYears } = await computeJobEnrichment(job, user);
@@ -923,10 +958,10 @@ async function runPollCycle() {
 
         // Rate limit: 300ms between DMs
         await new Promise((resolve) => setTimeout(resolve, 300));
+      } catch (err) {
+        console.error(`[multi-user] Error on job ${job.key} for user ${user.id}: ${err.message}`);
+        try { logError("multi-user-poll-job", `user=${user.id} job=${job.key} ${err.message}`); } catch (_) { /* DB may be busy */ }
       }
-    } catch (err) {
-      console.error(`[multi-user] Error processing user ${user.id}: ${err.message}`);
-      try { logError("multi-user-poll-user", `user=${user.id} ${err.message}`); } catch (_) { /* DB may be busy */ }
     }
   }
 
