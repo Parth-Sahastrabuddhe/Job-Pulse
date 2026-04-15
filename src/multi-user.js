@@ -989,7 +989,7 @@ async function digestLoop() {
       }
     } catch (err) {
       console.error(`[multi-user] Digest cycle error: ${err.message}`);
-      logError("multi-user-digest", err.message);
+      try { logError("multi-user-digest", err.message); } catch (_) { /* DB may be busy */ }
     }
     await new Promise((resolve) => setTimeout(resolve, 60_000));
   }
@@ -1105,7 +1105,7 @@ async function runDigestCycle() {
       }
     } catch (err) {
       console.error(`[multi-user] Digest error for user ${user.id}: ${err.message}`);
-      logError("multi-user-digest-user", `user=${user.id} ${err.message}`);
+      try { logError("multi-user-digest-user", `user=${user.id} ${err.message}`); } catch (_) { /* DB may be busy */ }
     }
   }
 }

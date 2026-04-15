@@ -48,11 +48,13 @@ export function buildDmButtons(hash, jobUrl, status) {
   const isApplied = status === "applied";
   const isSaved = status === "saved";
 
+  const isValidUrl = typeof jobUrl === "string" && /^https?:\/\/.+/.test(jobUrl);
+  const viewJobButton = isValidUrl
+    ? new ButtonBuilder().setLabel("View Job").setStyle(ButtonStyle.Link).setURL(jobUrl)
+    : new ButtonBuilder().setCustomId(`mu_noop:${hash}`).setLabel("View Job").setStyle(ButtonStyle.Secondary).setDisabled(true);
+
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setLabel("View Job")
-      .setStyle(ButtonStyle.Link)
-      .setURL(jobUrl),
+    viewJobButton,
     new ButtonBuilder()
       .setCustomId(`mu_applied:${hash}`)
       .setLabel(isApplied ? "\u2705 Applied" : "Applied")
