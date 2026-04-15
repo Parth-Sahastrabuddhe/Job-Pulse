@@ -158,8 +158,6 @@ export function buildJobEmbed(job, { timezone, experienceYears, warnings = [] } 
  */
 export async function sendJobDm(client, discordId, job, firstName, options = {}) {
   try {
-    const user = await client.users.fetch(discordId);
-
     const jobKey = job.key ?? job.jobKey ?? "";
     const jobUrl = job.url ?? "";
     const hash   = jobButtonHash(jobKey);
@@ -169,15 +167,24 @@ export async function sendJobDm(client, discordId, job, firstName, options = {})
 
     const company = job.source_label ?? job.sourceLabel ?? "";
     const title   = job.title ?? "";
-    const message = await user.send({
+    const payload = {
       content: company ? `${company} — ${title}` : undefined,
       embeds: [embed],
       components: buttons,
-    });
+    };
+
+    let message;
+    if (options.notificationChannelId) {
+      const channel = await client.channels.fetch(options.notificationChannelId);
+      message = await channel.send(payload);
+    } else {
+      const user = await client.users.fetch(discordId);
+      message = await user.send(payload);
+    }
 
     return { messageId: message.id };
   } catch (err) {
-    console.error(`[mu-delivery] Failed to DM ${discordId}: ${err.message}`);
+    console.error(`[mu-delivery] Failed to send notification for ${discordId}: ${err.message}`);
     return null;
   }
 }
@@ -198,7 +205,12 @@ export async function sendJobDm(client, discordId, job, firstName, options = {})
  */
 export async function sendDigestDm(client, discordId, jobs, firstName, options = {}) {
   try {
-    const user = await client.users.fetch(discordId);
+    let target;
+    if (options.notificationChannelId) {
+      target = await client.channels.fetch(options.notificationChannelId);
+    } else {
+      target = await client.users.fetch(discordId);
+    }
 
     // Build the summary embed
     const displayJobs  = jobs.slice(0, 20);
@@ -217,7 +229,7 @@ export async function sendDigestDm(client, discordId, jobs, firstName, options =
       .setDescription(summaryLines.join("\n") || "No jobs to show.")
       .setColor(0x5865F2);
 
-    await user.send({ embeds: [summaryEmbed] });
+    await target.send({ embeds: [summaryEmbed] });
 
     // Send individual embeds with action buttons
     for (const job of individualJobs) {
@@ -234,9 +246,9 @@ export async function sendDigestDm(client, discordId, jobs, firstName, options =
       });
       const buttons = buildDmButtons(hash, jobUrl, "pending");
 
-      await user.send({ embeds: [embed], components: buttons });
+      await target.send({ embeds: [embed], components: buttons });
     }
   } catch (err) {
-    console.error(`[mu-delivery] Failed digest DM to ${discordId}: ${err.message}`);
+    console.error(`[mu-delivery] Failed digest send to ${discordId}: ${err.message}`);
   }
 }

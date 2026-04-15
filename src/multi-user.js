@@ -973,6 +973,9 @@ async function runPollCycle() {
 
         const action = getDeliveryAction(user, new Date());
         const dmOptions = { timezone: userTz, experienceYears, warnings };
+        if (user.discord_id === "1038422401874145372" && process.env.PERSONAL_CHANNEL_ID) {
+          dmOptions.notificationChannelId = process.env.PERSONAL_CHANNEL_ID;
+        }
 
         if (action === "send") {
           const result = await sendJobDm(client, user.discord_id, job, user.first_name, dmOptions);
@@ -1080,7 +1083,11 @@ async function runDigestCycle() {
             });
           }
 
-          await sendDigestDm(client, user.discord_id, enrichedJobs, user.first_name, { timezone: userTz });
+          const digestOpts = { timezone: userTz };
+          if (user.discord_id === "1038422401874145372" && process.env.PERSONAL_CHANNEL_ID) {
+            digestOpts.notificationChannelId = process.env.PERSONAL_CHANNEL_ID;
+          }
+          await sendDigestDm(client, user.discord_id, enrichedJobs, user.first_name, digestOpts);
 
           // Mark all queued DMs as sent
           db.prepare(
@@ -1119,11 +1126,11 @@ async function runDigestCycle() {
             };
             const { warnings, experienceYears } = await computeJobEnrichment(normalisedJob, user);
 
-            const result = await sendJobDm(client, user.discord_id, job, user.first_name, {
-              timezone: tz,
-              experienceYears,
-              warnings,
-            });
+            const flushOpts = { timezone: tz, experienceYears, warnings };
+            if (user.discord_id === "1038422401874145372" && process.env.PERSONAL_CHANNEL_ID) {
+              flushOpts.notificationChannelId = process.env.PERSONAL_CHANNEL_ID;
+            }
+            const result = await sendJobDm(client, user.discord_id, job, user.first_name, flushOpts);
             if (result) {
               db.prepare(
                 "UPDATE dm_log SET status = 'sent' WHERE user_id = ? AND job_key = ? AND status = 'queued'"
