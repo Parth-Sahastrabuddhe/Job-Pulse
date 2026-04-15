@@ -203,6 +203,10 @@ const savedCommand = new SlashCommandBuilder()
   .setName("saved")
   .setDescription("Show your saved jobs");
 
+const companyCommand = new SlashCommandBuilder()
+  .setName("company")
+  .setDescription("List all companies tracked by the bot");
+
 // ─────────────────────────────────────────────────────────────────────────────
 // /search handler
 // ─────────────────────────────────────────────────────────────────────────────
@@ -403,6 +407,27 @@ function buildMuSavedResponse(profile, offset = 0) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// /company handler
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function handleCompanyCommand(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const sorted = [...COMPANIES]
+    .map((c) => c.label)
+    .sort((a, b) => a.localeCompare(b));
+
+  const description = sorted.map((name) => `• ${name}`).join("\n");
+
+  const embed = new EmbedBuilder()
+    .setTitle(`Tracked Companies (${sorted.length})`)
+    .setDescription(description)
+    .setColor(0x5865f2);
+
+  await interaction.editReply({ embeds: [embed] });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Interaction handler
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -428,6 +453,12 @@ client.on("interactionCreate", async (interaction) => {
 
       const response = buildSearchResponse(profile, searchParams);
       await interaction.editReply(response);
+      return;
+    }
+
+    // ── /company slash command ─────────────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === "company") {
+      await handleCompanyCommand(interaction);
       return;
     }
 
@@ -1127,7 +1158,7 @@ client.once("ready", async () => {
   try {
     const rest = new REST().setToken(token);
     await rest.put(Routes.applicationCommands(client.user.id), {
-      body: [searchCommand.toJSON(), savedCommand.toJSON()],
+      body: [searchCommand.toJSON(), savedCommand.toJSON(), companyCommand.toJSON()],
     });
     console.log("[multi-user] Slash commands /search and /saved registered globally.");
   } catch (err) {
