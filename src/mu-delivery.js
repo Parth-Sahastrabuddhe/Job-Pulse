@@ -57,7 +57,7 @@ export function buildDmButtons(hash, jobUrl, status) {
     viewJobButton,
     new ButtonBuilder()
       .setCustomId(`mu_applied:${hash}`)
-      .setLabel(isApplied ? "\u2705 Applied" : "Applied")
+      .setLabel(isApplied ? "\u2705 Applied" : "Apply")
       .setStyle(ButtonStyle.Success)
       .setDisabled(isApplied),
     new ButtonBuilder()

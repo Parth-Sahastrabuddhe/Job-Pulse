@@ -167,7 +167,16 @@ export function detectSeniority(title) {
   // Entry only — new grad, early career, junior
   if (/\b(new\s+grad|early[\s-]?career|entry[\s-]?level|junior|jr\.?)\b/i.test(t)) return "entry";
 
-  // Mid — default (includes SWE II/III, SDE II/III, Engineer 2/3, plain "Software Engineer")
+  // Plain Software Engineer / Software Development Engineer / Software Engineering titles
+  // without explicit level markers (II/III, 2/3) → entry_mid so entry-only users also match.
+  // I / 1 is already handled by the entry_mid rules above.
+  if (/\b(software\s+(?:development\s+)?engineer|software\s+engineering)\b/i.test(t)
+      && !/\b(?:II|III)\b/.test(t)
+      && !/\bengineer\s+[23]\b/i.test(t)) {
+    return "entry_mid";
+  }
+
+  // Mid — default (includes SWE II/III, SDE II/III, Engineer 2/3)
   return "mid";
 }
 
