@@ -14,21 +14,21 @@ describe("detectSeniority", () => {
     ["Entry Level Data Engineer", "entry"],
     ["Early Career Software Engineer", "entry"],
 
-    // Entry+Mid
+    // Entry+Mid — plain titles without level markers match both entry-only and mid users
     ["SDE I", "entry_mid"],
     ["Software Engineer 1", "entry_mid"],
     ["Software Engineer I", "entry_mid"],
     ["Software Development Engineer I", "entry_mid"],
+    ["Software Engineer", "entry_mid"],
+    ["Associate Software Engineer", "entry_mid"],
 
-    // Mid (default)
+    // Mid (default) — explicit II / III / 2 / 3 level markers
     ["Software Engineer II", "mid"],
-    ["Software Engineer", "mid"],
     ["Data Engineer", "mid"],
     ["Software Engineer 2", "mid"],
     ["Software Engineer III", "mid"],
     ["Software Engineer 3", "mid"],
     ["Backend Developer", "mid"],
-    ["Associate Software Engineer", "mid"],
 
     // Senior
     ["Senior Software Engineer", "senior"],
