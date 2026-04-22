@@ -9,3 +9,20 @@ google-credentials.json
 CLAUDE.md
 .claude/
 web/AGENTS.md
+
+# Personal notes & scratch
+hackerrank-ai-interview-notes.md
+add-dataset.md
+write-dataloader.md
+sql_commands.md
+*.pdf
+
+# Non-project images at repo root
+autobot.jpg
+micro-bot.png
+
+# Personal automation
+scripts/delete_arpit_rows.py
+
+# Superpowers workspace
+.superpowers/
