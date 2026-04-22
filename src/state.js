@@ -30,6 +30,7 @@ export function initDb(dbFile) {
     );
     CREATE INDEX IF NOT EXISTS idx_seen_source ON seen_jobs(source_key, id);
     CREATE INDEX IF NOT EXISTS idx_seen_first_seen ON seen_jobs(first_seen_at);
+    CREATE INDEX IF NOT EXISTS idx_seen_url ON seen_jobs(url) WHERE url != '';
 
     CREATE TABLE IF NOT EXISTS job_posts (
       job_key TEXT PRIMARY KEY,
@@ -301,16 +302,22 @@ export function hasSeenJobs() {
 // SQL-indexed dedup — O(1) per job instead of O(n)
 const _stmtByKey = () => db.prepare("SELECT 1 FROM seen_jobs WHERE key = ?");
 const _stmtBySourceId = () => db.prepare("SELECT 1 FROM seen_jobs WHERE source_key = ? AND id = ?");
+const _stmtByUrlDifferentKey = () => db.prepare("SELECT 1 FROM seen_jobs WHERE url = ? AND key != ?");
 
 export function getNewJobs(jobs) {
   const byKey = _stmtByKey();
   const bySourceId = _stmtBySourceId();
+  const byUrlDifferentKey = _stmtByUrlDifferentKey();
 
   return jobs.filter((job) => {
     // Primary check: exact key match (indexed)
     if (byKey.get(job.key)) return false;
     // Fallback: same source + same ID but different key hash
     if (bySourceId.get(job.sourceKey, String(job.id))) return false;
+    // URL match under a different key → ATS re-indexed the same listing with a
+    // new internal ID (e.g. Microsoft's PCSX ID migration). Skip to avoid
+    // re-notifying jobs the user already actioned under the old key.
+    if (job.url && byUrlDifferentKey.get(job.url, job.key)) return false;
     return true;
   });
 }
@@ -327,11 +334,15 @@ export function getUnnotifiedJobs(jobs) {
 // SQL-indexed upsert — no full table scan
 const _stmtGetFirstSeen = () => db.prepare("SELECT first_seen_at FROM seen_jobs WHERE key = ?");
 const _stmtGetBySourceId = () => db.prepare("SELECT key, first_seen_at FROM seen_jobs WHERE source_key = ? AND id = ? AND key != ?");
+const _stmtGetByUrlDifferentKey = () => db.prepare("SELECT key FROM seen_jobs WHERE url = ? AND key != ?");
+const _stmtTouchLastSeen = () => db.prepare("UPDATE seen_jobs SET last_seen_at = ? WHERE key = ?");
 
 export function upsertJobs(jobs, seenAt) {
   _hasSeenJobsCached = true;
   const getFirstSeen = _stmtGetFirstSeen();
   const getBySourceId = _stmtGetBySourceId();
+  const getByUrlDifferentKey = _stmtGetByUrlDifferentKey();
+  const touchLastSeen = _stmtTouchLastSeen();
   const deleteStmt = db.prepare("DELETE FROM seen_jobs WHERE key = ?");
 
   const upsert = db.prepare(`
@@ -357,6 +368,18 @@ export function upsertJobs(jobs, seenAt) {
 
   const run = db.transaction(() => {
     for (const job of jobs) {
+      // URL match under a different key → ATS re-indexed the same listing with
+      // a new internal ID. Just bump last_seen_at on the existing row; skip the
+      // insert so the existing key (and its job_posts/Applied state) stays
+      // canonical.
+      if (job.url) {
+        const urlRow = getByUrlDifferentKey.get(job.url, job.key);
+        if (urlRow) {
+          touchLastSeen.run(seenAt, urlRow.key);
+          continue;
+        }
+      }
+
       let existingFirstSeen = null;
 
       // Check if same source+id exists under a different key (re-keyed job)
@@ -444,7 +467,7 @@ export function expireSavedJobPosts() {
 }
 
 // Bridge personal bot actions → web dashboard (user_seen_jobs) for admin user
-const ADMIN_DISCORD_ID = "1038422401874145372";
+const ADMIN_DISCORD_ID = process.env.ADMIN_DISCORD_ID;
 
 export function bridgeToTracker(jobKey, status) {
   try {
