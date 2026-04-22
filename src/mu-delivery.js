@@ -104,7 +104,7 @@ export function buildJobEmbed(job, { timezone, experienceYears, warnings = [] } 
     const d = new Date(postedAt);
     const tz = { timeZone: timezone || "America/New_York" };
     const postedStr = (precision === "day" || precision === "date")
-      ? d.toLocaleDateString(undefined, tz)
+      ? d.toLocaleDateString(undefined, { timeZone: "UTC" })
       : d.toLocaleString(undefined, tz);
     descParts.push(`Posted: ${postedStr}`);
   }

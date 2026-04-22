@@ -71,7 +71,7 @@ export async function collectGoldmanSachsJobs(_unused, config, log) {
         operationName: "GetRoles",
         variables: {
           searchQueryInput: {
-            page: { pageSize: 50, pageNumber: 0 },
+            page: { pageSize: 200, pageNumber: 0 },
             sort: { sortStrategy: "RELEVANCE", sortOrder: "DESC" },
             filters: [],
             experiences: ["EARLY_CAREER", "PROFESSIONAL"],

@@ -821,7 +821,7 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
       const d = new Date(job.postedAt);
       const tz = { timeZone: "America/New_York" };
       const postedStr = (job.postedPrecision === "day" || job.postedPrecision === "date")
-        ? d.toLocaleDateString(undefined, tz)
+        ? d.toLocaleDateString(undefined, { timeZone: "UTC" })
         : d.toLocaleString(undefined, tz);
       descParts.push(`Posted: ${postedStr}`);
     }
