@@ -16,7 +16,7 @@ export async function GET(request) {
 
   try {
     const { applications, total } = getUserApplications(session.discordId, { status, query, limit, offset });
-    const isAdmin = session.discordId === "1038422401874145372";
+    const isAdmin = session.discordId === process.env.ADMIN_DISCORD_ID;
     const profile = getUserProfile(session.discordId);
     const timezone = profile?.quiet_hours_tz || "America/New_York";
     return Response.json({ applications, total, page, totalPages: Math.ceil(total / limit), hideSkipped: isAdmin, timezone });

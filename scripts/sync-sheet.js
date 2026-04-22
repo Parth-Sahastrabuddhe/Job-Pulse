@@ -11,7 +11,7 @@ import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = resolve(__dirname, "../data/jobs.db");
-const DISCORD_ID = "1038422401874145372";
+const DISCORD_ID = process.env.ADMIN_DISCORD_ID;
 const SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/1cBerym6t8Ws_SxWQCX06BbWVOCK3oQnxh9lqc8WTDVw/export?format=csv&gid=1100127803";
 

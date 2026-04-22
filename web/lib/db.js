@@ -69,7 +69,7 @@ export function getUserApplications(discordId, { status, query, limit = 50, offs
   const d = getDb();
   const user = getUserProfile(discordId);
   if (!user) return { applications: [], total: 0 };
-  const isAdmin = discordId === "1038422401874145372";
+  const isAdmin = discordId === process.env.ADMIN_DISCORD_ID;
   let where = isAdmin
     ? "WHERE usj.user_id = ? AND usj.status NOT IN ('notified', 'skipped', 'saved')"
     : "WHERE usj.user_id = ? AND usj.status NOT IN ('notified', 'saved')";

@@ -31,7 +31,7 @@ function jobButtonId(job) {
   return hash;
 }
 
-const ADMIN_DISCORD_ID = "1038422401874145372";
+const ADMIN_DISCORD_ID = process.env.ADMIN_DISCORD_ID;
 
 function buildButtonRows(hash, jobUrl, status, isAdmin = false) {
   // status: "pending" | "fitchecked" | "applied" | "skipped" | "saved"

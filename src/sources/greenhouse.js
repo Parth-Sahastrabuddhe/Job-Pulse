@@ -1,5 +1,12 @@
 import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
 
+function slugifyTitle(title) {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function parseGreenhouseJob(raw, companyConfig) {
   const title = raw.title?.trim();
   if (!title || !isTargetRole(title)) return null;
@@ -17,7 +24,14 @@ function parseGreenhouseJob(raw, companyConfig) {
     postedPrecision = "exact";
   }
 
-  const url = raw.absolute_url || `${companyConfig.jobUrlBase}${id}`;
+  // Pinterest's `absolute_url` (`...?gh_jid=<id>`) lands on the generic listing
+  // page; only the slugged URL opens the specific posting.
+  let url;
+  if (companyConfig.sourceKey === "pinterest") {
+    url = `https://www.pinterestcareers.com/jobs/${id}/${slugifyTitle(title)}/?gh_jid=${id}`;
+  } else {
+    url = raw.absolute_url || `${companyConfig.jobUrlBase}${id}`;
+  }
 
   return finalizeJob({
     sourceKey: companyConfig.sourceKey,

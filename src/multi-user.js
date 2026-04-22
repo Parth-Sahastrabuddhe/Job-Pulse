@@ -58,6 +58,7 @@ import { sendJobDm, sendDigestDm, jobButtonHash, buildDmButtons } from "./mu-del
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
+const ADMIN_DISCORD_ID = process.env.ADMIN_DISCORD_ID;
 
 /** Load .env file the same way config.js does — no dotenv dependency. */
 function loadEnvFile(envFilePath = path.join(PROJECT_ROOT, ".env")) {
@@ -542,7 +543,7 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.editReply({ components: updatedButtons });
 
       // Update Google Sheet in background — only for the sheet owner
-      if (row?.source_label && row?.title && profile.discord_id === "1038422401874145372") {
+      if (row?.source_label && row?.title && profile.discord_id === ADMIN_DISCORD_ID) {
         try {
           const scriptPath = path.resolve(PROJECT_ROOT, "scripts", "add_application.py");
           const isLinux = process.platform === "linux";
@@ -973,7 +974,7 @@ async function runPollCycle() {
 
         const action = getDeliveryAction(user, new Date());
         const dmOptions = { timezone: userTz, experienceYears, warnings };
-        if (user.discord_id === "1038422401874145372" && process.env.PERSONAL_CHANNEL_ID) {
+        if (user.discord_id === ADMIN_DISCORD_ID && process.env.PERSONAL_CHANNEL_ID) {
           dmOptions.notificationChannelId = process.env.PERSONAL_CHANNEL_ID;
         }
 
@@ -1084,7 +1085,7 @@ async function runDigestCycle() {
           }
 
           const digestOpts = { timezone: userTz };
-          if (user.discord_id === "1038422401874145372" && process.env.PERSONAL_CHANNEL_ID) {
+          if (user.discord_id === ADMIN_DISCORD_ID && process.env.PERSONAL_CHANNEL_ID) {
             digestOpts.notificationChannelId = process.env.PERSONAL_CHANNEL_ID;
           }
           await sendDigestDm(client, user.discord_id, enrichedJobs, user.first_name, digestOpts);
@@ -1127,7 +1128,7 @@ async function runDigestCycle() {
             const { warnings, experienceYears } = await computeJobEnrichment(normalisedJob, user);
 
             const flushOpts = { timezone: tz, experienceYears, warnings };
-            if (user.discord_id === "1038422401874145372" && process.env.PERSONAL_CHANNEL_ID) {
+            if (user.discord_id === ADMIN_DISCORD_ID && process.env.PERSONAL_CHANNEL_ID) {
               flushOpts.notificationChannelId = process.env.PERSONAL_CHANNEL_ID;
             }
             const result = await sendJobDm(client, user.discord_id, job, user.first_name, flushOpts);

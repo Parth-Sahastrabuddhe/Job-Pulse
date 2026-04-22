@@ -7,3 +7,5 @@ docs/
 resume/
 google-credentials.json
 CLAUDE.md
+.claude/
+web/AGENTS.md

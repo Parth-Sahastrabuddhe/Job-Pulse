@@ -12,7 +12,7 @@ import { fileURLToPath } from "url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = resolve(__dirname, "../data/jobs.db");
 const CSV_PATH = process.argv[2] || resolve(__dirname, "../data/sheet_import.csv");
-const DISCORD_ID = "1038422401874145372";
+const DISCORD_ID = process.env.ADMIN_DISCORD_ID;
 
 function parseCSV(text) {
   const rows = [];

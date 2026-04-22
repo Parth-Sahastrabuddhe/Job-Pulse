@@ -25,17 +25,20 @@ if [ -n "$DOWN" ]; then
       const envPath = path.resolve('$SCRIPT_DIR', '..', '.env');
       const envContent = fs.readFileSync(envPath, 'utf8');
       let token = '';
+      let adminId = '';
       for (const line of envContent.split('\n')) {
         const trimmed = line.trim();
         if (trimmed.startsWith('MULTI_USER_BOT_TOKEN=')) {
           token = trimmed.split('=').slice(1).join('=').replace(/^['\"]|['\"]$/g, '');
+        } else if (trimmed.startsWith('ADMIN_DISCORD_ID=')) {
+          adminId = trimmed.split('=').slice(1).join('=').replace(/^['\"]|['\"]$/g, '');
         }
       }
 
       const client = new Client({ intents: [GatewayIntentBits.Guilds] });
       client.once('ready', async () => {
         try {
-          const user = await client.users.fetch('1038422401874145372');
+          const user = await client.users.fetch(adminId);
           await user.send('⚠️ **PM2 Alert:** \`$DOWN\` is down on EC2. Check with \`pm2 status\`.');
         } catch (e) {
           console.error('DM failed:', e.message);
