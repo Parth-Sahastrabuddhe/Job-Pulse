@@ -10,6 +10,7 @@ const GET_ROLES_QUERY = `query GetRoles($searchQueryInput: RoleSearchQueryInput!
       corporateTitle
       jobTitle
       jobFunction
+      lastPostedDate
       locations {
         primary
         state
@@ -43,15 +44,22 @@ function parseGSJob(raw) {
 
   const url = `https://higher.gs.com/roles/${id}`;
 
+  let postedAt = "";
+  let postedPrecision = "";
+  if (raw.lastPostedDate && !Number.isNaN(Date.parse(raw.lastPostedDate))) {
+    postedAt = new Date(raw.lastPostedDate).toISOString();
+    postedPrecision = "exact";
+  }
+
   return finalizeJob({
     sourceKey: "goldmansachs",
     sourceLabel: "Goldman Sachs",
     id,
     title,
     location,
-    postedText: "",
-    postedAt: "",
-    postedPrecision: "",
+    postedText: raw.lastPostedDate || "",
+    postedAt,
+    postedPrecision,
     url,
     countryCode: "US"
   });
@@ -72,7 +80,7 @@ export async function collectGoldmanSachsJobs(_unused, config, log) {
         variables: {
           searchQueryInput: {
             page: { pageSize: 200, pageNumber: 0 },
-            sort: { sortStrategy: "RELEVANCE", sortOrder: "DESC" },
+            sort: { sortStrategy: "POSTED_DATE", sortOrder: "DESC" },
             filters: [],
             experiences: ["EARLY_CAREER", "PROFESSIONAL"],
             searchTerm: "software engineer"
