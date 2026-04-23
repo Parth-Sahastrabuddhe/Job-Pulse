@@ -341,3 +341,56 @@ describe("findDuplicateAddress", () => {
     expect([firstId, secondId]).toContain(match.id);
   });
 });
+
+describe("searchAddresses state expansion", () => {
+  it("returns rows stored as acronym when searching by full name", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 1, line1: "A", city: "Austin", state: "IL", postalCode: "1", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "B", city: "Austin", state: "TX", postalCode: "2", country: "USA" });
+
+    const rows = searchAddresses(db, { userId: 1, state: "Illinois" });
+    expect(rows.map((r) => r.line1)).toEqual(["A"]);
+  });
+
+  it("returns rows stored as full name when searching by acronym", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 1, line1: "A", city: "Austin", state: "Illinois", postalCode: "1", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "B", city: "Austin", state: "TX", postalCode: "2", country: "USA" });
+
+    const rows = searchAddresses(db, { userId: 1, state: "IL" });
+    expect(rows.map((r) => r.line1)).toEqual(["A"]);
+  });
+
+  it("matches both forms in a mixed dataset", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 1, line1: "A", city: "Austin",  state: "IL",        postalCode: "1", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "B", city: "Chicago", state: "Illinois",  postalCode: "2", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "C", city: "Austin",  state: "TX",        postalCode: "3", country: "USA" });
+
+    const rows = searchAddresses(db, { userId: 1, state: "il" });
+    expect(new Set(rows.map((r) => r.line1))).toEqual(new Set(["A", "B"]));
+  });
+
+  it("unknown state input falls back to partial LIKE on the raw column", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 1, line1: "A", city: "Austin", state: "Illinois", postalCode: "1", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "B", city: "Austin", state: "TX",       postalCode: "2", country: "USA" });
+
+    // "Ill" is not a known state, so falls back to LIKE %Ill%, which still
+    // partial-matches "Illinois".
+    const rows = searchAddresses(db, { userId: 1, state: "Ill" });
+    expect(rows.map((r) => r.line1)).toEqual(["A"]);
+  });
+});
+
+describe("countMatchingAddresses state expansion", () => {
+  it("counts both forms when state input is a known name", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL",       postalCode: "1", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "B", city: "x", state: "Illinois", postalCode: "2", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "C", city: "x", state: "TX",       postalCode: "3", country: "USA" });
+
+    expect(countMatchingAddresses(db, { userId: 1, state: "Illinois" })).toBe(2);
+    expect(countMatchingAddresses(db, { userId: 1, state: "IL"       })).toBe(2);
+  });
+});

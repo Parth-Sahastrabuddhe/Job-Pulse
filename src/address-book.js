@@ -193,8 +193,14 @@ export function searchAddresses(db, { userId, city, state, limit = SEARCH_LIMIT 
     params.push(`%${escapeLike(city)}%`);
   }
   if (state) {
-    sql += " AND state LIKE ? COLLATE NOCASE ESCAPE '\\'";
-    params.push(`%${escapeLike(state)}%`);
+    const matches = stateMatchSet(state);
+    if (matches) {
+      sql += " AND (state LIKE ? COLLATE NOCASE ESCAPE '\\' OR state LIKE ? COLLATE NOCASE ESCAPE '\\')";
+      params.push(`%${escapeLike(matches[0])}%`, `%${escapeLike(matches[1])}%`);
+    } else {
+      sql += " AND state LIKE ? COLLATE NOCASE ESCAPE '\\'";
+      params.push(`%${escapeLike(state)}%`);
+    }
   }
   sql += " ORDER BY created_at DESC, id DESC LIMIT ?";
   params.push(limit);
@@ -209,8 +215,14 @@ export function countMatchingAddresses(db, { userId, city, state }) {
     params.push(`%${escapeLike(city)}%`);
   }
   if (state) {
-    sql += " AND state LIKE ? COLLATE NOCASE ESCAPE '\\'";
-    params.push(`%${escapeLike(state)}%`);
+    const matches = stateMatchSet(state);
+    if (matches) {
+      sql += " AND (state LIKE ? COLLATE NOCASE ESCAPE '\\' OR state LIKE ? COLLATE NOCASE ESCAPE '\\')";
+      params.push(`%${escapeLike(matches[0])}%`, `%${escapeLike(matches[1])}%`);
+    } else {
+      sql += " AND state LIKE ? COLLATE NOCASE ESCAPE '\\'";
+      params.push(`%${escapeLike(state)}%`);
+    }
   }
   return db.prepare(sql).get(...params).cnt;
 }
@@ -263,7 +275,7 @@ export async function handleAddAddressCommand(interaction) {
     new TextInputBuilder().setCustomId("city").setLabel("City").setStyle(TextInputStyle.Short).setMaxLength(MAX_CITY).setRequired(true),
     new TextInputBuilder().setCustomId("state").setLabel("State").setStyle(TextInputStyle.Short).setMaxLength(MAX_STATE).setRequired(true),
     new TextInputBuilder().setCustomId("postal_code").setLabel("Postal code").setStyle(TextInputStyle.Short).setMaxLength(MAX_POSTAL).setRequired(true),
-    new TextInputBuilder().setCustomId("country").setLabel("Country").setStyle(TextInputStyle.Short).setMaxLength(MAX_COUNTRY).setRequired(true),
+    new TextInputBuilder().setCustomId("country").setLabel("Country").setStyle(TextInputStyle.Short).setMaxLength(MAX_COUNTRY).setRequired(true).setValue("USA"),
   ];
 
   // Discord requires each TextInput to live in its own ActionRow.
@@ -297,6 +309,16 @@ export async function handleAddressModalSubmit(interaction, profile, db) {
     ) {
       await interaction.reply({
         content: "One or more fields exceeded the allowed length. Please try /add-address again.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const normalized = normalizeAddressTuple({ line1, city, state, postalCode, country });
+    const duplicate = findDuplicateAddress(db, profile.id, normalized);
+    if (duplicate) {
+      await interaction.reply({
+        content: `This address is already saved as #${duplicate.id}. Nothing to add.`,
         ephemeral: true,
       });
       return;
