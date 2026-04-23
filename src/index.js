@@ -268,6 +268,7 @@ async function processBatchResults(config, flags, jobs, batchLabel) {
 
 async function collectBatch(config, entries) {
   const COLLECTOR_TIMEOUT_MS = 30_000;
+  let errorCount = 0;
   const results = await Promise.all(
     entries.map(async (entry) => {
       try {
@@ -278,12 +279,17 @@ async function collectBatch(config, entries) {
           ),
         ]);
       } catch (error) {
+        errorCount += 1;
         log(`[${entry.key}] Collection error: ${error.message}`);
         return [];
       }
     })
   );
-  return dedupeJobs(results.flat());
+  return {
+    jobs: dedupeJobs(results.flat()),
+    totalCount: entries.length,
+    errorCount,
+  };
 }
 
 // --- Main Loop: Rolling Window with Batching ---
@@ -314,7 +320,7 @@ async function runBatchLoop(config, flags, registry) {
   // Seed mode: run everything once
   if (flags.seedOnly) {
     log("Seed-only mode. Collecting all sources...");
-    const allJobs = await collectBatch(config, [...fastEntries, ...normalEntries, ...slowEntries]);
+    const { jobs: allJobs } = await collectBatch(config, [...fastEntries, ...normalEntries, ...slowEntries]);
     log(`Collected ${allJobs.length} total candidate jobs for seeding.`);
     await processBatchResults(config, flags, allJobs, "seed");
     return;
@@ -323,7 +329,7 @@ async function runBatchLoop(config, flags, registry) {
   // First-run detection
   if (!hasSeenJobs() && !flags.notifyExisting) {
     log("First run detected. Seeding all sources without notifications...");
-    const allJobs = await collectBatch(config, [...fastEntries, ...normalEntries, ...slowEntries]);
+    const { jobs: allJobs } = await collectBatch(config, [...fastEntries, ...normalEntries, ...slowEntries]);
     log(`Seeded ${allJobs.length} jobs.`);
     if (!flags.dryRun) {
       upsertJobs(allJobs.filter((j) => jobMatchesCountryFilter(j, config.countryFilter)), timestamp());
@@ -343,7 +349,7 @@ async function runBatchLoop(config, flags, registry) {
     try {
       // --- Fast lane: always runs ---
       try {
-        const fastJobs = await collectBatch(config, fastEntries);
+        const { jobs: fastJobs } = await collectBatch(config, fastEntries);
         await processBatchResults(config, flags, fastJobs, "fast");
       } catch (fastError) {
         log(`[fast lane] Error: ${fastError.message}`);
@@ -354,8 +360,8 @@ async function runBatchLoop(config, flags, registry) {
         const currentBatch = batches[batchIndex];
         const batchLabel = `batch ${batchIndex + 1}/${totalBatches}`;
         log(`[${batchLabel}] Running ${currentBatch.length} companies: ${currentBatch.map((e) => e.key).join(", ")}`);
-        const normalJobs = await collectBatch(config, currentBatch);
-        await processBatchResults(config, flags, normalJobs, batchLabel);
+        const batchResult = await collectBatch(config, currentBatch);
+        await processBatchResults(config, flags, batchResult.jobs, batchLabel);
 
         batchIndex = (batchIndex + 1) % totalBatches;
         if (batchIndex === 0) {
@@ -412,7 +418,7 @@ async function runOnce(config, flags, registry) {
   pruneState(config.retentionDays);
 
   log("Single run: collecting all sources...");
-  const allJobs = await collectBatch(config, allEntries);
+  const { jobs: allJobs } = await collectBatch(config, allEntries);
   log(`Collected ${allJobs.length} total candidate jobs.`);
   await processBatchResults(config, flags, allJobs, "all");
 }
