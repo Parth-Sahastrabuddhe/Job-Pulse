@@ -55,7 +55,10 @@ import {
   buildAddressSlashCommands,
   handleAddAddressCommand,
   handleAddressModalSubmit,
+  handleSearchAddressCommand,
+  handleAddressDelete,
   ADDRESS_MODAL_ID,
+  ADDRESS_DELETE_PREFIX,
 } from "./address-book.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -490,6 +493,17 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
+    // ── /search-address slash command ──────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === "search-address") {
+      const profile = getUserProfile(interaction.user.id);
+      if (!profile) {
+        await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
+        return;
+      }
+      await handleSearchAddressCommand(interaction, profile, getDb());
+      return;
+    }
+
     // ── /add-address modal submission ──────────────────────────────────────
     if (interaction.isModalSubmit() && interaction.customId === ADDRESS_MODAL_ID) {
       const profile = getUserProfile(interaction.user.id);
@@ -512,6 +526,17 @@ client.on("interactionCreate", async (interaction) => {
 
     // Only handle mu_ prefixed buttons
     if (!action.startsWith("mu_")) return;
+
+    // ── mu_addr_del — single-click address delete ─────────────────────────
+    if (action === ADDRESS_DELETE_PREFIX) {
+      const profile = getUserProfile(interaction.user.id);
+      if (!profile) {
+        await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
+        return;
+      }
+      await handleAddressDelete(interaction, profile, payload, getDb());
+      return;
+    }
 
     // ── mu_applied (show confirmation) ─────────────────────────────────────
     if (action === "mu_applied") {

@@ -208,3 +208,108 @@ export async function handleAddressModalSubmit(interaction, profile, db) {
     }
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Discord layer — /search-address and delete
+// ─────────────────────────────────────────────────────────────────────────────
+
+function formatAddressEntry(row, idx) {
+  return (
+    `**${idx + 1}.** ${row.city}, ${row.state}, ${row.country}\n` +
+    "```\n" +
+    `line 1  : ${row.line1}\n` +
+    `city    : ${row.city}\n` +
+    `state   : ${row.state}\n` +
+    `postal  : ${row.postal_code}\n` +
+    `country : ${row.country}\n` +
+    "```"
+  );
+}
+
+export async function handleSearchAddressCommand(interaction, profile, db) {
+  try {
+    await interaction.deferReply({ ephemeral: true });
+
+    const city  = interaction.options.getString("city")  ?? undefined;
+    const state = interaction.options.getString("state") ?? undefined;
+
+    const rows  = searchAddresses(db, { userId: profile.id, city, state, limit: SEARCH_LIMIT });
+    const total = countMatchingAddresses(db, { userId: profile.id, city, state });
+
+    if (rows.length === 0) {
+      const hasFilter = Boolean(city || state);
+      await interaction.editReply({
+        content: hasFilter
+          ? "No addresses match that filter. Try fewer terms, or /search-address with no filters to see all."
+          : "No addresses saved yet. Use /add-address to add one.",
+      });
+      return;
+    }
+
+    let title;
+    if (!city && !state)     title = "📍 Your addresses";
+    else if (total === 1)    title = "📍 1 address matches";
+    else                     title = `📍 ${total} addresses match`;
+
+    const embed = new EmbedBuilder()
+      .setColor(0x5865F2)
+      .setTitle(title)
+      .setDescription(rows.map(formatAddressEntry).join("\n"));
+
+    if (total > rows.length) {
+      embed.setFooter({ text: `Showing ${rows.length} of ${total}. Narrow your search.` });
+    }
+
+    // Delete buttons — up to 10 across two ActionRows of 5 (Discord caps).
+    const buttons = rows.map((row, idx) =>
+      new ButtonBuilder()
+        .setCustomId(`${ADDRESS_DELETE_PREFIX}:${row.id}`)
+        .setLabel(`🗑 ${idx + 1}`)
+        .setStyle(ButtonStyle.Danger)
+    );
+
+    const components = [];
+    for (let i = 0; i < buttons.length; i += 5) {
+      components.push(new ActionRowBuilder().addComponents(...buttons.slice(i, i + 5)));
+    }
+
+    await interaction.editReply({ embeds: [embed], components });
+  } catch (err) {
+    console.error(`[address-book] search error: ${err.message}`);
+    if (interaction.deferred) {
+      try {
+        await interaction.editReply({ content: "Something went wrong. Try again in a moment." });
+      } catch {}
+    }
+  }
+}
+
+export async function handleAddressDelete(interaction, profile, rawId, db) {
+  try {
+    await interaction.deferReply({ ephemeral: true });
+
+    const id = parseInt(rawId, 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      await interaction.editReply({ content: "Invalid address id." });
+      return;
+    }
+
+    const changes = deleteAddress(db, { id, userId: profile.id });
+
+    if (changes === 0) {
+      await interaction.editReply({ content: "Already deleted." });
+      return;
+    }
+
+    await interaction.editReply({
+      content: `Deleted address #${id}. Run /search-address again to refresh this list.`,
+    });
+  } catch (err) {
+    console.error(`[address-book] delete error: ${err.message}`);
+    if (interaction.deferred) {
+      try {
+        await interaction.editReply({ content: "Something went wrong. Try again in a moment." });
+      } catch {}
+    }
+  }
+}
