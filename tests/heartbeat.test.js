@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer } from "node:http";
 import { ping, pingFail } from "../src/heartbeat.js";
 
@@ -9,22 +9,25 @@ let hits;
 beforeAll(async () => {
   hits = [];
   server = createServer((req, res) => {
-    hits.push({ method: req.method, url: req.url });
-    // Simulate slow endpoint for timeout test
-    if (req.url === "/slow") {
-      setTimeout(() => {
-        res.statusCode = 200;
-        res.end("ok");
-      }, 10_000);
-      return;
-    }
-    if (req.url === "/boom") {
-      res.statusCode = 500;
-      res.end("err");
-      return;
-    }
-    res.statusCode = 200;
-    res.end("ok");
+    const hit = { method: req.method, url: req.url, body: "" };
+    hits.push(hit);
+    req.on("data", (chunk) => { hit.body += chunk.toString(); });
+    req.on("end", () => {
+      if (req.url === "/slow") {
+        setTimeout(() => {
+          res.statusCode = 200;
+          res.end("ok");
+        }, 10_000);
+        return;
+      }
+      if (req.url === "/boom") {
+        res.statusCode = 500;
+        res.end("err");
+        return;
+      }
+      res.statusCode = 200;
+      res.end("ok");
+    });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
@@ -48,7 +51,7 @@ describe("heartbeat.ping", () => {
     const before = hits.length;
     await ping(`${baseUrl}/ok`);
     expect(hits.length).toBe(before + 1);
-    expect(hits[hits.length - 1]).toEqual({ method: "GET", url: "/ok" });
+    expect(hits[hits.length - 1]).toEqual({ method: "GET", url: "/ok", body: "" });
   });
 
   it("does not throw on non-2xx response", async () => {
@@ -81,6 +84,7 @@ describe("heartbeat.pingFail", () => {
     expect(hits.length).toBe(before + 1);
     expect(hits[hits.length - 1].url).toBe("/hc/fail");
     expect(hits[hits.length - 1].method).toBe("POST");
+    expect(hits[hits.length - 1].body).toBe("db locked");
   });
 
   it("does not throw when reason is missing", async () => {

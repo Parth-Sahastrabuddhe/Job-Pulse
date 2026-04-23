@@ -4,8 +4,8 @@
 const TIMEOUT_MS = 5_000;
 
 function silent(err) {
-  // stdout only — caller's log() helper isn't imported here to keep this module dependency-free.
-  // pm2 captures this to its log file.
+  // caller's log() helper isn't imported here to keep this module dependency-free.
+  // pm2 captures stderr to its log file.
   console.error(`[heartbeat] ${err?.message || err}`);
 }
 
