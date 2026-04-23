@@ -51,6 +51,8 @@ import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } fro
 import { fetchJobDescription, jobDirId, loadJobData } from "./job-description.js";
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
 import { sendJobDm, sendDigestDm, jobButtonHash, buildDmButtons } from "./mu-delivery.js";
+import { getConfig } from "./config.js";
+import { ping, pingFail } from "./heartbeat.js";
 import {
   buildAddressSlashCommands,
   handleAddAddressCommand,
@@ -899,6 +901,7 @@ async function pollLoop() {
     } catch (err) {
       console.error(`[multi-user] Poll cycle error: ${err.message}`);
       try { logError("multi-user-poll", err.message); } catch (_) { /* DB may be busy */ }
+      void pingFail(getConfig().heartbeat.mu, `pollCycle: ${err.message}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 10_000));
   }
@@ -1058,6 +1061,7 @@ async function runPollCycle() {
   // so those jobs are retried next cycle instead of being permanently skipped.
   lastPollAt = nowIso;
   db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(nowIso);
+  void ping(getConfig().heartbeat.mu);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1078,6 +1082,7 @@ async function digestLoop() {
     } catch (err) {
       console.error(`[multi-user] Digest cycle error: ${err.message}`);
       try { logError("multi-user-digest", err.message); } catch (_) { /* DB may be busy */ }
+      void pingFail(getConfig().heartbeat.mu, `digestCycle: ${err.message}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 60_000));
   }
@@ -1240,6 +1245,15 @@ client.once("ready", async () => {
   console.log(`[multi-user] Resuming poll from ${lastPollAt}`);
 
   // Start loops
+  process.on("uncaughtException", (err) => {
+    console.error(`[multi-user] uncaughtException: ${err?.message}`);
+    pingFail(getConfig().heartbeat.mu, `uncaughtException: ${err?.message}`).finally(() => process.exit(1));
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error(`[multi-user] unhandledRejection: ${reason?.message ?? reason}`);
+    pingFail(getConfig().heartbeat.mu, `unhandledRejection: ${reason?.message ?? reason}`).finally(() => process.exit(1));
+  });
+
   pollLoop();
   digestLoop();
 });
