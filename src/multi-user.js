@@ -51,6 +51,12 @@ import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } fro
 import { fetchJobDescription, jobDirId, loadJobData } from "./job-description.js";
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
 import { sendJobDm, sendDigestDm, jobButtonHash, buildDmButtons } from "./mu-delivery.js";
+import {
+  buildAddressSlashCommands,
+  handleAddAddressCommand,
+  handleAddressModalSubmit,
+  ADDRESS_MODAL_ID,
+} from "./address-book.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bootstrap
@@ -475,6 +481,23 @@ client.on("interactionCreate", async (interaction) => {
 
       const response = buildMuSavedResponse(profile, 0);
       await interaction.editReply(response);
+      return;
+    }
+
+    // ── /add-address slash command ─────────────────────────────────────────
+    if (interaction.isChatInputCommand() && interaction.commandName === "add-address") {
+      await handleAddAddressCommand(interaction);
+      return;
+    }
+
+    // ── /add-address modal submission ──────────────────────────────────────
+    if (interaction.isModalSubmit() && interaction.customId === ADDRESS_MODAL_ID) {
+      const profile = getUserProfile(interaction.user.id);
+      if (!profile) {
+        await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
+        return;
+      }
+      await handleAddressModalSubmit(interaction, profile, getDb());
       return;
     }
 
@@ -1166,9 +1189,14 @@ client.once("ready", async () => {
   try {
     const rest = new REST().setToken(token);
     await rest.put(Routes.applicationCommands(client.user.id), {
-      body: [searchCommand.toJSON(), savedCommand.toJSON(), companyCommand.toJSON()],
+      body: [
+        searchCommand.toJSON(),
+        savedCommand.toJSON(),
+        companyCommand.toJSON(),
+        ...buildAddressSlashCommands().map((c) => c.toJSON()),
+      ],
     });
-    console.log("[multi-user] Slash commands /search and /saved registered globally.");
+    console.log("[multi-user] Slash commands registered: /search, /saved, /company, /add-address, /search-address.");
   } catch (err) {
     console.error(`[multi-user] Failed to register slash commands: ${err.message}`);
   }
