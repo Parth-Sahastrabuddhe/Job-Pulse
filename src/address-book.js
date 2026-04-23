@@ -20,6 +20,9 @@ export const MAX_CITY = 60;
 export const MAX_STATE = 60;
 export const MAX_POSTAL = 20;
 export const MAX_COUNTRY = 60;
+// Discord allows max 5 ActionRows × 5 buttons, so SEARCH_LIMIT must stay ≤ 25
+// to keep a one-button-per-row layout feasible. The current value also stays
+// safely under the embed description cap at worst-case field lengths.
 export const SEARCH_LIMIT = 10;
 
 function escapeLike(s) {
@@ -213,15 +216,26 @@ export async function handleAddressModalSubmit(interaction, profile, db) {
 // Discord layer — /search-address and delete
 // ─────────────────────────────────────────────────────────────────────────────
 
+function sanitizeCodeBlock(value) {
+  // Replace backticks with U+02CB (MODIFIER LETTER GRAVE ACCENT) so user
+  // content cannot escape the triple-backtick fence below.
+  return String(value).replace(/`/g, "ˋ");
+}
+
 function formatAddressEntry(row, idx) {
+  const line1   = sanitizeCodeBlock(row.line1);
+  const city    = sanitizeCodeBlock(row.city);
+  const state   = sanitizeCodeBlock(row.state);
+  const postal  = sanitizeCodeBlock(row.postal_code);
+  const country = sanitizeCodeBlock(row.country);
   return (
-    `**${idx + 1}.** ${row.city}, ${row.state}, ${row.country}\n` +
+    `**${idx + 1}.** ${city}, ${state}, ${country}\n` +
     "```\n" +
-    `line 1  : ${row.line1}\n` +
-    `city    : ${row.city}\n` +
-    `state   : ${row.state}\n` +
-    `postal  : ${row.postal_code}\n` +
-    `country : ${row.country}\n` +
+    `line 1  : ${line1}\n` +
+    `city    : ${city}\n` +
+    `state   : ${state}\n` +
+    `postal  : ${postal}\n` +
+    `country : ${country}\n` +
     "```"
   );
 }
@@ -251,17 +265,31 @@ export async function handleSearchAddressCommand(interaction, profile, db) {
     else if (total === 1)    title = "📍 1 address matches";
     else                     title = `📍 ${total} addresses match`;
 
+    const MAX_EMBED_DESC = 4000; // Discord cap is 4096; leave a small buffer
+    const rendered = rows.map(formatAddressEntry);
+    const kept = [];
+    let usedChars = 0;
+    for (const entry of rendered) {
+      const next = usedChars + entry.length + (kept.length > 0 ? 1 : 0); // +1 for join newline
+      if (next > MAX_EMBED_DESC) break;
+      kept.push(entry);
+      usedChars = next;
+    }
+    const truncated = kept.length < rendered.length;
+    const shownCount = kept.length;
+
     const embed = new EmbedBuilder()
       .setColor(0x5865F2)
       .setTitle(title)
-      .setDescription(rows.map(formatAddressEntry).join("\n"));
+      .setDescription(kept.join("\n"));
 
-    if (total > rows.length) {
-      embed.setFooter({ text: `Showing ${rows.length} of ${total}. Narrow your search.` });
-    }
+    const footerParts = [];
+    if (total > rows.length)  footerParts.push(`Showing ${shownCount} of ${total}. Narrow your search.`);
+    else if (truncated)       footerParts.push(`Showing ${shownCount} of ${rows.length}; some entries were hidden to fit Discord limits.`);
+    if (footerParts.length > 0) embed.setFooter({ text: footerParts.join(" ") });
 
-    // Delete buttons — up to 10 across two ActionRows of 5 (Discord caps).
-    const buttons = rows.map((row, idx) =>
+    // Delete buttons — one per shown entry, up to 10 across two ActionRows of 5 (Discord caps).
+    const buttons = rows.slice(0, shownCount).map((row, idx) =>
       new ButtonBuilder()
         .setCustomId(`${ADDRESS_DELETE_PREFIX}:${row.id}`)
         .setLabel(`🗑 ${idx + 1}`)
@@ -277,9 +305,9 @@ export async function handleSearchAddressCommand(interaction, profile, db) {
   } catch (err) {
     console.error(`[address-book] search error: ${err.message}`);
     if (interaction.deferred) {
-      try {
-        await interaction.editReply({ content: "Something went wrong. Try again in a moment." });
-      } catch {}
+      try { await interaction.editReply({ content: "Something went wrong. Try again in a moment." }); } catch {}
+    } else if (!interaction.replied) {
+      try { await interaction.reply({ content: "Something went wrong. Try again in a moment.", ephemeral: true }); } catch {}
     }
   }
 }
@@ -288,8 +316,8 @@ export async function handleAddressDelete(interaction, profile, rawId, db) {
   try {
     await interaction.deferReply({ ephemeral: true });
 
-    const id = parseInt(rawId, 10);
-    if (!Number.isFinite(id) || id <= 0) {
+    const id = Number(rawId);
+    if (!Number.isFinite(id) || !Number.isInteger(id) || id <= 0) {
       await interaction.editReply({ content: "Invalid address id." });
       return;
     }
@@ -307,9 +335,9 @@ export async function handleAddressDelete(interaction, profile, rawId, db) {
   } catch (err) {
     console.error(`[address-book] delete error: ${err.message}`);
     if (interaction.deferred) {
-      try {
-        await interaction.editReply({ content: "Something went wrong. Try again in a moment." });
-      } catch {}
+      try { await interaction.editReply({ content: "Something went wrong. Try again in a moment." }); } catch {}
+    } else if (!interaction.replied) {
+      try { await interaction.reply({ content: "Something went wrong. Try again in a moment.", ephemeral: true }); } catch {}
     }
   }
 }
