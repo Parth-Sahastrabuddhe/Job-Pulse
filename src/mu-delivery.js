@@ -33,6 +33,10 @@ export function jobButtonHash(jobKey) {
   return crypto.createHash("sha1").update(jobKey).digest("hex").slice(0, 16);
 }
 
+function isValidJobUrl(url) {
+  return typeof url === "string" && /^https?:\/\/.+/.test(url);
+}
+
 /**
  * Build the ActionRow with View Job / Applied / Save / Skip buttons.
  *
@@ -48,8 +52,7 @@ export function buildDmButtons(hash, jobUrl, status) {
   const isApplied = status === "applied";
   const isSaved = status === "saved";
 
-  const isValidUrl = typeof jobUrl === "string" && /^https?:\/\/.+/.test(jobUrl);
-  const viewJobButton = isValidUrl
+  const viewJobButton = isValidJobUrl(jobUrl)
     ? new ButtonBuilder().setLabel("View Job").setStyle(ButtonStyle.Link).setURL(jobUrl)
     : new ButtonBuilder().setCustomId(`mu_noop:${hash}`).setLabel("View Job").setStyle(ButtonStyle.Secondary).setDisabled(true);
 
@@ -134,7 +137,7 @@ export function buildJobEmbed(job, { timezone, experienceYears, warnings = [] } 
     .setTitle(title)
     .setColor(color);
 
-  if (url) embed.setURL(url);
+  if (isValidJobUrl(url)) embed.setURL(url);
   if (description) embed.setDescription(description);
 
   return embed;
@@ -220,7 +223,7 @@ export async function sendDigestDm(client, discordId, jobs, firstName, options =
       const company = job.source_label ?? job.sourceLabel ?? "Unknown";
       const title   = job.title        ?? "Untitled";
       const url     = job.url          ?? "";
-      const line    = url ? `${i + 1}. [${title}](${url}) — ${company}` : `${i + 1}. **${title}** — ${company}`;
+      const line    = isValidJobUrl(url) ? `${i + 1}. [${title}](${url}) — ${company}` : `${i + 1}. **${title}** — ${company}`;
       return line;
     });
 
