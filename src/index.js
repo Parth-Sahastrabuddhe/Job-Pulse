@@ -42,6 +42,7 @@ import {
 import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } from "./jd-filter.js";
 import { checkLegitimacy } from "./legitimacy.js";
 import { isJobUrlLive } from "./liveness.js";
+import { ping, pingFail } from "./heartbeat.js";
 
 function timestamp() {
   return new Date().toISOString();
@@ -362,6 +363,12 @@ async function runBatchLoop(config, flags, registry) {
         log(`[${batchLabel}] Running ${currentBatch.length} companies: ${currentBatch.map((e) => e.key).join(", ")}`);
         const batchResult = await collectBatch(config, currentBatch);
         await processBatchResults(config, flags, batchResult.jobs, batchLabel);
+
+        if (batchResult.totalCount > 0 && batchResult.errorCount === batchResult.totalCount) {
+          await pingFail(config.heartbeat.micro, `all ${batchResult.totalCount} collectors in ${batchLabel} failed`);
+        } else {
+          await ping(config.heartbeat.micro);
+        }
 
         batchIndex = (batchIndex + 1) % totalBatches;
         if (batchIndex === 0) {
