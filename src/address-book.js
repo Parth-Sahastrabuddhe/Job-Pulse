@@ -195,8 +195,11 @@ export function searchAddresses(db, { userId, city, state, limit = SEARCH_LIMIT 
   if (state) {
     const matches = stateMatchSet(state);
     if (matches) {
-      sql += " AND (state LIKE ? COLLATE NOCASE ESCAPE '\\' OR state LIKE ? COLLATE NOCASE ESCAPE '\\')";
-      params.push(`%${escapeLike(matches[0])}%`, `%${escapeLike(matches[1])}%`);
+      // Acronym side is exact-match to prevent substring false positives
+      // (e.g., "IN" should not match "Illinois"). Full-name side stays LIKE
+      // for partial-matching UX.
+      sql += " AND (state = ? COLLATE NOCASE OR state LIKE ? COLLATE NOCASE ESCAPE '\\')";
+      params.push(matches[0], `%${escapeLike(matches[1])}%`);
     } else {
       sql += " AND state LIKE ? COLLATE NOCASE ESCAPE '\\'";
       params.push(`%${escapeLike(state)}%`);
@@ -217,8 +220,11 @@ export function countMatchingAddresses(db, { userId, city, state }) {
   if (state) {
     const matches = stateMatchSet(state);
     if (matches) {
-      sql += " AND (state LIKE ? COLLATE NOCASE ESCAPE '\\' OR state LIKE ? COLLATE NOCASE ESCAPE '\\')";
-      params.push(`%${escapeLike(matches[0])}%`, `%${escapeLike(matches[1])}%`);
+      // Acronym side is exact-match to prevent substring false positives
+      // (e.g., "IN" should not match "Illinois"). Full-name side stays LIKE
+      // for partial-matching UX.
+      sql += " AND (state = ? COLLATE NOCASE OR state LIKE ? COLLATE NOCASE ESCAPE '\\')";
+      params.push(matches[0], `%${escapeLike(matches[1])}%`);
     } else {
       sql += " AND state LIKE ? COLLATE NOCASE ESCAPE '\\'";
       params.push(`%${escapeLike(state)}%`);

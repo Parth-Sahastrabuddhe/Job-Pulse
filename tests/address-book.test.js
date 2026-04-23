@@ -381,6 +381,28 @@ describe("searchAddresses state expansion", () => {
     const rows = searchAddresses(db, { userId: 1, state: "Ill" });
     expect(rows.map((r) => r.line1)).toEqual(["A"]);
   });
+
+  it("searching by acronym does NOT return other states where acronym appears as substring", () => {
+    const db = makeDb();
+    // "Illinois" contains the substring "IN" — make sure searching IN doesn't match it.
+    insertAddress(db, { userId: 1, line1: "A", city: "Chicago",     state: "Illinois", postalCode: "1", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "B", city: "Indianapolis", state: "IN",       postalCode: "2", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "C", city: "Carmel",       state: "Indiana",  postalCode: "3", country: "USA" });
+
+    const rows = searchAddresses(db, { userId: 1, state: "IN" });
+    expect(new Set(rows.map((r) => r.line1))).toEqual(new Set(["B", "C"]));
+  });
+
+  it("searching by full name still partial-matches longer versions of the same name", () => {
+    const db = makeDb();
+    // Full-name side is still LIKE, so "West Virginia" contains "Virginia".
+    // This is the intended trade-off — state full-name partial-match is useful.
+    insertAddress(db, { userId: 1, line1: "A", city: "x", state: "Virginia",      postalCode: "1", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "B", city: "x", state: "West Virginia", postalCode: "2", country: "USA" });
+
+    const rows = searchAddresses(db, { userId: 1, state: "Virginia" });
+    expect(new Set(rows.map((r) => r.line1))).toEqual(new Set(["A", "B"]));
+  });
 });
 
 describe("countMatchingAddresses state expansion", () => {
@@ -392,5 +414,14 @@ describe("countMatchingAddresses state expansion", () => {
 
     expect(countMatchingAddresses(db, { userId: 1, state: "Illinois" })).toBe(2);
     expect(countMatchingAddresses(db, { userId: 1, state: "IL"       })).toBe(2);
+  });
+
+  it("does not count substring-acronym false positives", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 1, line1: "A", city: "x", state: "Illinois", postalCode: "1", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "B", city: "x", state: "IN",       postalCode: "2", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "C", city: "x", state: "Indiana",  postalCode: "3", country: "USA" });
+
+    expect(countMatchingAddresses(db, { userId: 1, state: "IN" })).toBe(2);
   });
 });
