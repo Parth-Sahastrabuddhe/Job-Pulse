@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import Database from "better-sqlite3";
 import {
   addressBookMigrate,
@@ -50,15 +50,13 @@ describe("insertAddress + countAddresses", () => {
       postalCode: "62704",
       country: "USA",
     });
-    expect(typeof id === "number" || typeof id === "bigint").toBe(true);
+    expect(typeof id).toBe("number");
     expect(countAddresses(db, 1)).toBe(1);
     expect(countAddresses(db, 2)).toBe(0);
   });
 });
 
 describe("searchAddresses", () => {
-  beforeEach(() => {});
-
   it("returns user's rows ordered by created_at DESC when no filter", () => {
     const db = makeDb();
     insertAddress(db, { userId: 1, line1: "A", city: "Austin",     state: "TX", postalCode: "1", country: "USA" });
@@ -115,6 +113,26 @@ describe("searchAddresses", () => {
     const rows = searchAddresses(db, { userId: 1, city: "austin" });
     expect(rows).toHaveLength(1);
     expect(rows[0].line1).toBe("A");
+  });
+
+  it("treats % in city as a literal, not a wildcard", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 1, line1: "A", city: "Austin",   state: "TX", postalCode: "1", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "B", city: "50% off",  state: "CA", postalCode: "2", country: "USA" });
+
+    const rows = searchAddresses(db, { userId: 1, city: "%" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].line1).toBe("B");
+  });
+
+  it("treats _ in city as a literal, not a single-char wildcard", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 1, line1: "A", city: "Austin",    state: "TX", postalCode: "1", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "B", city: "under_score", state: "CA", postalCode: "2", country: "USA" });
+
+    const rows = searchAddresses(db, { userId: 1, city: "_" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].line1).toBe("B");
   });
 });
 

@@ -11,6 +11,10 @@ export const MAX_POSTAL = 20;
 export const MAX_COUNTRY = 60;
 export const SEARCH_LIMIT = 10;
 
+function escapeLike(s) {
+  return s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
 export function addressBookMigrate(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS user_addresses (
@@ -46,12 +50,12 @@ export function searchAddresses(db, { userId, city, state, limit = SEARCH_LIMIT 
   const params = [userId];
   let sql = "SELECT id, line1, city, state, postal_code, country FROM user_addresses WHERE user_id = ?";
   if (city) {
-    sql += " AND city LIKE ? COLLATE NOCASE";
-    params.push(`%${city}%`);
+    sql += " AND city LIKE ? COLLATE NOCASE ESCAPE '\\'";
+    params.push(`%${escapeLike(city)}%`);
   }
   if (state) {
-    sql += " AND state LIKE ? COLLATE NOCASE";
-    params.push(`%${state}%`);
+    sql += " AND state LIKE ? COLLATE NOCASE ESCAPE '\\'";
+    params.push(`%${escapeLike(state)}%`);
   }
   sql += " ORDER BY created_at DESC, id DESC LIMIT ?";
   params.push(limit);
@@ -62,12 +66,12 @@ export function countMatchingAddresses(db, { userId, city, state }) {
   const params = [userId];
   let sql = "SELECT COUNT(*) AS cnt FROM user_addresses WHERE user_id = ?";
   if (city) {
-    sql += " AND city LIKE ? COLLATE NOCASE";
-    params.push(`%${city}%`);
+    sql += " AND city LIKE ? COLLATE NOCASE ESCAPE '\\'";
+    params.push(`%${escapeLike(city)}%`);
   }
   if (state) {
-    sql += " AND state LIKE ? COLLATE NOCASE";
-    params.push(`%${state}%`);
+    sql += " AND state LIKE ? COLLATE NOCASE ESCAPE '\\'";
+    params.push(`%${escapeLike(state)}%`);
   }
   return db.prepare(sql).get(...params).cnt;
 }
