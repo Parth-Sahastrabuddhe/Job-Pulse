@@ -90,6 +90,67 @@ export function stateMatchSet(input) {
   return null;
 }
 
+/**
+ * Collapse runs of internal whitespace to a single ASCII space. Used as part
+ * of text-field normalization for dup detection.
+ */
+function collapseSpaces(s) {
+  return s.replace(/\s+/g, " ");
+}
+
+/**
+ * Given the raw fields a user submitted, produce a normalized 5-tuple suitable
+ * for dup comparison. Rules:
+ * - line1, city, country: trim, lowercase, collapse internal whitespace runs
+ * - postal code: trim, uppercase
+ * - state: canonicalState (acronym if known, trimmed input otherwise)
+ */
+export function normalizeAddressTuple({ line1, city, state, postalCode, country }) {
+  const normalizeText = (v) => collapseSpaces(String(v ?? "").trim().toLowerCase());
+  return {
+    line1: normalizeText(line1),
+    city: normalizeText(city),
+    state: canonicalState(state),
+    postalCode: String(postalCode ?? "").trim().toUpperCase(),
+    country: normalizeText(country),
+  };
+}
+
+/**
+ * Look for a row owned by the given user whose normalized 5-tuple equals the
+ * passed-in normalized tuple. Returns { id } of the first match, or null.
+ *
+ * Implementation: normalized form isn't persisted, so we load all rows for the
+ * user and compare in JS. Fine at the current scale (per-user cap is 200).
+ */
+export function findDuplicateAddress(db, userId, normalized) {
+  const rows = db.prepare(`
+    SELECT id, line1, city, state, postal_code, country
+    FROM user_addresses
+    WHERE user_id = ?
+  `).all(userId);
+
+  for (const row of rows) {
+    const rowNorm = normalizeAddressTuple({
+      line1: row.line1,
+      city: row.city,
+      state: row.state,
+      postalCode: row.postal_code,
+      country: row.country,
+    });
+    if (
+      rowNorm.line1 === normalized.line1 &&
+      rowNorm.city === normalized.city &&
+      rowNorm.state === normalized.state &&
+      rowNorm.postalCode === normalized.postalCode &&
+      rowNorm.country === normalized.country
+    ) {
+      return { id: row.id };
+    }
+  }
+  return null;
+}
+
 export function addressBookMigrate(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS user_addresses (

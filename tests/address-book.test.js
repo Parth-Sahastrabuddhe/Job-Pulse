@@ -10,6 +10,8 @@ import {
   MAX_ADDRESSES_PER_USER,
   canonicalState,
   stateMatchSet,
+  normalizeAddressTuple,
+  findDuplicateAddress,
 } from "../src/address-book.js";
 
 function makeDb() {
@@ -238,5 +240,95 @@ describe("stateMatchSet", () => {
   it("handles null and undefined gracefully", () => {
     expect(stateMatchSet(null)).toBeNull();
     expect(stateMatchSet(undefined)).toBeNull();
+  });
+});
+
+describe("normalizeAddressTuple", () => {
+  it("trims, lowercases, and collapses internal whitespace on text fields", () => {
+    const n = normalizeAddressTuple({
+      line1: "  742   Evergreen   Terr  ",
+      city: "  Springfield  ",
+      state: "IL",
+      postalCode: "62704",
+      country: " USA ",
+    });
+    expect(n.line1).toBe("742 evergreen terr");
+    expect(n.city).toBe("springfield");
+    expect(n.country).toBe("usa");
+  });
+
+  it("canonicalizes state to acronym when known", () => {
+    const n1 = normalizeAddressTuple({ line1: "x", city: "x", state: "illinois", postalCode: "1", country: "x" });
+    expect(n1.state).toBe("IL");
+
+    const n2 = normalizeAddressTuple({ line1: "x", city: "x", state: "IL", postalCode: "1", country: "x" });
+    expect(n2.state).toBe("IL");
+  });
+
+  it("leaves unknown state inputs as trimmed unchanged", () => {
+    const n = normalizeAddressTuple({ line1: "x", city: "x", state: "  Ontario  ", postalCode: "1", country: "CA" });
+    expect(n.state).toBe("Ontario");
+  });
+
+  it("uppercases postal code and trims", () => {
+    const n = normalizeAddressTuple({ line1: "x", city: "x", state: "IL", postalCode: "  k1a0b1  ", country: "Canada" });
+    expect(n.postalCode).toBe("K1A0B1");
+  });
+});
+
+describe("findDuplicateAddress", () => {
+  it("returns null when no row matches", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
+    const normalized = normalizeAddressTuple({ line1: "1 Main St", city: "Austin", state: "TX", postalCode: "78701", country: "USA" });
+    expect(findDuplicateAddress(db, 1, normalized)).toBeNull();
+  });
+
+  it("finds a dup that differs only by casing", () => {
+    const db = makeDb();
+    const id = insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
+    const normalized = normalizeAddressTuple({ line1: "742 EVERGREEN TERR", city: "SPRINGFIELD", state: "IL", postalCode: "62704", country: "usa" });
+    const match = findDuplicateAddress(db, 1, normalized);
+    expect(match).not.toBeNull();
+    expect(match.id).toBe(id);
+  });
+
+  it("finds a dup that differs only by whitespace runs", () => {
+    const db = makeDb();
+    const id = insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
+    const normalized = normalizeAddressTuple({ line1: "742  Evergreen   Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
+    expect(findDuplicateAddress(db, 1, normalized)?.id).toBe(id);
+  });
+
+  it("treats rows stored as acronym and full name as duplicates of each other", () => {
+    const db = makeDb();
+    const id = insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
+    const normalized = normalizeAddressTuple({ line1: "742 Evergreen Terr", city: "Springfield", state: "Illinois", postalCode: "62704", country: "USA" });
+    expect(findDuplicateAddress(db, 1, normalized)?.id).toBe(id);
+  });
+
+  it("does NOT match another user's row", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 2, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
+    const normalized = normalizeAddressTuple({ line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
+    expect(findDuplicateAddress(db, 1, normalized)).toBeNull();
+  });
+
+  it("does NOT match when any of the 5 fields differs materially", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
+    const normalized = normalizeAddressTuple({ line1: "743 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
+    expect(findDuplicateAddress(db, 1, normalized)).toBeNull();
+  });
+
+  it("returns the first match when multiple legacy duplicates exist", () => {
+    const db = makeDb();
+    const firstId = insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
+    insertAddress(db, { userId: 1, line1: "742 evergreen terr", city: "springfield", state: "Illinois", postalCode: "62704", country: "USA" });
+    const normalized = normalizeAddressTuple({ line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
+    const match = findDuplicateAddress(db, 1, normalized);
+    expect(match).not.toBeNull();
+    // One of the two — order not specified in data layer, just verify it found a dup.
+    expect([firstId, firstId + 1]).toContain(match.id);
   });
 });
