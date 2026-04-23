@@ -898,6 +898,7 @@ async function pollLoop() {
   while (running) {
     try {
       await runPollCycle();
+      void ping(getConfig().heartbeat.mu);
     } catch (err) {
       console.error(`[multi-user] Poll cycle error: ${err.message}`);
       try { logError("multi-user-poll", err.message); } catch (_) { /* DB may be busy */ }
@@ -1061,7 +1062,6 @@ async function runPollCycle() {
   // so those jobs are retried next cycle instead of being permanently skipped.
   lastPollAt = nowIso;
   db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(nowIso);
-  void ping(getConfig().heartbeat.mu);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1069,6 +1069,7 @@ async function runPollCycle() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function digestLoop() {
+  // Success heartbeat is emitted by pollLoop; digestLoop only fail-pings on errors.
   while (running) {
     try {
       await runDigestCycle();
