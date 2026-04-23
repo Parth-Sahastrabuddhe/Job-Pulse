@@ -33,6 +33,7 @@ function escapeLike(s) {
 // expansion and dup-detection normalization. DC is included as a de-facto
 // state for application-form compatibility. Any future update to this map
 // should keep acronyms uppercase and full names in their canonical title case.
+// Not exported; use canonicalState() / stateMatchSet() for external access.
 const US_STATE_ACRONYMS = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
   CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
@@ -55,7 +56,9 @@ const US_STATE_NAMES_TO_ACRONYM = Object.fromEntries(
 /**
  * Given any string, return the canonical US-state acronym if the input is a
  * known full name or acronym (case/whitespace insensitive); otherwise return
- * the trimmed input unchanged.
+ * the trimmed input unchanged. Callers must pass a string; null/undefined are
+ * safely treated as "", but other non-strings (objects, arrays) are coerced
+ * via String() and may produce unexpected passthrough values.
  */
 export function canonicalState(input) {
   const trimmed = String(input ?? "").trim();
@@ -71,7 +74,8 @@ export function canonicalState(input) {
  * Given any string, return [acronym, fullName] if the input matches a known
  * US state (by acronym or full name, case/whitespace insensitive); otherwise
  * return null. Used by the search layer to decide whether to expand the WHERE
- * clause to match both forms.
+ * clause to match both forms. Callers must pass a string; null/undefined are
+ * treated as unknown.
  */
 export function stateMatchSet(input) {
   const trimmed = String(input ?? "").trim();

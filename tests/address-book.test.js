@@ -206,6 +206,11 @@ describe("canonicalState", () => {
     expect(canonicalState("District of Columbia")).toBe("DC");
     expect(canonicalState("district of columbia")).toBe("DC");
   });
+
+  it("handles null and undefined gracefully", () => {
+    expect(canonicalState(null)).toBe("");
+    expect(canonicalState(undefined)).toBe("");
+  });
 });
 
 describe("stateMatchSet", () => {
@@ -228,5 +233,10 @@ describe("stateMatchSet", () => {
     expect(stateMatchSet("Ill")).toBeNull();
     expect(stateMatchSet("Ontario")).toBeNull();
     expect(stateMatchSet("")).toBeNull();
+  });
+
+  it("handles null and undefined gracefully", () => {
+    expect(stateMatchSet(null)).toBeNull();
+    expect(stateMatchSet(undefined)).toBeNull();
   });
 });
