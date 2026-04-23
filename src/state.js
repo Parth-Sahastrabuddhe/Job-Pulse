@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { addressBookMigrate } from "./address-book.js";
 
 let db = null;
 let _hasSeenJobsCached = false;
@@ -212,6 +213,8 @@ export function initDb(dbFile) {
       researched_at TEXT NOT NULL
     );
   `);
+
+  addressBookMigrate(db);
 
   return db;
 }
