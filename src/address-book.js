@@ -248,7 +248,11 @@ export async function handleSearchAddressCommand(interaction, profile, db) {
     const state = interaction.options.getString("state") ?? undefined;
 
     const rows  = searchAddresses(db, { userId: profile.id, city, state, limit: SEARCH_LIMIT });
-    const total = countMatchingAddresses(db, { userId: profile.id, city, state });
+    // If the result set came back non-full, the total equals the returned count —
+    // skip the extra count query in the common case.
+    const total = rows.length < SEARCH_LIMIT
+      ? rows.length
+      : countMatchingAddresses(db, { userId: profile.id, city, state });
 
     if (rows.length === 0) {
       const hasFilter = Boolean(city || state);

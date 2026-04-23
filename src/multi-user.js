@@ -489,6 +489,11 @@ client.on("interactionCreate", async (interaction) => {
 
     // ── /add-address slash command ─────────────────────────────────────────
     if (interaction.isChatInputCommand() && interaction.commandName === "add-address") {
+      const profile = getUserProfile(interaction.user.id);
+      if (!profile) {
+        await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
+        return;
+      }
       await handleAddAddressCommand(interaction);
       return;
     }
