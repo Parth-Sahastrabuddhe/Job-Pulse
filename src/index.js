@@ -406,6 +406,7 @@ async function runBatchLoop(config, flags, registry) {
       }
     } catch (cycleError) {
       log(`[cycle] Unhandled error: ${cycleError.message}`);
+      await pingFail(config.heartbeat.micro, cycleError.message);
     }
 
     if (!flags.watch) break;
