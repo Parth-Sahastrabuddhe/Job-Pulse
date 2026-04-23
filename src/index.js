@@ -365,9 +365,9 @@ async function runBatchLoop(config, flags, registry) {
         await processBatchResults(config, flags, batchResult.jobs, batchLabel);
 
         if (batchResult.totalCount > 0 && batchResult.errorCount === batchResult.totalCount) {
-          await pingFail(config.heartbeat.micro, `all ${batchResult.totalCount} collectors in ${batchLabel} failed`);
+          void pingFail(config.heartbeat.micro, `all ${batchResult.totalCount} collectors in ${batchLabel} failed`);
         } else {
-          await ping(config.heartbeat.micro);
+          void ping(config.heartbeat.micro);
         }
 
         batchIndex = (batchIndex + 1) % totalBatches;
@@ -406,7 +406,7 @@ async function runBatchLoop(config, flags, registry) {
       }
     } catch (cycleError) {
       log(`[cycle] Unhandled error: ${cycleError.message}`);
-      await pingFail(config.heartbeat.micro, cycleError.message);
+      void pingFail(config.heartbeat.micro, cycleError.message);
     }
 
     if (!flags.watch) break;
