@@ -91,8 +91,10 @@ export function stateMatchSet(input) {
 }
 
 /**
- * Collapse runs of internal whitespace to a single ASCII space. Used as part
- * of text-field normalization for dup detection.
+ * Collapse runs of any whitespace (including tabs, NBSP, etc.) to a single
+ * space. Used as part of text-field normalization for dup detection — a
+ * pasted address with NBSP between tokens should still match one typed with
+ * a regular space.
  */
 function collapseSpaces(s) {
   return s.replace(/\s+/g, " ");
@@ -102,7 +104,8 @@ function collapseSpaces(s) {
  * Given the raw fields a user submitted, produce a normalized 5-tuple suitable
  * for dup comparison. Rules:
  * - line1, city, country: trim, lowercase, collapse internal whitespace runs
- * - postal code: trim, uppercase
+ * - postal code: trim, uppercase (alphanumeric codes like UK/CA are conventionally
+ *   uppercase; numeric-only codes like US ZIP are unchanged by the operation)
  * - state: canonicalState (acronym if known, trimmed input otherwise)
  */
 export function normalizeAddressTuple({ line1, city, state, postalCode, country }) {

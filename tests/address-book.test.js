@@ -274,6 +274,15 @@ describe("normalizeAddressTuple", () => {
     const n = normalizeAddressTuple({ line1: "x", city: "x", state: "IL", postalCode: "  k1a0b1  ", country: "Canada" });
     expect(n.postalCode).toBe("K1A0B1");
   });
+
+  it("handles null/undefined field values defensively", () => {
+    const n = normalizeAddressTuple({ line1: null, city: undefined, state: "IL", postalCode: null, country: undefined });
+    expect(n.line1).toBe("");
+    expect(n.city).toBe("");
+    expect(n.postalCode).toBe("");
+    expect(n.country).toBe("");
+    expect(n.state).toBe("IL");
+  });
 });
 
 describe("findDuplicateAddress", () => {
@@ -323,12 +332,12 @@ describe("findDuplicateAddress", () => {
 
   it("returns the first match when multiple legacy duplicates exist", () => {
     const db = makeDb();
-    const firstId = insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
-    insertAddress(db, { userId: 1, line1: "742 evergreen terr", city: "springfield", state: "Illinois", postalCode: "62704", country: "USA" });
+    const firstId  = insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL",       postalCode: "62704", country: "USA" });
+    const secondId = insertAddress(db, { userId: 1, line1: "742 evergreen terr", city: "springfield", state: "Illinois", postalCode: "62704", country: "USA" });
     const normalized = normalizeAddressTuple({ line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
     const match = findDuplicateAddress(db, 1, normalized);
     expect(match).not.toBeNull();
-    // One of the two — order not specified in data layer, just verify it found a dup.
-    expect([firstId, firstId + 1]).toContain(match.id);
+    // Data layer does not specify ordering; assert match is one of the two inserted rows.
+    expect([firstId, secondId]).toContain(match.id);
   });
 });
