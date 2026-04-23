@@ -1245,21 +1245,24 @@ client.once("ready", async () => {
   console.log(`[multi-user] Resuming poll from ${lastPollAt}`);
 
   // Start loops
-  process.on("uncaughtException", (err) => {
-    console.error(`[multi-user] uncaughtException: ${err?.message}`);
-    pingFail(getConfig().heartbeat.mu, `uncaughtException: ${err?.message}`).finally(() => process.exit(1));
-  });
-  process.on("unhandledRejection", (reason) => {
-    console.error(`[multi-user] unhandledRejection: ${reason?.message ?? reason}`);
-    pingFail(getConfig().heartbeat.mu, `unhandledRejection: ${reason?.message ?? reason}`).finally(() => process.exit(1));
-  });
-
   pollLoop();
   digestLoop();
 });
 
 client.on("error", (err) => {
   console.error(`[multi-user] Discord client error: ${err.message}`);
+});
+
+const muHeartbeatUrl = () => {
+  try { return getConfig().heartbeat.mu; } catch { return ""; }
+};
+process.on("uncaughtException", (err) => {
+  console.error(`[multi-user] uncaughtException: ${err?.message}`);
+  pingFail(muHeartbeatUrl(), `uncaughtException: ${err?.message}`).finally(() => process.exit(1));
+});
+process.on("unhandledRejection", (reason) => {
+  console.error(`[multi-user] unhandledRejection: ${reason?.message ?? reason}`);
+  pingFail(muHeartbeatUrl(), `unhandledRejection: ${reason?.message ?? reason}`).finally(() => process.exit(1));
 });
 
 await client.login(token);
