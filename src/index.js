@@ -543,6 +543,20 @@ process.title = "job-alert-bot";
 async function main() {
   const flags = parseFlags(process.argv.slice(2));
 
+  // Heartbeat: fire a fail-ping on any uncaught error before the process dies.
+  // We resolve the URL lazily inside the handler so getConfig() has already run by then.
+  const heartbeatUrl = () => {
+    try { return getConfig().heartbeat.micro; } catch { return ""; }
+  };
+  process.on("uncaughtException", (err) => {
+    log(`[heartbeat] uncaughtException: ${err?.message}`);
+    pingFail(heartbeatUrl(), `uncaughtException: ${err?.message}`).finally(() => process.exit(1));
+  });
+  process.on("unhandledRejection", (reason) => {
+    log(`[heartbeat] unhandledRejection: ${reason?.message ?? reason}`);
+    pingFail(heartbeatUrl(), `unhandledRejection: ${reason?.message ?? reason}`).finally(() => process.exit(1));
+  });
+
   if (flags.watch && !acquireLock()) {
     console.error(`[${timestamp()}] Another bot instance is already running. Exiting.`);
     process.exitCode = 1;
