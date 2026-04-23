@@ -201,7 +201,7 @@ export async function handleAddressModalSubmit(interaction, profile, db) {
     await interaction.reply({ embeds: [embed], ephemeral: true });
   } catch (err) {
     console.error(`[address-book] modal-submit error: ${err.message}`);
-    if (!interaction.replied) {
+    if (!interaction.replied && !interaction.deferred) {
       try {
         await interaction.reply({ content: "Something went wrong. Try again in a moment.", ephemeral: true });
       } catch {}
