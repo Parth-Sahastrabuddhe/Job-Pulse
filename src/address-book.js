@@ -278,15 +278,25 @@ export async function handleSearchAddressCommand(interaction, profile, db) {
     const truncated = kept.length < rendered.length;
     const shownCount = kept.length;
 
+    // Guard against the pathological case where no entry fits the embed budget.
+    // Not reachable today (single worst-case entry is ~575 chars; budget is 4000),
+    // but protects against future schema changes that bump field length caps.
+    if (shownCount === 0) {
+      await interaction.editReply({
+        content: `Found ${total} matching address${total === 1 ? "" : "es"}, but the entries are too long to display. Narrow your search.`,
+      });
+      return;
+    }
+
     const embed = new EmbedBuilder()
       .setColor(0x5865F2)
       .setTitle(title)
       .setDescription(kept.join("\n"));
 
-    const footerParts = [];
-    if (total > rows.length)  footerParts.push(`Showing ${shownCount} of ${total}. Narrow your search.`);
-    else if (truncated)       footerParts.push(`Showing ${shownCount} of ${rows.length}; some entries were hidden to fit Discord limits.`);
-    if (footerParts.length > 0) embed.setFooter({ text: footerParts.join(" ") });
+    let footerText = null;
+    if (total > rows.length)  footerText = `Showing ${shownCount} of ${total}. Narrow your search.`;
+    else if (truncated)       footerText = `Showing ${shownCount} of ${rows.length}; some entries were hidden to fit Discord limits.`;
+    if (footerText) embed.setFooter({ text: footerText });
 
     // Delete buttons — one per shown entry, up to 10 across two ActionRows of 5 (Discord caps).
     const buttons = rows.slice(0, shownCount).map((row, idx) =>
