@@ -8,6 +8,8 @@ import {
   countMatchingAddresses,
   deleteAddress,
   MAX_ADDRESSES_PER_USER,
+  canonicalState,
+  stateMatchSet,
 } from "../src/address-book.js";
 
 function makeDb() {
@@ -170,5 +172,61 @@ describe("deleteAddress", () => {
 describe("MAX_ADDRESSES_PER_USER", () => {
   it("is exported and equals 200", () => {
     expect(MAX_ADDRESSES_PER_USER).toBe(200);
+  });
+});
+
+describe("canonicalState", () => {
+  it("returns the acronym unchanged for a known acronym input", () => {
+    expect(canonicalState("IL")).toBe("IL");
+    expect(canonicalState("NY")).toBe("NY");
+  });
+
+  it("returns the acronym for a known full name input (any casing)", () => {
+    expect(canonicalState("Illinois")).toBe("IL");
+    expect(canonicalState("illinois")).toBe("IL");
+    expect(canonicalState("ILLINOIS")).toBe("IL");
+    expect(canonicalState("new york")).toBe("NY");
+    expect(canonicalState("New York")).toBe("NY");
+  });
+
+  it("trims whitespace before lookup", () => {
+    expect(canonicalState("  IL  ")).toBe("IL");
+    expect(canonicalState("  Illinois  ")).toBe("IL");
+  });
+
+  it("returns the trimmed input unchanged when the value is not a known state", () => {
+    expect(canonicalState("Ill")).toBe("Ill");
+    expect(canonicalState("  Ill  ")).toBe("Ill");
+    expect(canonicalState("Ontario")).toBe("Ontario");
+    expect(canonicalState("")).toBe("");
+  });
+
+  it("handles District of Columbia", () => {
+    expect(canonicalState("DC")).toBe("DC");
+    expect(canonicalState("District of Columbia")).toBe("DC");
+    expect(canonicalState("district of columbia")).toBe("DC");
+  });
+});
+
+describe("stateMatchSet", () => {
+  it("returns [acronym, full name] for a known acronym input", () => {
+    expect(stateMatchSet("IL")).toEqual(["IL", "Illinois"]);
+    expect(stateMatchSet("NY")).toEqual(["NY", "New York"]);
+  });
+
+  it("returns [acronym, full name] for a known full name input (any casing)", () => {
+    expect(stateMatchSet("Illinois")).toEqual(["IL", "Illinois"]);
+    expect(stateMatchSet("illinois")).toEqual(["IL", "Illinois"]);
+    expect(stateMatchSet("new york")).toEqual(["NY", "New York"]);
+  });
+
+  it("trims whitespace before lookup", () => {
+    expect(stateMatchSet("  IL  ")).toEqual(["IL", "Illinois"]);
+  });
+
+  it("returns null when the input is not a known state", () => {
+    expect(stateMatchSet("Ill")).toBeNull();
+    expect(stateMatchSet("Ontario")).toBeNull();
+    expect(stateMatchSet("")).toBeNull();
   });
 });

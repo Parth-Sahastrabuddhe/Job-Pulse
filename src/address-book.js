@@ -29,6 +29,63 @@ function escapeLike(s) {
   return s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
+// US state name ↔ acronym map. Source of truth for bidirectional search
+// expansion and dup-detection normalization. DC is included as a de-facto
+// state for application-form compatibility. Any future update to this map
+// should keep acronyms uppercase and full names in their canonical title case.
+const US_STATE_ACRONYMS = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
+  CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
+  HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa",
+  KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+  MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri",
+  MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey",
+  NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio",
+  OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina",
+  SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont",
+  VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+  DC: "District of Columbia",
+};
+
+// Reverse index: lowercase full name → acronym. Built once at module load.
+const US_STATE_NAMES_TO_ACRONYM = Object.fromEntries(
+  Object.entries(US_STATE_ACRONYMS).map(([acr, name]) => [name.toLowerCase(), acr])
+);
+
+/**
+ * Given any string, return the canonical US-state acronym if the input is a
+ * known full name or acronym (case/whitespace insensitive); otherwise return
+ * the trimmed input unchanged.
+ */
+export function canonicalState(input) {
+  const trimmed = String(input ?? "").trim();
+  if (!trimmed) return "";
+  const upper = trimmed.toUpperCase();
+  if (upper in US_STATE_ACRONYMS) return upper;
+  const lower = trimmed.toLowerCase();
+  if (lower in US_STATE_NAMES_TO_ACRONYM) return US_STATE_NAMES_TO_ACRONYM[lower];
+  return trimmed;
+}
+
+/**
+ * Given any string, return [acronym, fullName] if the input matches a known
+ * US state (by acronym or full name, case/whitespace insensitive); otherwise
+ * return null. Used by the search layer to decide whether to expand the WHERE
+ * clause to match both forms.
+ */
+export function stateMatchSet(input) {
+  const trimmed = String(input ?? "").trim();
+  if (!trimmed) return null;
+  const upper = trimmed.toUpperCase();
+  if (upper in US_STATE_ACRONYMS) return [upper, US_STATE_ACRONYMS[upper]];
+  const lower = trimmed.toLowerCase();
+  if (lower in US_STATE_NAMES_TO_ACRONYM) {
+    const acr = US_STATE_NAMES_TO_ACRONYM[lower];
+    return [acr, US_STATE_ACRONYMS[acr]];
+  }
+  return null;
+}
+
 export function addressBookMigrate(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS user_addresses (
