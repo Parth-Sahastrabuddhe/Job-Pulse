@@ -501,10 +501,14 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // ── /search-address slash command ──────────────────────────────────────
+    // Defer FIRST — getUserProfile can block up to 5s on SQLITE_BUSY when
+    // the poll/digest loops hold a write transaction. Deferring beats
+    // Discord's 3-second interaction-response window even under DB contention.
     if (interaction.isChatInputCommand() && interaction.commandName === "search-address") {
+      await interaction.deferReply({ ephemeral: true });
       const profile = getUserProfile(interaction.user.id);
       if (!profile) {
-        await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
+        await interaction.editReply({ content: "You don't have a profile yet. Please sign up first." });
         return;
       }
       await handleSearchAddressCommand(interaction, profile, getDb());

@@ -437,8 +437,9 @@ function formatAddressEntry(row, idx) {
  */
 export async function handleSearchAddressCommand(interaction, profile, db) { // eslint-disable-line no-unused-vars
   try {
-    await interaction.deferReply({ ephemeral: true });
-
+    // Caller (dispatch layer) already called deferReply({ ephemeral: true })
+    // before resolving profile — this avoids the 3-second-interaction-window
+    // race when the DB is under contention. We just editReply from here on.
     const city  = interaction.options.getString("city")  ?? undefined;
     const state = interaction.options.getString("state") ?? undefined;
 
