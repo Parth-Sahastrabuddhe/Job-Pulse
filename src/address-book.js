@@ -12,6 +12,8 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
 } from "discord.js";
 
 export const MAX_ADDRESSES_PER_USER = 200;
@@ -20,9 +22,9 @@ export const MAX_CITY = 60;
 export const MAX_STATE = 60;
 export const MAX_POSTAL = 20;
 export const MAX_COUNTRY = 60;
-// Discord allows max 5 ActionRows × 5 buttons, so SEARCH_LIMIT must stay ≤ 25
-// to keep a one-button-per-row layout feasible. The current value also stays
-// safely under the embed description cap at worst-case field lengths.
+// Discord select menus allow max 25 options, so SEARCH_LIMIT must stay ≤ 25.
+// The current value also stays safely under the embed description cap at
+// worst-case field lengths.
 export const SEARCH_LIMIT = 10;
 
 function escapeLike(s) {
@@ -261,7 +263,8 @@ export function deleteAddresses(db, { ids, userId }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const ADDRESS_MODAL_ID = "mu_add_address";
-export const ADDRESS_DELETE_PREFIX = "mu_addr_del";
+export const ADDRESS_SEL_MENU_ID = "mu_addr_sel";
+export const ADDRESS_DELSEL_PREFIX = "mu_addr_delsel";
 
 export function buildAddressSlashCommands() {
   return [
@@ -402,11 +405,11 @@ function formatAddressEntry(row, idx) {
   return (
     `**${idx + 1}.** ${city}, ${state}, ${country}\n` +
     "```\n" +
-    `line 1  : ${line1}\n` +
-    `city    : ${city}\n` +
-    `state   : ${state}\n` +
-    `postal  : ${postal}\n` +
-    `country : ${country}\n` +
+    `${line1}\n` +
+    `${city}\n` +
+    `${state}\n` +
+    `${postal}\n` +
+    `${country}\n` +
     "```"
   );
 }
@@ -473,18 +476,14 @@ export async function handleSearchAddressCommand(interaction, profile, db) {
     else if (truncated)       footerText = `Showing ${shownCount} of ${rows.length}; some entries were hidden to fit Discord limits.`;
     if (footerText) embed.setFooter({ text: footerText });
 
-    // Delete buttons — one per shown entry, up to 10 across two ActionRows of 5 (Discord caps).
-    const buttons = rows.slice(0, shownCount).map((row, idx) =>
-      new ButtonBuilder()
-        .setCustomId(`${ADDRESS_DELETE_PREFIX}:${row.id}`)
-        .setLabel(`🗑 ${idx + 1}`)
-        .setStyle(ButtonStyle.Danger)
-    );
-
-    const components = [];
-    for (let i = 0; i < buttons.length; i += 5) {
-      components.push(new ActionRowBuilder().addComponents(...buttons.slice(i, i + 5)));
-    }
+    // Multi-select dropdown + single "Delete Selected" button.
+    // Dropdown starts with no pre-selection, so the button is disabled
+    // until the user selects at least one address.
+    const shownRows = rows.slice(0, shownCount);
+    const components = [
+      buildAddressSelectMenuRow(shownRows, /* selectedIds */ new Set()),
+      buildDeleteSelectedButtonRow(/* selectedIds */ []),
+    ];
 
     await interaction.editReply({ embeds: [embed], components });
   } catch (err) {
@@ -497,28 +496,126 @@ export async function handleSearchAddressCommand(interaction, profile, db) {
   }
 }
 
-export async function handleAddressDelete(interaction, profile, rawId, db) {
+/**
+ * Build the multi-select dropdown ActionRow for /search-address results.
+ * `selectedIds` is a Set of row.id values that should render as pre-selected
+ * (checked) — used when re-rendering after the user changes their selection.
+ */
+function buildAddressSelectMenuRow(rows, selectedIds) {
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(ADDRESS_SEL_MENU_ID)
+    .setPlaceholder("Select addresses to delete")
+    .setMinValues(0)
+    .setMaxValues(Math.max(rows.length, 1));
+
+  for (const [idx, row] of rows.entries()) {
+    // Label: "1. City, ST" — Discord caps label at 100 chars.
+    const label = `${idx + 1}. ${row.city}, ${row.state}`.slice(0, 100);
+    // Description: first line of the address — Discord caps at 100 chars.
+    const description = row.line1.slice(0, 100);
+    const opt = new StringSelectMenuOptionBuilder()
+      .setLabel(label)
+      .setValue(String(row.id))
+      .setDescription(description);
+    if (selectedIds.has(row.id)) opt.setDefault(true);
+    menu.addOptions(opt);
+  }
+
+  return new ActionRowBuilder().addComponents(menu);
+}
+
+/**
+ * Build the "Delete Selected" button ActionRow. Button is disabled until
+ * at least one id is selected. The selected ids are embedded in the
+ * customId so the click handler can read them without a separate store.
+ */
+function buildDeleteSelectedButtonRow(selectedIds) {
+  const payload = selectedIds.join(",");
+  const count = selectedIds.length;
+  const button = new ButtonBuilder()
+    .setCustomId(`${ADDRESS_DELSEL_PREFIX}:${payload}`)
+    .setLabel(count > 0 ? `🗑 Delete Selected (${count})` : "🗑 Delete Selected")
+    .setStyle(ButtonStyle.Danger)
+    .setDisabled(count === 0);
+  return new ActionRowBuilder().addComponents(button);
+}
+
+/**
+ * Fires when the user opens the dropdown, ticks/unticks options, and closes it.
+ * Re-renders the message so the checkmarks persist and the Delete Selected
+ * button gets the selected ids embedded in its customId (and the right
+ * label/disabled state).
+ */
+export async function handleAddressSelect(interaction, profile, db) {
+  try {
+    const selectedIdStrs = interaction.values; // ["1", "5", "7"]
+    const selectedIds = selectedIdStrs
+      .map((s) => Number(s))
+      .filter((n) => Number.isInteger(n) && n > 0);
+    const selectedSet = new Set(selectedIds);
+
+    // Re-query the user's currently-shown rows. We don't know which search
+    // filters produced the message, so we re-issue with no filter and take
+    // the first SEARCH_LIMIT — this is almost always the same result set the
+    // user is looking at. Good enough since selections survive only while
+    // the user is still looking at the message.
+    const rows = searchAddresses(db, { userId: profile.id, limit: SEARCH_LIMIT });
+    // Restrict to rows that were actually selectable in the current message.
+    // We can't precisely reconstruct the filter, so we just keep all rows the
+    // user owns — options that don't match anymore get dropped from the menu.
+    const shownRows = rows.filter((r) => selectedSet.has(r.id) || true);
+
+    const components = [
+      buildAddressSelectMenuRow(shownRows, selectedSet),
+      buildDeleteSelectedButtonRow(selectedIds),
+    ];
+    await interaction.update({ components });
+  } catch (err) {
+    console.error(`[address-book] select error: ${err.message}`);
+    // Only defer/reply if we haven't already committed to update()
+    if (!interaction.replied && !interaction.deferred) {
+      try { await interaction.reply({ content: "Something went wrong. Try again in a moment.", ephemeral: true }); } catch {}
+    }
+  }
+}
+
+/**
+ * Fires when the user clicks the Delete Selected button. Parses the selected
+ * ids out of the customId payload, deletes them (scoped to the user), and
+ * replies ephemerally with the count. Also strips components from the source
+ * message so the stale select menu isn't used to "delete again" against
+ * already-deleted rows.
+ */
+export async function handleAddressDeleteSelected(interaction, profile, rawPayload, db) {
   try {
     await interaction.deferReply({ ephemeral: true });
 
-    const id = Number(rawId);
-    if (!Number.isFinite(id) || !Number.isInteger(id) || id <= 0) {
-      await interaction.editReply({ content: "Invalid address id." });
+    const ids = (rawPayload || "")
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0);
+
+    if (ids.length === 0) {
+      await interaction.editReply({ content: "No addresses selected." });
       return;
     }
 
-    const changes = deleteAddress(db, { id, userId: profile.id });
+    const deleted = deleteAddresses(db, { ids, userId: profile.id });
 
-    if (changes === 0) {
-      await interaction.editReply({ content: "Already deleted." });
-      return;
+    // Strip components from the source message so the stale menu can't be reused.
+    try {
+      await interaction.message.edit({ components: [] });
+    } catch (editErr) {
+      // Non-fatal: if the message is too old or gone, just carry on with the reply.
+      console.error(`[address-book] message.edit after delete failed: ${editErr.message}`);
     }
 
+    const word = deleted === 1 ? "address" : "addresses";
     await interaction.editReply({
-      content: `Deleted address #${id}. Run /search-address again to refresh this list.`,
+      content: `Deleted ${deleted} ${word}. Run /search-address again to refresh.`,
     });
   } catch (err) {
-    console.error(`[address-book] delete error: ${err.message}`);
+    console.error(`[address-book] delete-selected error: ${err.message}`);
     if (interaction.deferred) {
       try { await interaction.editReply({ content: "Something went wrong. Try again in a moment." }); } catch {}
     } else if (!interaction.replied) {

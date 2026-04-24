@@ -56,9 +56,11 @@ import {
   handleAddAddressCommand,
   handleAddressModalSubmit,
   handleSearchAddressCommand,
-  handleAddressDelete,
+  handleAddressSelect,
+  handleAddressDeleteSelected,
   ADDRESS_MODAL_ID,
-  ADDRESS_DELETE_PREFIX,
+  ADDRESS_SEL_MENU_ID,
+  ADDRESS_DELSEL_PREFIX,
 } from "./address-book.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -520,6 +522,17 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
+    // ── /search-address multi-select dropdown interaction ──────────────────
+    if (interaction.isStringSelectMenu && interaction.isStringSelectMenu() && interaction.customId === ADDRESS_SEL_MENU_ID) {
+      const profile = getUserProfile(interaction.user.id);
+      if (!profile) {
+        await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
+        return;
+      }
+      await handleAddressSelect(interaction, profile, getDb());
+      return;
+    }
+
     // ── Button interactions ────────────────────────────────────────────────
     if (!interaction.isButton()) return;
 
@@ -532,14 +545,14 @@ client.on("interactionCreate", async (interaction) => {
     // Only handle mu_ prefixed buttons
     if (!action.startsWith("mu_")) return;
 
-    // ── mu_addr_del — single-click address delete ─────────────────────────
-    if (action === ADDRESS_DELETE_PREFIX) {
+    // ── mu_addr_delsel — delete multiple selected addresses ────────────────
+    if (action === ADDRESS_DELSEL_PREFIX) {
       const profile = getUserProfile(interaction.user.id);
       if (!profile) {
         await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
         return;
       }
-      await handleAddressDelete(interaction, profile, payload, getDb());
+      await handleAddressDeleteSelected(interaction, profile, payload, getDb());
       return;
     }
 
