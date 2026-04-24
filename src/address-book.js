@@ -1,7 +1,10 @@
 // src/address-book.js
 //
-// Per-user address book. Data layer lives here; Discord handlers are added in
-// later tasks and also live in this file (single-feature module).
+// Shared address pool for the multi-user bot. Single-feature module: the
+// data layer sits above the Discord layer in the same file. The pool is
+// fully shared — every registered user can read, add, and delete any entry.
+// The only per-user scope is the 200-cap on how many addresses any single
+// user can add (prevents flooding the pool).
 
 import {
   SlashCommandBuilder,
@@ -280,11 +283,11 @@ export function buildAddressSlashCommands() {
   return [
     new SlashCommandBuilder()
       .setName("add-address")
-      .setDescription("Save a new postal address to your private address book"),
+      .setDescription("Add an address to the shared pool"),
 
     new SlashCommandBuilder()
       .setName("search-address")
-      .setDescription("Search your saved addresses by city and/or state")
+      .setDescription("Search the shared address pool by city and/or state")
       .addStringOption((opt) =>
         opt.setName("city")
           .setDescription("City (partial match, case-insensitive)")
