@@ -545,8 +545,12 @@ function buildDeleteSelectedButtonRow(selectedIds) {
  * Menu options are reconstructed from `interaction.message.components` — the
  * message already holds the exact list that was originally shown, so we don't
  * need to re-query the DB (and don't have the original search filter handy).
+ *
+ * `profile` is currently unused because the ownership boundary lives in the
+ * button-click handler (where rows are actually mutated). It's kept in the
+ * signature so the dispatch layer stays uniform across all handlers.
  */
-export async function handleAddressSelect(interaction, profile) {
+export async function handleAddressSelect(interaction, profile) { // eslint-disable-line no-unused-vars
   try {
     const selectedIdStrs = interaction.values; // ["1", "5", "7"]
     const selectedIds = selectedIdStrs
@@ -608,6 +612,7 @@ export async function handleAddressDeleteSelected(interaction, profile, rawPaylo
       .filter((n) => Number.isInteger(n) && n > 0);
 
     if (ids.length === 0) {
+      try { await interaction.message.edit({ components: [] }); } catch {}
       await interaction.editReply({ content: "No addresses selected." });
       return;
     }
@@ -622,10 +627,14 @@ export async function handleAddressDeleteSelected(interaction, profile, rawPaylo
       console.error(`[address-book] message.edit after delete failed: ${editErr.message}`);
     }
 
-    const word = deleted === 1 ? "address" : "addresses";
-    await interaction.editReply({
-      content: `Deleted ${deleted} ${word}. Run /search-address again to refresh.`,
-    });
+    let content;
+    if (deleted === 0) {
+      content = "No matching addresses found — they may have already been deleted. Run /search-address again to refresh.";
+    } else {
+      const word = deleted === 1 ? "address" : "addresses";
+      content = `Deleted ${deleted} ${word}. Run /search-address again to refresh.`;
+    }
+    await interaction.editReply({ content });
   } catch (err) {
     console.error(`[address-book] delete-selected error: ${err.message}`);
     if (interaction.deferred) {
