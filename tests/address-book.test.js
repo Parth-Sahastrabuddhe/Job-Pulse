@@ -61,14 +61,14 @@ describe("insertAddress + countAddresses", () => {
 });
 
 describe("searchAddresses", () => {
-  it("returns user's rows ordered by created_at DESC when no filter", () => {
+  it("returns all rows ordered by created_at DESC when no filter (shared pool)", () => {
     const db = makeDb();
     insertAddress(db, { userId: 1, line1: "A", city: "Austin",     state: "TX", postalCode: "1", country: "USA" });
     insertAddress(db, { userId: 1, line1: "B", city: "Springfield", state: "IL", postalCode: "2", country: "USA" });
     insertAddress(db, { userId: 2, line1: "C", city: "Austin",     state: "TX", postalCode: "3", country: "USA" });
 
-    const rows = searchAddresses(db, { userId: 1 });
-    expect(rows.map((r) => r.line1)).toEqual(["B", "A"]); // newest first
+    const rows = searchAddresses(db, {});
+    expect(rows.map((r) => r.line1)).toEqual(["C", "B", "A"]); // newest first, all users
   });
 
   it("partial, case-insensitive match on city", () => {
@@ -76,7 +76,7 @@ describe("searchAddresses", () => {
     insertAddress(db, { userId: 1, line1: "A", city: "Springfield", state: "IL", postalCode: "1", country: "USA" });
     insertAddress(db, { userId: 1, line1: "B", city: "Austin",      state: "TX", postalCode: "2", country: "USA" });
 
-    const rows = searchAddresses(db, { userId: 1, city: "spring" });
+    const rows = searchAddresses(db, { city: "spring" });
     expect(rows).toHaveLength(1);
     expect(rows[0].line1).toBe("A");
   });
@@ -86,7 +86,7 @@ describe("searchAddresses", () => {
     insertAddress(db, { userId: 1, line1: "A", city: "Springfield", state: "Illinois", postalCode: "1", country: "USA" });
     insertAddress(db, { userId: 1, line1: "B", city: "Austin",      state: "TX",       postalCode: "2", country: "USA" });
 
-    const rows = searchAddresses(db, { userId: 1, state: "ill" });
+    const rows = searchAddresses(db, { state: "ill" });
     expect(rows).toHaveLength(1);
     expect(rows[0].line1).toBe("A");
   });
@@ -96,7 +96,7 @@ describe("searchAddresses", () => {
     insertAddress(db, { userId: 1, line1: "A", city: "Springfield", state: "IL", postalCode: "1", country: "USA" });
     insertAddress(db, { userId: 1, line1: "B", city: "Springfield", state: "MA", postalCode: "2", country: "USA" });
 
-    const rows = searchAddresses(db, { userId: 1, city: "spring", state: "il" });
+    const rows = searchAddresses(db, { city: "spring", state: "il" });
     expect(rows).toHaveLength(1);
     expect(rows[0].state).toBe("IL");
   });
@@ -106,17 +106,17 @@ describe("searchAddresses", () => {
     for (let i = 0; i < 12; i++) {
       insertAddress(db, { userId: 1, line1: `L${i}`, city: "Austin", state: "TX", postalCode: String(i), country: "USA" });
     }
-    expect(searchAddresses(db, { userId: 1, limit: 10 })).toHaveLength(10);
+    expect(searchAddresses(db, { limit: 10 })).toHaveLength(10);
   });
 
-  it("does not return other users' rows", () => {
+  it("returns rows from all users (shared pool)", () => {
     const db = makeDb();
     insertAddress(db, { userId: 1, line1: "A", city: "Austin", state: "TX", postalCode: "1", country: "USA" });
     insertAddress(db, { userId: 2, line1: "B", city: "Austin", state: "TX", postalCode: "2", country: "USA" });
 
-    const rows = searchAddresses(db, { userId: 1, city: "austin" });
-    expect(rows).toHaveLength(1);
-    expect(rows[0].line1).toBe("A");
+    const rows = searchAddresses(db, { city: "austin" });
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((r) => r.line1))).toEqual(new Set(["A", "B"]));
   });
 
   it("treats % in city as a literal, not a wildcard", () => {
@@ -124,7 +124,7 @@ describe("searchAddresses", () => {
     insertAddress(db, { userId: 1, line1: "A", city: "Austin",   state: "TX", postalCode: "1", country: "USA" });
     insertAddress(db, { userId: 1, line1: "B", city: "50% off",  state: "CA", postalCode: "2", country: "USA" });
 
-    const rows = searchAddresses(db, { userId: 1, city: "%" });
+    const rows = searchAddresses(db, { city: "%" });
     expect(rows).toHaveLength(1);
     expect(rows[0].line1).toBe("B");
   });
@@ -134,7 +134,7 @@ describe("searchAddresses", () => {
     insertAddress(db, { userId: 1, line1: "A", city: "Austin",    state: "TX", postalCode: "1", country: "USA" });
     insertAddress(db, { userId: 1, line1: "B", city: "under_score", state: "CA", postalCode: "2", country: "USA" });
 
-    const rows = searchAddresses(db, { userId: 1, city: "_" });
+    const rows = searchAddresses(db, { city: "_" });
     expect(rows).toHaveLength(1);
     expect(rows[0].line1).toBe("B");
   });
@@ -146,7 +146,15 @@ describe("countMatchingAddresses", () => {
     for (let i = 0; i < 15; i++) {
       insertAddress(db, { userId: 1, line1: `L${i}`, city: "Austin", state: "TX", postalCode: String(i), country: "USA" });
     }
-    expect(countMatchingAddresses(db, { userId: 1, city: "aus" })).toBe(15);
+    expect(countMatchingAddresses(db, { city: "aus" })).toBe(15);
+  });
+
+  it("counts rows across all users (shared pool)", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 1, line1: "A", city: "Austin", state: "TX", postalCode: "1", country: "USA" });
+    insertAddress(db, { userId: 2, line1: "B", city: "Austin", state: "TX", postalCode: "2", country: "USA" });
+
+    expect(countMatchingAddresses(db, { city: "austin" })).toBe(2);
   });
 });
 
@@ -270,14 +278,14 @@ describe("findDuplicateAddress", () => {
     const db = makeDb();
     insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
     const normalized = normalizeAddressTuple({ line1: "1 Main St", city: "Austin", state: "TX", postalCode: "78701", country: "USA" });
-    expect(findDuplicateAddress(db, 1, normalized)).toBeNull();
+    expect(findDuplicateAddress(db, normalized)).toBeNull();
   });
 
   it("finds a dup that differs only by casing", () => {
     const db = makeDb();
     const id = insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
     const normalized = normalizeAddressTuple({ line1: "742 EVERGREEN TERR", city: "SPRINGFIELD", state: "IL", postalCode: "62704", country: "usa" });
-    const match = findDuplicateAddress(db, 1, normalized);
+    const match = findDuplicateAddress(db, normalized);
     expect(match).not.toBeNull();
     expect(match.id).toBe(id);
   });
@@ -286,28 +294,28 @@ describe("findDuplicateAddress", () => {
     const db = makeDb();
     const id = insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
     const normalized = normalizeAddressTuple({ line1: "742  Evergreen   Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
-    expect(findDuplicateAddress(db, 1, normalized)?.id).toBe(id);
+    expect(findDuplicateAddress(db, normalized)?.id).toBe(id);
   });
 
   it("treats rows stored as acronym and full name as duplicates of each other", () => {
     const db = makeDb();
     const id = insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
     const normalized = normalizeAddressTuple({ line1: "742 Evergreen Terr", city: "Springfield", state: "Illinois", postalCode: "62704", country: "USA" });
-    expect(findDuplicateAddress(db, 1, normalized)?.id).toBe(id);
+    expect(findDuplicateAddress(db, normalized)?.id).toBe(id);
   });
 
-  it("does NOT match another user's row", () => {
+  it("matches rows added by other users (global dup detection)", () => {
     const db = makeDb();
-    insertAddress(db, { userId: 2, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
+    const id = insertAddress(db, { userId: 2, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
     const normalized = normalizeAddressTuple({ line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
-    expect(findDuplicateAddress(db, 1, normalized)).toBeNull();
+    expect(findDuplicateAddress(db, normalized)?.id).toBe(id);
   });
 
   it("does NOT match when any of the 5 fields differs materially", () => {
     const db = makeDb();
     insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
     const normalized = normalizeAddressTuple({ line1: "743 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
-    expect(findDuplicateAddress(db, 1, normalized)).toBeNull();
+    expect(findDuplicateAddress(db, normalized)).toBeNull();
   });
 
   it("returns the first match when multiple legacy duplicates exist", () => {
@@ -315,7 +323,7 @@ describe("findDuplicateAddress", () => {
     const firstId  = insertAddress(db, { userId: 1, line1: "742 Evergreen Terr", city: "Springfield", state: "IL",       postalCode: "62704", country: "USA" });
     const secondId = insertAddress(db, { userId: 1, line1: "742 evergreen terr", city: "springfield", state: "Illinois", postalCode: "62704", country: "USA" });
     const normalized = normalizeAddressTuple({ line1: "742 Evergreen Terr", city: "Springfield", state: "IL", postalCode: "62704", country: "USA" });
-    const match = findDuplicateAddress(db, 1, normalized);
+    const match = findDuplicateAddress(db, normalized);
     expect(match).not.toBeNull();
     // Data layer does not specify ordering; assert match is one of the two inserted rows.
     expect([firstId, secondId]).toContain(match.id);
@@ -328,7 +336,7 @@ describe("searchAddresses state expansion", () => {
     insertAddress(db, { userId: 1, line1: "A", city: "Austin", state: "IL", postalCode: "1", country: "USA" });
     insertAddress(db, { userId: 1, line1: "B", city: "Austin", state: "TX", postalCode: "2", country: "USA" });
 
-    const rows = searchAddresses(db, { userId: 1, state: "Illinois" });
+    const rows = searchAddresses(db, { state: "Illinois" });
     expect(rows.map((r) => r.line1)).toEqual(["A"]);
   });
 
@@ -337,7 +345,7 @@ describe("searchAddresses state expansion", () => {
     insertAddress(db, { userId: 1, line1: "A", city: "Austin", state: "Illinois", postalCode: "1", country: "USA" });
     insertAddress(db, { userId: 1, line1: "B", city: "Austin", state: "TX", postalCode: "2", country: "USA" });
 
-    const rows = searchAddresses(db, { userId: 1, state: "IL" });
+    const rows = searchAddresses(db, { state: "IL" });
     expect(rows.map((r) => r.line1)).toEqual(["A"]);
   });
 
@@ -347,7 +355,7 @@ describe("searchAddresses state expansion", () => {
     insertAddress(db, { userId: 1, line1: "B", city: "Chicago", state: "Illinois",  postalCode: "2", country: "USA" });
     insertAddress(db, { userId: 1, line1: "C", city: "Austin",  state: "TX",        postalCode: "3", country: "USA" });
 
-    const rows = searchAddresses(db, { userId: 1, state: "il" });
+    const rows = searchAddresses(db, { state: "il" });
     expect(new Set(rows.map((r) => r.line1))).toEqual(new Set(["A", "B"]));
   });
 
@@ -358,7 +366,7 @@ describe("searchAddresses state expansion", () => {
 
     // "Ill" is not a known state, so falls back to LIKE %Ill%, which still
     // partial-matches "Illinois".
-    const rows = searchAddresses(db, { userId: 1, state: "Ill" });
+    const rows = searchAddresses(db, { state: "Ill" });
     expect(rows.map((r) => r.line1)).toEqual(["A"]);
   });
 
@@ -369,7 +377,7 @@ describe("searchAddresses state expansion", () => {
     insertAddress(db, { userId: 1, line1: "B", city: "Indianapolis", state: "IN",       postalCode: "2", country: "USA" });
     insertAddress(db, { userId: 1, line1: "C", city: "Carmel",       state: "Indiana",  postalCode: "3", country: "USA" });
 
-    const rows = searchAddresses(db, { userId: 1, state: "IN" });
+    const rows = searchAddresses(db, { state: "IN" });
     expect(new Set(rows.map((r) => r.line1))).toEqual(new Set(["B", "C"]));
   });
 
@@ -380,7 +388,7 @@ describe("searchAddresses state expansion", () => {
     insertAddress(db, { userId: 1, line1: "A", city: "x", state: "Virginia",      postalCode: "1", country: "USA" });
     insertAddress(db, { userId: 1, line1: "B", city: "x", state: "West Virginia", postalCode: "2", country: "USA" });
 
-    const rows = searchAddresses(db, { userId: 1, state: "Virginia" });
+    const rows = searchAddresses(db, { state: "Virginia" });
     expect(new Set(rows.map((r) => r.line1))).toEqual(new Set(["A", "B"]));
   });
 });
@@ -392,8 +400,8 @@ describe("countMatchingAddresses state expansion", () => {
     insertAddress(db, { userId: 1, line1: "B", city: "x", state: "Illinois", postalCode: "2", country: "USA" });
     insertAddress(db, { userId: 1, line1: "C", city: "x", state: "TX",       postalCode: "3", country: "USA" });
 
-    expect(countMatchingAddresses(db, { userId: 1, state: "Illinois" })).toBe(2);
-    expect(countMatchingAddresses(db, { userId: 1, state: "IL"       })).toBe(2);
+    expect(countMatchingAddresses(db, { state: "Illinois" })).toBe(2);
+    expect(countMatchingAddresses(db, { state: "IL"       })).toBe(2);
   });
 
   it("does not count substring-acronym false positives", () => {
@@ -402,43 +410,43 @@ describe("countMatchingAddresses state expansion", () => {
     insertAddress(db, { userId: 1, line1: "B", city: "x", state: "IN",       postalCode: "2", country: "USA" });
     insertAddress(db, { userId: 1, line1: "C", city: "x", state: "Indiana",  postalCode: "3", country: "USA" });
 
-    expect(countMatchingAddresses(db, { userId: 1, state: "IN" })).toBe(2);
+    expect(countMatchingAddresses(db, { state: "IN" })).toBe(2);
   });
 });
 
 describe("deleteAddresses", () => {
-  it("deletes multiple rows owned by the user and returns the count", () => {
+  it("deletes multiple rows and returns the count", () => {
     const db = makeDb();
     const id1 = insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
     insertAddress(db,           { userId: 1, line1: "B", city: "x", state: "IL", postalCode: "2", country: "USA" });
     const id3 = insertAddress(db, { userId: 1, line1: "C", city: "x", state: "IL", postalCode: "3", country: "USA" });
 
-    expect(deleteAddresses(db, { ids: [id1, id3], userId: 1 })).toBe(2);
+    expect(deleteAddresses(db, { ids: [id1, id3] })).toBe(2);
     expect(countAddresses(db, 1)).toBe(1);
   });
 
   it("returns 0 when the ids array is empty and does not touch the DB", () => {
     const db = makeDb();
     insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
-    expect(deleteAddresses(db, { ids: [], userId: 1 })).toBe(0);
+    expect(deleteAddresses(db, { ids: [] })).toBe(0);
     expect(countAddresses(db, 1)).toBe(1);
   });
 
-  it("only deletes rows owned by the specified user", () => {
+  it("deletes rows regardless of which user added them (shared pool)", () => {
     const db = makeDb();
-    const myId     = insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
-    const theirId  = insertAddress(db, { userId: 2, line1: "B", city: "x", state: "IL", postalCode: "2", country: "USA" });
+    const id1 = insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
+    const id2 = insertAddress(db, { userId: 2, line1: "B", city: "x", state: "IL", postalCode: "2", country: "USA" });
 
-    expect(deleteAddresses(db, { ids: [myId, theirId], userId: 1 })).toBe(1);
+    expect(deleteAddresses(db, { ids: [id1, id2] })).toBe(2);
     expect(countAddresses(db, 1)).toBe(0);
-    expect(countAddresses(db, 2)).toBe(1);
+    expect(countAddresses(db, 2)).toBe(0);
   });
 
   it("returns the count of actually-deleted rows when some ids don't exist", () => {
     const db = makeDb();
     const id1 = insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
 
-    expect(deleteAddresses(db, { ids: [id1, 99999, 12345], userId: 1 })).toBe(1);
+    expect(deleteAddresses(db, { ids: [id1, 99999, 12345] })).toBe(1);
     expect(countAddresses(db, 1)).toBe(0);
   });
 
@@ -446,7 +454,7 @@ describe("deleteAddresses", () => {
     const db = makeDb();
     const id1 = insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
 
-    expect(deleteAddresses(db, { ids: [id1, 0, -1, NaN, 1.5, "123", null, undefined], userId: 1 })).toBe(1);
+    expect(deleteAddresses(db, { ids: [id1, 0, -1, NaN, 1.5, "123", null, undefined] })).toBe(1);
     expect(countAddresses(db, 1)).toBe(0);
   });
 });

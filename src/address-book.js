@@ -122,18 +122,18 @@ export function normalizeAddressTuple({ line1, city, state, postalCode, country 
 }
 
 /**
- * Look for a row owned by the given user whose normalized 5-tuple equals the
+ * Look for any row in the shared pool whose normalized 5-tuple equals the
  * passed-in normalized tuple. Returns { id } of the first match, or null.
+ * Dup detection is now global — no user-scoping.
  *
- * Implementation: normalized form isn't persisted, so we load all rows for the
- * user and compare in JS. Fine at the current scale (per-user cap is 200).
+ * Implementation: normalized form isn't persisted, so we load all rows and
+ * compare in JS. Fine at the current scale (global pool cap is 200 per user).
  */
-export function findDuplicateAddress(db, userId, normalized) {
+export function findDuplicateAddress(db, normalized) {
   const rows = db.prepare(`
     SELECT id, line1, city, state, postal_code, country
     FROM user_addresses
-    WHERE user_id = ?
-  `).all(userId);
+  `).all();
 
   for (const row of rows) {
     const rowNorm = normalizeAddressTuple({
@@ -175,6 +175,11 @@ export function addressBookMigrate(db) {
   `);
 }
 
+/**
+ * Count how many addresses THIS user has added to the shared pool.
+ * Only used for the per-user add cap (MAX_ADDRESSES_PER_USER) —
+ * the pool itself is fully shared across all users.
+ */
 export function countAddresses(db, userId) {
   return db.prepare("SELECT COUNT(*) AS cnt FROM user_addresses WHERE user_id = ?").get(userId).cnt;
 }
@@ -187,9 +192,14 @@ export function insertAddress(db, { userId, line1, city, state, postalCode, coun
   return Number(info.lastInsertRowid);
 }
 
-export function searchAddresses(db, { userId, city, state, limit = SEARCH_LIMIT }) {
-  const params = [userId];
-  let sql = "SELECT id, line1, city, state, postal_code, country FROM user_addresses WHERE user_id = ?";
+/**
+ * Search the shared pool of addresses by optional city/state filters.
+ * Returns up to `limit` rows. No user-scoping — every registered user
+ * sees the same pool.
+ */
+export function searchAddresses(db, { city, state, limit = SEARCH_LIMIT }) {
+  const params = [];
+  let sql = "SELECT id, line1, city, state, postal_code, country FROM user_addresses WHERE 1=1";
   if (city) {
     sql += " AND city LIKE ? COLLATE NOCASE ESCAPE '\\'";
     params.push(`%${escapeLike(city)}%`);
@@ -212,9 +222,13 @@ export function searchAddresses(db, { userId, city, state, limit = SEARCH_LIMIT 
   return db.prepare(sql).all(...params);
 }
 
-export function countMatchingAddresses(db, { userId, city, state }) {
-  const params = [userId];
-  let sql = "SELECT COUNT(*) AS cnt FROM user_addresses WHERE user_id = ?";
+/**
+ * Count addresses in the shared pool matching optional city/state filters.
+ * No user-scoping — counts across all users in the shared pool.
+ */
+export function countMatchingAddresses(db, { city, state }) {
+  const params = [];
+  let sql = "SELECT COUNT(*) AS cnt FROM user_addresses WHERE 1=1";
   if (city) {
     sql += " AND city LIKE ? COLLATE NOCASE ESCAPE '\\'";
     params.push(`%${escapeLike(city)}%`);
@@ -237,20 +251,20 @@ export function countMatchingAddresses(db, { userId, city, state }) {
 
 
 /**
- * Bulk-delete multiple addresses owned by a single user. Returns the number
- * of rows actually deleted (so callers can report "Deleted N of M" if some
- * ids were stale or belonged to another user). Empty ids → 0, no DB hit.
- * Non-positive / non-integer ids in the array are filtered out before the
- * SQL runs, so a caller passing user-supplied values can't smuggle in
- * `"DROP TABLE"` or negative ids.
+ * Bulk-delete addresses from the shared pool by id. Any user can delete any
+ * entry — ownership is not checked. Returns the number of rows actually
+ * deleted (so callers can report "Deleted N of M" if some ids were stale).
+ * Empty ids → 0, no DB hit. Non-positive / non-integer ids in the array are
+ * filtered out before the SQL runs, so a caller passing user-supplied values
+ * can't smuggle in `"DROP TABLE"` or negative ids.
  */
-export function deleteAddresses(db, { ids, userId }) {
+export function deleteAddresses(db, { ids }) {
   const validIds = (ids || []).filter((id) => Number.isInteger(id) && id > 0);
   if (validIds.length === 0) return 0;
 
   const placeholders = validIds.map(() => "?").join(",");
-  const sql = `DELETE FROM user_addresses WHERE user_id = ? AND id IN (${placeholders})`;
-  const info = db.prepare(sql).run(userId, ...validIds);
+  const sql = `DELETE FROM user_addresses WHERE id IN (${placeholders})`;
+  const info = db.prepare(sql).run(...validIds);
   return info.changes;
 }
 
