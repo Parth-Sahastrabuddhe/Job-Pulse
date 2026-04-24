@@ -431,7 +431,7 @@ describe("deleteAddresses", () => {
   it("deletes multiple rows owned by the user and returns the count", () => {
     const db = makeDb();
     const id1 = insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
-    const id2 = insertAddress(db, { userId: 1, line1: "B", city: "x", state: "IL", postalCode: "2", country: "USA" });
+    insertAddress(db,           { userId: 1, line1: "B", city: "x", state: "IL", postalCode: "2", country: "USA" });
     const id3 = insertAddress(db, { userId: 1, line1: "C", city: "x", state: "IL", postalCode: "3", country: "USA" });
 
     expect(deleteAddresses(db, { ids: [id1, id3], userId: 1 })).toBe(2);
@@ -467,7 +467,7 @@ describe("deleteAddresses", () => {
     const db = makeDb();
     const id1 = insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
 
-    expect(deleteAddresses(db, { ids: [id1, 0, -1, NaN], userId: 1 })).toBe(1);
+    expect(deleteAddresses(db, { ids: [id1, 0, -1, NaN, 1.5, "123", null, undefined], userId: 1 })).toBe(1);
     expect(countAddresses(db, 1)).toBe(0);
   });
 });
