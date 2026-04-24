@@ -238,6 +238,24 @@ export function deleteAddress(db, { id, userId }) {
   return info.changes;
 }
 
+/**
+ * Bulk-delete multiple addresses owned by a single user. Returns the number
+ * of rows actually deleted (so callers can report "Deleted N of M" if some
+ * ids were stale or belonged to another user). Empty ids → 0, no DB hit.
+ * Non-positive / non-integer ids in the array are filtered out before the
+ * SQL runs, so a caller passing user-supplied values can't smuggle in
+ * `"DROP TABLE"` or negative ids.
+ */
+export function deleteAddresses(db, { ids, userId }) {
+  const validIds = (ids || []).filter((id) => Number.isInteger(id) && id > 0);
+  if (validIds.length === 0) return 0;
+
+  const placeholders = validIds.map(() => "?").join(",");
+  const sql = `DELETE FROM user_addresses WHERE user_id = ? AND id IN (${placeholders})`;
+  const info = db.prepare(sql).run(userId, ...validIds);
+  return info.changes;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Discord layer — slash command builders
 // ─────────────────────────────────────────────────────────────────────────────

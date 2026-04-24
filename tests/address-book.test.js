@@ -7,6 +7,7 @@ import {
   searchAddresses,
   countMatchingAddresses,
   deleteAddress,
+  deleteAddresses,
   MAX_ADDRESSES_PER_USER,
   canonicalState,
   stateMatchSet,
@@ -423,5 +424,50 @@ describe("countMatchingAddresses state expansion", () => {
     insertAddress(db, { userId: 1, line1: "C", city: "x", state: "Indiana",  postalCode: "3", country: "USA" });
 
     expect(countMatchingAddresses(db, { userId: 1, state: "IN" })).toBe(2);
+  });
+});
+
+describe("deleteAddresses", () => {
+  it("deletes multiple rows owned by the user and returns the count", () => {
+    const db = makeDb();
+    const id1 = insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
+    const id2 = insertAddress(db, { userId: 1, line1: "B", city: "x", state: "IL", postalCode: "2", country: "USA" });
+    const id3 = insertAddress(db, { userId: 1, line1: "C", city: "x", state: "IL", postalCode: "3", country: "USA" });
+
+    expect(deleteAddresses(db, { ids: [id1, id3], userId: 1 })).toBe(2);
+    expect(countAddresses(db, 1)).toBe(1);
+  });
+
+  it("returns 0 when the ids array is empty and does not touch the DB", () => {
+    const db = makeDb();
+    insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
+    expect(deleteAddresses(db, { ids: [], userId: 1 })).toBe(0);
+    expect(countAddresses(db, 1)).toBe(1);
+  });
+
+  it("only deletes rows owned by the specified user", () => {
+    const db = makeDb();
+    const myId     = insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
+    const theirId  = insertAddress(db, { userId: 2, line1: "B", city: "x", state: "IL", postalCode: "2", country: "USA" });
+
+    expect(deleteAddresses(db, { ids: [myId, theirId], userId: 1 })).toBe(1);
+    expect(countAddresses(db, 1)).toBe(0);
+    expect(countAddresses(db, 2)).toBe(1);
+  });
+
+  it("returns the count of actually-deleted rows when some ids don't exist", () => {
+    const db = makeDb();
+    const id1 = insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
+
+    expect(deleteAddresses(db, { ids: [id1, 99999, 12345], userId: 1 })).toBe(1);
+    expect(countAddresses(db, 1)).toBe(0);
+  });
+
+  it("ignores non-integer or non-positive ids gracefully", () => {
+    const db = makeDb();
+    const id1 = insertAddress(db, { userId: 1, line1: "A", city: "x", state: "IL", postalCode: "1", country: "USA" });
+
+    expect(deleteAddresses(db, { ids: [id1, 0, -1, NaN], userId: 1 })).toBe(1);
+    expect(countAddresses(db, 1)).toBe(0);
   });
 });
