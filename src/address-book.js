@@ -352,7 +352,7 @@ export async function handleAddressModalSubmit(interaction, profile, db) {
     }
 
     const normalized = normalizeAddressTuple({ line1, city, state, postalCode, country });
-    const duplicate = findDuplicateAddress(db, profile.id, normalized);
+    const duplicate = findDuplicateAddress(db, normalized);
     if (duplicate) {
       await interaction.reply({
         content: `This address is already saved as #${duplicate.id}. Nothing to add.`,
@@ -424,19 +424,27 @@ function formatAddressEntry(row, idx) {
   );
 }
 
-export async function handleSearchAddressCommand(interaction, profile, db) {
+/**
+ * Handle the `/search-address` slash command. Returns the shared address pool
+ * filtered by optional city/state.
+ *
+ * `profile` is unused inside this handler — the pool is shared across all
+ * users. It stays in the signature so the dispatch layer can enforce the
+ * "registered-user only" gate before calling it.
+ */
+export async function handleSearchAddressCommand(interaction, profile, db) { // eslint-disable-line no-unused-vars
   try {
     await interaction.deferReply({ ephemeral: true });
 
     const city  = interaction.options.getString("city")  ?? undefined;
     const state = interaction.options.getString("state") ?? undefined;
 
-    const rows  = searchAddresses(db, { userId: profile.id, city, state, limit: SEARCH_LIMIT });
+    const rows  = searchAddresses(db, { city, state, limit: SEARCH_LIMIT });
     // If the result set came back non-full, the total equals the returned count —
     // skip the extra count query in the common case.
     const total = rows.length < SEARCH_LIMIT
       ? rows.length
-      : countMatchingAddresses(db, { userId: profile.id, city, state });
+      : countMatchingAddresses(db, { city, state });
 
     if (rows.length === 0) {
       const hasFilter = Boolean(city || state);
@@ -611,12 +619,16 @@ export async function handleAddressSelect(interaction, profile) { // eslint-disa
 
 /**
  * Fires when the user clicks the Delete Selected button. Parses the selected
- * ids out of the customId payload, deletes them (scoped to the user), and
+ * ids out of the customId payload, deletes them from the shared pool, and
  * replies ephemerally with the count. Also strips components from the source
  * message so the stale select menu isn't used to "delete again" against
  * already-deleted rows.
+ *
+ * `profile` is unused inside this handler — the pool is shared and any
+ * registered user can delete any entry. It stays in the signature so the
+ * dispatch layer can enforce the "registered-user only" gate.
  */
-export async function handleAddressDeleteSelected(interaction, profile, rawPayload, db) {
+export async function handleAddressDeleteSelected(interaction, profile, rawPayload, db) { // eslint-disable-line no-unused-vars
   try {
     await interaction.deferReply({ ephemeral: true });
 
@@ -631,7 +643,7 @@ export async function handleAddressDeleteSelected(interaction, profile, rawPaylo
       return;
     }
 
-    const deleted = deleteAddresses(db, { ids, userId: profile.id });
+    const deleted = deleteAddresses(db, { ids });
 
     // Strip components from the source message so the stale menu can't be reused.
     try {
