@@ -6,7 +6,6 @@ import {
   insertAddress,
   searchAddresses,
   countMatchingAddresses,
-  deleteAddress,
   deleteAddresses,
   MAX_ADDRESSES_PER_USER,
   canonicalState,
@@ -151,26 +150,6 @@ describe("countMatchingAddresses", () => {
   });
 });
 
-describe("deleteAddress", () => {
-  it("deletes a row the user owns and returns 1", () => {
-    const db = makeDb();
-    const id = insertAddress(db, { userId: 1, line1: "A", city: "Austin", state: "TX", postalCode: "1", country: "USA" });
-    expect(deleteAddress(db, { id, userId: 1 })).toBe(1);
-    expect(countAddresses(db, 1)).toBe(0);
-  });
-
-  it("returns 0 when id belongs to another user (does not delete)", () => {
-    const db = makeDb();
-    const id = insertAddress(db, { userId: 1, line1: "A", city: "Austin", state: "TX", postalCode: "1", country: "USA" });
-    expect(deleteAddress(db, { id, userId: 2 })).toBe(0);
-    expect(countAddresses(db, 1)).toBe(1);
-  });
-
-  it("returns 0 when id does not exist", () => {
-    const db = makeDb();
-    expect(deleteAddress(db, { id: 99999, userId: 1 })).toBe(0);
-  });
-});
 
 describe("MAX_ADDRESSES_PER_USER", () => {
   it("is exported and equals 200", () => {

@@ -523,13 +523,13 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // ── /search-address multi-select dropdown interaction ──────────────────
-    if (interaction.isStringSelectMenu && interaction.isStringSelectMenu() && interaction.customId === ADDRESS_SEL_MENU_ID) {
+    if (interaction.isStringSelectMenu() && interaction.customId === ADDRESS_SEL_MENU_ID) {
       const profile = getUserProfile(interaction.user.id);
       if (!profile) {
         await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
         return;
       }
-      await handleAddressSelect(interaction, profile, getDb());
+      await handleAddressSelect(interaction, profile);
       return;
     }
 

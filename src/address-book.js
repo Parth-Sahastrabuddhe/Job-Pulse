@@ -235,10 +235,6 @@ export function countMatchingAddresses(db, { userId, city, state }) {
   return db.prepare(sql).get(...params).cnt;
 }
 
-export function deleteAddress(db, { id, userId }) {
-  const info = db.prepare("DELETE FROM user_addresses WHERE id = ? AND user_id = ?").run(id, userId);
-  return info.changes;
-}
 
 /**
  * Bulk-delete multiple addresses owned by a single user. Returns the number
@@ -545,8 +541,12 @@ function buildDeleteSelectedButtonRow(selectedIds) {
  * Re-renders the message so the checkmarks persist and the Delete Selected
  * button gets the selected ids embedded in its customId (and the right
  * label/disabled state).
+ *
+ * Menu options are reconstructed from `interaction.message.components` — the
+ * message already holds the exact list that was originally shown, so we don't
+ * need to re-query the DB (and don't have the original search filter handy).
  */
-export async function handleAddressSelect(interaction, profile, db) {
+export async function handleAddressSelect(interaction, profile) {
   try {
     const selectedIdStrs = interaction.values; // ["1", "5", "7"]
     const selectedIds = selectedIdStrs
@@ -554,27 +554,39 @@ export async function handleAddressSelect(interaction, profile, db) {
       .filter((n) => Number.isInteger(n) && n > 0);
     const selectedSet = new Set(selectedIds);
 
-    // Re-query the user's currently-shown rows. We don't know which search
-    // filters produced the message, so we re-issue with no filter and take
-    // the first SEARCH_LIMIT — this is almost always the same result set the
-    // user is looking at. Good enough since selections survive only while
-    // the user is still looking at the message.
-    const rows = searchAddresses(db, { userId: profile.id, limit: SEARCH_LIMIT });
-    // Restrict to rows that were actually selectable in the current message.
-    // We can't precisely reconstruct the filter, so we just keep all rows the
-    // user owns — options that don't match anymore get dropped from the menu.
-    const shownRows = rows.filter((r) => selectedSet.has(r.id) || true);
+    // Read the existing menu's options from the message and rebuild the menu
+    // with the same options — just marking the now-selected ones as default.
+    const existingMenu = interaction.message?.components?.[0]?.components?.[0];
+    const existingOptions = existingMenu?.options ?? [];
+
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId(ADDRESS_SEL_MENU_ID)
+      .setPlaceholder("Select addresses to delete")
+      .setMinValues(0)
+      .setMaxValues(Math.max(existingOptions.length, 1));
+
+    for (const existing of existingOptions) {
+      const opt = new StringSelectMenuOptionBuilder()
+        .setLabel(existing.label)
+        .setValue(existing.value)
+        .setDescription(existing.description || "");
+      if (selectedSet.has(Number(existing.value))) opt.setDefault(true);
+      menu.addOptions(opt);
+    }
 
     const components = [
-      buildAddressSelectMenuRow(shownRows, selectedSet),
+      new ActionRowBuilder().addComponents(menu),
       buildDeleteSelectedButtonRow(selectedIds),
     ];
     await interaction.update({ components });
   } catch (err) {
     console.error(`[address-book] select error: ${err.message}`);
-    // Only defer/reply if we haven't already committed to update()
     if (!interaction.replied && !interaction.deferred) {
-      try { await interaction.reply({ content: "Something went wrong. Try again in a moment.", ephemeral: true }); } catch {}
+      try {
+        await interaction.reply({ content: "Something went wrong. Try again in a moment.", ephemeral: true });
+      } catch (secondary) {
+        console.error(`[address-book] select fallback reply failed: ${secondary.message}`);
+      }
     }
   }
 }
