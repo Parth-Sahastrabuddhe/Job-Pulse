@@ -410,8 +410,13 @@ export function delay(ms) {
 }
 
 export function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  // The timer must remain armed across the body read (resp.json() / resp.text()),
+  // not only the headers — otherwise a server that streams headers fast and then
+  // stalls the body will hang the caller forever. unref() so a pending timer
+  // doesn't keep the event loop alive after the response is consumed.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+  if (typeof timer.unref === "function") timer.unref();
+  return fetch(url, { ...options, signal: controller.signal });
 }
 
