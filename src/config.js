@@ -93,6 +93,10 @@ export function getConfig() {
       telegramBotToken: process.env.TELEGRAM_BOT_TOKEN?.trim() || "",
       telegramChatId: process.env.TELEGRAM_CHAT_ID?.trim() || ""
     },
+    heartbeat: {
+      micro: process.env.HEARTBEAT_URL_MICRO?.trim() || "",
+      mu: process.env.HEARTBEAT_URL_MU?.trim() || ""
+    },
     applicant: {
       name: process.env.APPLICANT_NAME?.trim() || "",
       email: process.env.APPLICANT_EMAIL?.trim() || "",

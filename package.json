@@ -11,7 +11,7 @@
     "seed": "node src/index.js --seed-only",
     "seed:sponsors": "node src/h1b-sponsors-seed.js",
     "tailor": "node src/tailor.js",
-    "check": "node --check src/index.js && node --check src/config.js && node --check src/state.js && node --check src/legitimacy.js && node --check src/notifiers/discord.js && node --check src/notifiers/telegram.js && node --check src/sources/shared.js && node --check src/sources/amazon.js && node --check src/sources/microsoft.js && node --check src/sources/google.js && node --check src/sources/meta.js && node --check src/sources/ashby.js && node --check src/job-description.js && node --check src/tailor.js && node --check src/discord-bot.js && node --check src/h1b-sponsors-seed.js && node --check src/address-book.js && node --check src/multi-user.js",
+    "check": "node --check src/index.js && node --check src/config.js && node --check src/state.js && node --check src/legitimacy.js && node --check src/notifiers/discord.js && node --check src/notifiers/telegram.js && node --check src/sources/shared.js && node --check src/sources/amazon.js && node --check src/sources/microsoft.js && node --check src/sources/google.js && node --check src/sources/meta.js && node --check src/sources/ashby.js && node --check src/job-description.js && node --check src/tailor.js && node --check src/discord-bot.js && node --check src/h1b-sponsors-seed.js && node --check src/address-book.js && node --check src/multi-user.js && node --check src/heartbeat.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "multi-user": "node src/multi-user.js"

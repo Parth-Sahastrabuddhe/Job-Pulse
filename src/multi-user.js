@@ -51,6 +51,8 @@ import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } fro
 import { fetchJobDescription, jobDirId, loadJobData } from "./job-description.js";
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
 import { sendJobDm, sendDigestDm, jobButtonHash, buildDmButtons } from "./mu-delivery.js";
+import { getConfig } from "./config.js";
+import { ping, pingFail } from "./heartbeat.js";
 import {
   buildAddressSlashCommands,
   handleAddAddressCommand,
@@ -913,9 +915,11 @@ async function pollLoop() {
   while (running) {
     try {
       await runPollCycle();
+      void ping(getConfig().heartbeat.mu);
     } catch (err) {
       console.error(`[multi-user] Poll cycle error: ${err.message}`);
       try { logError("multi-user-poll", err.message); } catch (_) { /* DB may be busy */ }
+      void pingFail(getConfig().heartbeat.mu, `pollCycle: ${err.message}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 10_000));
   }
@@ -1082,6 +1086,7 @@ async function runPollCycle() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function digestLoop() {
+  // Success heartbeat is emitted by pollLoop; digestLoop only fail-pings on errors.
   while (running) {
     try {
       await runDigestCycle();
@@ -1095,6 +1100,7 @@ async function digestLoop() {
     } catch (err) {
       console.error(`[multi-user] Digest cycle error: ${err.message}`);
       try { logError("multi-user-digest", err.message); } catch (_) { /* DB may be busy */ }
+      void pingFail(getConfig().heartbeat.mu, `digestCycle: ${err.message}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 60_000));
   }
@@ -1263,6 +1269,18 @@ client.once("ready", async () => {
 
 client.on("error", (err) => {
   console.error(`[multi-user] Discord client error: ${err.message}`);
+});
+
+const muHeartbeatUrl = () => {
+  try { return getConfig().heartbeat.mu; } catch { return ""; }
+};
+process.on("uncaughtException", (err) => {
+  console.error(`[multi-user] uncaughtException: ${err?.message}`);
+  pingFail(muHeartbeatUrl(), `uncaughtException: ${err?.message}`).finally(() => process.exit(1));
+});
+process.on("unhandledRejection", (reason) => {
+  console.error(`[multi-user] unhandledRejection: ${reason?.message ?? reason}`);
+  pingFail(muHeartbeatUrl(), `unhandledRejection: ${reason?.message ?? reason}`).finally(() => process.exit(1));
 });
 
 await client.login(token);
