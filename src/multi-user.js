@@ -53,6 +53,11 @@ import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-sch
 import { sendJobDm, sendDigestDm, jobButtonHash, buildDmButtons } from "./mu-delivery.js";
 import { getConfig } from "./config.js";
 import { ping, pingFail } from "./heartbeat.js";
+import { createWatchdog } from "./watchdog.js";
+
+const WATCHDOG_TIMEOUT_MS = 10 * 60 * 1000;
+const WATCHDOG_CHECK_MS = 60 * 1000;
+let watchdog = null;
 import {
   buildAddressSlashCommands,
   handleAddAddressCommand,
@@ -921,6 +926,7 @@ async function pollLoop() {
       try { logError("multi-user-poll", err.message); } catch (_) { /* DB may be busy */ }
       void pingFail(getConfig().heartbeat.mu, `pollCycle: ${err.message}`);
     }
+    if (watchdog) watchdog.progress();
     await new Promise((resolve) => setTimeout(resolve, 10_000));
   }
 }
@@ -1102,6 +1108,7 @@ async function digestLoop() {
       try { logError("multi-user-digest", err.message); } catch (_) { /* DB may be busy */ }
       void pingFail(getConfig().heartbeat.mu, `digestCycle: ${err.message}`);
     }
+    if (watchdog) watchdog.progress();
     await new Promise((resolve) => setTimeout(resolve, 60_000));
   }
 }
@@ -1261,6 +1268,21 @@ client.once("ready", async () => {
   const saved = getDb().prepare("SELECT value FROM meta WHERE key = 'mu_lastPollAt'").get();
   lastPollAt = saved?.value || new Date().toISOString();
   console.log(`[multi-user] Resuming poll from ${lastPollAt}`);
+
+  // Loop-progress watchdog: if neither pollLoop nor digestLoop reports progress
+  // for WATCHDOG_TIMEOUT_MS, exit so pm2 restarts. Catches event-loop hangs that
+  // don't crash the process — e.g. a fetch whose abort doesn't propagate to a
+  // stalled HTTP/2 body read.
+  watchdog = createWatchdog({
+    timeoutMs: WATCHDOG_TIMEOUT_MS,
+    checkIntervalMs: WATCHDOG_CHECK_MS,
+    onTimeout: (idleMs) => {
+      const idleMin = Math.round(idleMs / 60_000);
+      console.error(`[multi-user] [watchdog] No loop progress in ${idleMin} min — exiting for pm2 restart`);
+      pingFail(muHeartbeatUrl(), `watchdog: no loop progress in ${idleMin} min`)
+        .finally(() => setTimeout(() => process.exit(1), 1000).unref());
+    },
+  });
 
   // Start loops
   pollLoop();
