@@ -43,6 +43,11 @@ import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } fro
 import { checkLegitimacy } from "./legitimacy.js";
 import { isJobUrlLive } from "./liveness.js";
 import { ping, pingFail } from "./heartbeat.js";
+import { createWatchdog } from "./watchdog.js";
+
+const WATCHDOG_TIMEOUT_MS = 10 * 60 * 1000;
+const WATCHDOG_CHECK_MS = 60 * 1000;
+let watchdog = null;
 
 function timestamp() {
   return new Date().toISOString();
@@ -409,6 +414,8 @@ async function runBatchLoop(config, flags, registry) {
       void pingFail(config.heartbeat.micro, cycleError.message);
     }
 
+    if (watchdog) watchdog.progress();
+
     if (!flags.watch) break;
 
     // Wait before next batch
@@ -556,6 +563,19 @@ async function main() {
     log(`[heartbeat] unhandledRejection: ${reason?.message ?? reason}`);
     pingFail(heartbeatUrl(), `unhandledRejection: ${reason?.message ?? reason}`).finally(() => process.exit(1));
   });
+
+  if (flags.watch) {
+    watchdog = createWatchdog({
+      timeoutMs: WATCHDOG_TIMEOUT_MS,
+      checkIntervalMs: WATCHDOG_CHECK_MS,
+      onTimeout: (idleMs) => {
+        const idleMin = Math.round(idleMs / 60_000);
+        log(`[watchdog] No batch cycle progress in ${idleMin} min — exiting for pm2 restart`);
+        pingFail(heartbeatUrl(), `watchdog: no batch progress in ${idleMin} min`)
+          .finally(() => setTimeout(() => process.exit(1), 1000).unref());
+      },
+    });
+  }
 
   if (flags.watch && !acquireLock()) {
     console.error(`[${timestamp()}] Another bot instance is already running. Exiting.`);
