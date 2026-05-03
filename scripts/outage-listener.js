@@ -51,3 +51,110 @@ export async function appendRunLog(filePath, timestampMs) {
   existing.push(timestampMs);
   await fs.writeFile(filePath, JSON.stringify(existing), "utf8");
 }
+
+// ─── Orchestration ───────────────────────────────────────────────────────────
+
+const DEBOUNCE_MS = 20 * 60_000;
+const CAP_WINDOW_MS = 24 * 60 * 60_000;
+const CAP_MAX_RUNS = 3;
+const CLAUDE_TIMEOUT_MS = 15 * 60_000;
+
+function fillPrompt(template, vars) {
+  return Object.entries(vars).reduce(
+    (acc, [k, v]) => acc.split(`{{${k}}}`).join(v),
+    template
+  );
+}
+
+export async function processAlert({
+  content,
+  now,
+  runLog,
+  lockHeld,
+  spawnImpl,
+  promptTemplate,
+  promptVars,
+  runLogPath,
+  writeRun,
+  acquireLock,
+  releaseLock,
+}) {
+  if (!isDownAlert(content)) {
+    return { action: "skipped:not-down" };
+  }
+  if (lockHeld) {
+    return { action: "skipped:in-flight" };
+  }
+  const lastRun = runLog.length > 0 ? Math.max(...runLog) : 0;
+  if (shouldDebounce(now, lastRun, DEBOUNCE_MS)) {
+    return { action: "skipped:debounce" };
+  }
+  if (shouldCap(runLog, now, CAP_WINDOW_MS, CAP_MAX_RUNS)) {
+    return { action: "skipped:cap" };
+  }
+
+  acquireLock();
+  await writeRun(runLogPath, now);
+
+  const prompt = fillPrompt(promptTemplate, promptVars);
+
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const child = spawnImpl("claude", ["-p", "--output-format", "text"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    child.stdout.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr.on("data", (d) => {
+      stderr += d.toString();
+    });
+
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { child.kill(); } catch {}
+      releaseLock();
+      resolve({
+        action: "timeout",
+        stdout,
+        stderr,
+        error: `Claude timed out after ${CLAUDE_TIMEOUT_MS}ms`,
+      });
+    }, CLAUDE_TIMEOUT_MS);
+    if (typeof timeout.unref === "function") timeout.unref();
+
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      releaseLock();
+      resolve({
+        action: "spawn-error",
+        stdout,
+        stderr,
+        error: err.message,
+      });
+    });
+
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      releaseLock();
+      resolve({
+        action: "spawned",
+        exitCode: code,
+        stdout,
+        stderr,
+      });
+    });
+
+    child.stdin.write(prompt);
+    child.stdin.end();
+  });
+}

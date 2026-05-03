@@ -143,3 +143,142 @@ describe("readRunLog / appendRunLog", () => {
     await fs.rm(path.dirname(nested), { recursive: true, force: true });
   });
 });
+
+import { vi } from "vitest";
+import { processAlert } from "../scripts/outage-listener.js";
+
+describe("processAlert (orchestration)", () => {
+  it("ignores 'is up' messages without spawning", async () => {
+    const spawn = vi.fn();
+    const result = await processAlert({
+      content: "**jobpulse-micro** is UP.",
+      now: 1_000_000,
+      runLog: [],
+      lockHeld: false,
+      spawnImpl: spawn,
+      promptTemplate: "",
+      promptVars: {},
+      runLogPath: "/tmp/x",
+      writeRun: vi.fn(),
+      acquireLock: vi.fn(),
+      releaseLock: vi.fn(),
+    });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(result.action).toBe("skipped:not-down");
+  });
+
+  it("skips when lock is held (concurrency)", async () => {
+    const spawn = vi.fn();
+    const result = await processAlert({
+      content: "**jobpulse-micro** is DOWN.",
+      now: 1_000_000,
+      runLog: [],
+      lockHeld: true,
+      spawnImpl: spawn,
+      promptTemplate: "",
+      promptVars: {},
+      runLogPath: "/tmp/x",
+      writeRun: vi.fn(),
+      acquireLock: vi.fn(),
+      releaseLock: vi.fn(),
+    });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(result.action).toBe("skipped:in-flight");
+  });
+
+  it("skips when within debounce window", async () => {
+    const spawn = vi.fn();
+    const now = 10_000_000;
+    const result = await processAlert({
+      content: "**jobpulse-micro** is DOWN.",
+      now,
+      runLog: [now - 5 * 60_000],
+      lockHeld: false,
+      spawnImpl: spawn,
+      promptTemplate: "",
+      promptVars: {},
+      runLogPath: "/tmp/x",
+      writeRun: vi.fn(),
+      acquireLock: vi.fn(),
+      releaseLock: vi.fn(),
+    });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(result.action).toBe("skipped:debounce");
+  });
+
+  it("skips when daily cap exceeded", async () => {
+    const spawn = vi.fn();
+    const now = 10_000_000;
+    const runLog = [
+      now - 1 * 60 * 60_000,
+      now - 5 * 60 * 60_000,
+      now - 21 * 60 * 60_000,
+    ];
+    const result = await processAlert({
+      content: "**jobpulse-micro** is DOWN.",
+      now,
+      runLog,
+      lockHeld: false,
+      spawnImpl: spawn,
+      promptTemplate: "",
+      promptVars: {},
+      runLogPath: "/tmp/x",
+      writeRun: vi.fn(),
+      acquireLock: vi.fn(),
+      releaseLock: vi.fn(),
+    });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(result.action).toBe("skipped:cap");
+  });
+
+  it("spawns claude -p with substituted prompt and writes run log", async () => {
+    let capturedStdin = "";
+    const fakeChild = {
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      stdin: { write: (s) => { capturedStdin = s; }, end: vi.fn() },
+      on: vi.fn((event, cb) => {
+        if (event === "close") setTimeout(() => cb(0), 0);
+      }),
+      kill: vi.fn(),
+    };
+    const spawn = vi.fn(() => fakeChild);
+    const writeRun = vi.fn();
+    const acquireLock = vi.fn();
+    const releaseLock = vi.fn();
+    const now = 12_345_000;
+
+    const promptTemplate = "Check: {{CHECK_NAME}} at {{TRIGGER_AT_UTC}}";
+    const promptVars = {
+      CHECK_NAME: "jobpulse-micro",
+      TRIGGER_AT_UTC: "2026-05-03T12:00:00Z",
+    };
+
+    const result = await processAlert({
+      content: "**jobpulse-micro** is DOWN.",
+      now,
+      runLog: [],
+      lockHeld: false,
+      spawnImpl: spawn,
+      promptTemplate,
+      promptVars,
+      runLogPath: "/tmp/runs.json",
+      writeRun,
+      acquireLock,
+      releaseLock,
+    });
+
+    expect(acquireLock).toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledWith(
+      "claude",
+      ["-p", "--output-format", "text"],
+      expect.objectContaining({ stdio: ["pipe", "pipe", "pipe"] })
+    );
+    expect(capturedStdin).toBe(
+      "Check: jobpulse-micro at 2026-05-03T12:00:00Z"
+    );
+    expect(writeRun).toHaveBeenCalledWith("/tmp/runs.json", now);
+    expect(releaseLock).toHaveBeenCalled();
+    expect(result.action).toBe("spawned");
+  });
+});
