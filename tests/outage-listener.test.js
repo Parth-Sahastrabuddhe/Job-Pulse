@@ -236,14 +236,14 @@ describe("processAlert (orchestration)", () => {
     const fakeChild = {
       stdout: { on: vi.fn() },
       stderr: { on: vi.fn() },
-      stdin: { write: (s) => { capturedStdin = s; }, end: vi.fn() },
+      stdin: { write: (s) => { capturedStdin = s; }, end: vi.fn(), on: vi.fn() },
       on: vi.fn((event, cb) => {
         if (event === "close") setTimeout(() => cb(0), 0);
       }),
       kill: vi.fn(),
     };
     const spawn = vi.fn(() => fakeChild);
-    const writeRun = vi.fn();
+    const writeRun = vi.fn().mockResolvedValue(undefined);
     const acquireLock = vi.fn();
     const releaseLock = vi.fn();
     const now = 12_345_000;
@@ -280,5 +280,68 @@ describe("processAlert (orchestration)", () => {
     expect(writeRun).toHaveBeenCalledWith("/tmp/runs.json", now);
     expect(releaseLock).toHaveBeenCalled();
     expect(result.action).toBe("spawned");
+  });
+
+  it("on child 'error' event: releases lock and returns spawn-error", async () => {
+    const fakeChild = {
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      stdin: { write: vi.fn(), end: vi.fn(), on: vi.fn() },
+      on: vi.fn((event, cb) => {
+        if (event === "error") setTimeout(() => cb(new Error("ENOENT: claude")), 0);
+      }),
+      kill: vi.fn(),
+    };
+    const spawn = vi.fn(() => fakeChild);
+    const acquireLock = vi.fn();
+    const releaseLock = vi.fn();
+
+    const result = await processAlert({
+      content: "**jobpulse-micro** is DOWN.",
+      now: 1_000_000,
+      runLog: [],
+      lockHeld: false,
+      spawnImpl: spawn,
+      promptTemplate: "x",
+      promptVars: {},
+      runLogPath: "/tmp/runs.json",
+      writeRun: vi.fn().mockResolvedValue(undefined),
+      acquireLock,
+      releaseLock,
+    });
+
+    expect(acquireLock).toHaveBeenCalled();
+    expect(releaseLock).toHaveBeenCalled();
+    expect(result.action).toBe("spawn-error");
+    expect(result.error).toMatch(/ENOENT: claude/);
+  });
+
+  it("on synchronous spawn throw: releases lock and returns spawn-error", async () => {
+    const spawn = vi.fn(() => {
+      throw new Error("spawn ENOENT");
+    });
+    const acquireLock = vi.fn();
+    const releaseLock = vi.fn();
+    const writeRun = vi.fn().mockResolvedValue(undefined);
+
+    const result = await processAlert({
+      content: "**jobpulse-micro** is DOWN.",
+      now: 1_000_000,
+      runLog: [],
+      lockHeld: false,
+      spawnImpl: spawn,
+      promptTemplate: "x",
+      promptVars: {},
+      runLogPath: "/tmp/runs.json",
+      writeRun,
+      acquireLock,
+      releaseLock,
+    });
+
+    expect(acquireLock).toHaveBeenCalled();
+    expect(releaseLock).toHaveBeenCalled();
+    expect(writeRun).not.toHaveBeenCalled(); // run log NOT poisoned
+    expect(result.action).toBe("spawn-error");
+    expect(result.error).toMatch(/spawn ENOENT/);
   });
 });

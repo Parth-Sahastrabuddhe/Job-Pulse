@@ -94,17 +94,35 @@ export async function processAlert({
   }
 
   acquireLock();
-  await writeRun(runLogPath, now);
-
   const prompt = fillPrompt(promptTemplate, promptVars);
 
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let timeout = null;
 
-    const child = spawnImpl("claude", ["-p", "--output-format", "text"], {
-      stdio: ["pipe", "pipe", "pipe"],
+    let child;
+    try {
+      child = spawnImpl("claude", ["-p", "--output-format", "text"], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (err) {
+      releaseLock();
+      resolve({
+        action: "spawn-error",
+        stdout: "",
+        stderr: "",
+        error: err.message,
+      });
+      return;
+    }
+
+    // Persist the run timestamp now that the child is live. If writeRun fails,
+    // we still proceed — losing one entry from the cap log is preferable to
+    // skipping the diagnosis.
+    writeRun(runLogPath, now).catch((err) => {
+      stderr += `[outage-listener] writeRun failed: ${err?.message ?? err}\n`;
     });
 
     child.stdout.on("data", (d) => {
@@ -114,7 +132,12 @@ export async function processAlert({
       stderr += d.toString();
     });
 
-    const timeout = setTimeout(() => {
+    // Swallow stdin errors. If the child exits before we finish writing,
+    // discord.js / Node can emit an 'error' on stdin that would otherwise
+    // crash the process. The 'error'/'close' on the child handles state.
+    child.stdin.on("error", () => {});
+
+    timeout = setTimeout(() => {
       if (settled) return;
       settled = true;
       try { child.kill(); } catch {}
@@ -154,7 +177,11 @@ export async function processAlert({
       });
     });
 
-    child.stdin.write(prompt);
-    child.stdin.end();
+    try {
+      child.stdin.write(prompt);
+      child.stdin.end();
+    } catch {
+      // Already-destroyed stream — child 'error'/'close' will resolve.
+    }
   });
 }
