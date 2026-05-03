@@ -344,4 +344,85 @@ describe("processAlert (orchestration)", () => {
     expect(result.action).toBe("spawn-error");
     expect(result.error).toMatch(/spawn ENOENT/);
   });
+
+  it("uses lockRef for atomic in-flight check", async () => {
+    const lockRef = { held: false };
+    const spawn = vi.fn(() => ({
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      stdin: { write: vi.fn(), end: vi.fn(), on: vi.fn() },
+      on: vi.fn(), // never fires close/error — keeps spawn pending
+      kill: vi.fn(),
+    }));
+    const writeRun = vi.fn().mockResolvedValue(undefined);
+
+    // First call acquires the lock and starts a spawn that never resolves.
+    const first = processAlert({
+      content: "**jobpulse-micro** is DOWN.",
+      now: 1_000_000,
+      runLog: [],
+      lockRef,
+      spawnImpl: spawn,
+      promptTemplate: "x",
+      promptVars: {},
+      runLogPath: "/tmp/runs.json",
+      writeRun,
+    });
+
+    // After the first call returns control (synchronously past the gate),
+    // a second call must see lockRef.held === true and skip.
+    expect(lockRef.held).toBe(true);
+
+    const second = await processAlert({
+      content: "**jobpulse-micro** is DOWN.",
+      now: 1_000_010,
+      runLog: [],
+      lockRef,
+      spawnImpl: spawn,
+      promptTemplate: "x",
+      promptVars: {},
+      runLogPath: "/tmp/runs.json",
+      writeRun,
+    });
+
+    expect(second.action).toBe("skipped:in-flight");
+    expect(spawn).toHaveBeenCalledTimes(1);
+    // The first promise stays pending; we don't await it (would deadlock the test).
+    void first; // avoid unused-var warning
+  });
+
+  it("releases lockRef on skipped:debounce", async () => {
+    const lockRef = { held: false };
+    const result = await processAlert({
+      content: "**jobpulse-micro** is DOWN.",
+      now: 10_000_000,
+      runLog: [10_000_000 - 5 * 60_000], // within 20-min window
+      lockRef,
+      spawnImpl: vi.fn(),
+      promptTemplate: "",
+      promptVars: {},
+      runLogPath: "/tmp/x",
+      writeRun: vi.fn(),
+    });
+    expect(result.action).toBe("skipped:debounce");
+    expect(lockRef.held).toBe(false);
+  });
+
+  it("releases lockRef on skipped:cap", async () => {
+    const lockRef = { held: false };
+    const now = 10_000_000;
+    const result = await processAlert({
+      content: "**jobpulse-micro** is DOWN.",
+      now,
+      runLog: [now - 1 * 60 * 60_000, now - 5 * 60 * 60_000, now - 10 * 60 * 60_000],
+      lockRef,
+      spawnImpl: vi.fn(),
+      promptTemplate: "",
+      promptVars: {},
+      runLogPath: "/tmp/x",
+      writeRun: vi.fn(),
+    });
+    expect(result.action).toBe("skipped:cap");
+    expect(lockRef.held).toBe(false);
+  });
 });

@@ -1,5 +1,11 @@
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { Client, GatewayIntentBits, Events } from "discord.js";
+import { spawn } from "node:child_process";
+
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Outage listener — Discord WS subscriber that triggers claude -p on
 // healthchecks.io "is DOWN" alerts. See docs/superpowers/specs/2026-05-03-outage-listener-design.md.
@@ -70,30 +76,43 @@ export async function processAlert({
   content,
   now,
   runLog,
-  lockHeld,
+  // lockRef: { held: boolean } — atomic check-and-set in this function's
+  // synchronous prefix prevents two near-simultaneous alerts from both
+  // passing the in-flight gate before either acquires the lock.
+  lockRef,
   spawnImpl,
   promptTemplate,
   promptVars,
   runLogPath,
   writeRun,
+  // Optional fallback hooks — only used when lockRef is not provided
+  // (legacy test API). Prefer lockRef in new callers.
+  lockHeld,
   acquireLock,
   releaseLock,
 }) {
   if (!isDownAlert(content)) {
     return { action: "skipped:not-down" };
   }
-  if (lockHeld) {
+  // Atomic in-flight gate: if a lockRef is provided, check-and-set
+  // synchronously before any await so concurrent calls can't both pass.
+  if (lockRef) {
+    if (lockRef.held) return { action: "skipped:in-flight" };
+    lockRef.held = true;
+  } else if (lockHeld) {
     return { action: "skipped:in-flight" };
   }
   const lastRun = runLog.length > 0 ? Math.max(...runLog) : 0;
   if (shouldDebounce(now, lastRun, DEBOUNCE_MS)) {
+    if (lockRef) lockRef.held = false; // we set it earlier; release on skip
     return { action: "skipped:debounce" };
   }
   if (shouldCap(runLog, now, CAP_WINDOW_MS, CAP_MAX_RUNS)) {
+    if (lockRef) lockRef.held = false;
     return { action: "skipped:cap" };
   }
 
-  acquireLock();
+  if (acquireLock) acquireLock();
   const prompt = fillPrompt(promptTemplate, promptVars);
 
   return new Promise((resolve) => {
@@ -108,7 +127,8 @@ export async function processAlert({
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch (err) {
-      releaseLock();
+      if (lockRef) lockRef.held = false;
+      if (releaseLock) releaseLock();
       resolve({
         action: "spawn-error",
         stdout: "",
@@ -140,8 +160,12 @@ export async function processAlert({
     timeout = setTimeout(() => {
       if (settled) return;
       settled = true;
-      try { child.kill(); } catch {}
-      releaseLock();
+      try { child.kill("SIGTERM"); } catch {}
+      // Escalate to SIGKILL if the child ignores SIGTERM after 5s.
+      const killTimer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 5_000);
+      if (typeof killTimer.unref === "function") killTimer.unref();
+      if (lockRef) lockRef.held = false;
+      if (releaseLock) releaseLock();
       resolve({
         action: "timeout",
         stdout,
@@ -155,7 +179,8 @@ export async function processAlert({
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      releaseLock();
+      if (lockRef) lockRef.held = false;
+      if (releaseLock) releaseLock();
       resolve({
         action: "spawn-error",
         stdout,
@@ -168,7 +193,8 @@ export async function processAlert({
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      releaseLock();
+      if (lockRef) lockRef.held = false;
+      if (releaseLock) releaseLock();
       resolve({
         action: "spawned",
         exitCode: code,
@@ -188,11 +214,6 @@ export async function processAlert({
 
 // ─── Discord client + start() entrypoint ─────────────────────────────────────
 
-import { Client, GatewayIntentBits, Events } from "discord.js";
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
-
 function requireEnv(name) {
   const v = process.env[name];
   if (!v || v.trim() === "") {
@@ -204,9 +225,7 @@ function requireEnv(name) {
 
 function loadDotEnv() {
   // Minimal .env loader (matches src/config.js pattern; no dotenv dep)
-  const require_ = createRequire(import.meta.url);
-  const fsSync = require_("node:fs");
-  const envPath = path.resolve(process.cwd(), ".env");
+  const envPath = path.join(PROJECT_ROOT, ".env");
   if (!fsSync.existsSync(envPath)) return;
   const content = fsSync.readFileSync(envPath, "utf8");
   for (const rawLine of content.split(/\r?\n/)) {
@@ -241,14 +260,11 @@ export async function start() {
   const ec2Host = requireEnv("EC2_HOST");
   const githubRepo = requireEnv("GITHUB_REPO");
 
-  const promptPath = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "outage-prompt.md"
-  );
+  const promptPath = path.join(PROJECT_ROOT, "scripts", "outage-prompt.md");
   const promptTemplate = await fs.readFile(promptPath, "utf8");
-  const runLogPath = path.resolve(process.cwd(), "data", "outage-runs.json");
+  const runLogPath = path.join(PROJECT_ROOT, "data", "outage-runs.json");
 
-  let lockHeld = false;
+  const lockRef = { held: false };
 
   const client = new Client({
     intents: [
@@ -260,6 +276,10 @@ export async function start() {
 
   client.once(Events.ClientReady, (c) => {
     console.log(`[outage-listener] Ready as ${c.user.tag}, watching channel ${channelId}`);
+  });
+
+  client.on("error", (err) => {
+    console.error(`[outage-listener] client error: ${err.message}`);
   });
 
   client.on(Events.MessageCreate, async (message) => {
@@ -277,7 +297,7 @@ export async function start() {
       content,
       now,
       runLog,
-      lockHeld,
+      lockRef,
       spawnImpl: spawn,
       promptTemplate,
       promptVars: {
@@ -290,8 +310,6 @@ export async function start() {
       },
       runLogPath,
       writeRun: appendRunLog,
-      acquireLock: () => { lockHeld = true; },
-      releaseLock: () => { lockHeld = false; },
     });
 
     console.log(`[outage-listener] alert "${checkName}" → ${result.action}`);
