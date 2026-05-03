@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
 // Outage listener — Discord WS subscriber that triggers claude -p on
 // healthchecks.io "is DOWN" alerts. See docs/superpowers/specs/2026-05-03-outage-listener-design.md.
 
@@ -28,4 +31,23 @@ export function shouldCap(runTimestampsMs, nowMs, windowMs, maxRuns) {
   const cutoff = nowMs - windowMs;
   const recent = runTimestampsMs.filter((t) => t >= cutoff);
   return recent.length >= maxRuns;
+}
+
+// ─── Run-log persistence (sliding-window cap state) ──────────────────────────
+
+export async function readRunLog(filePath) {
+  try {
+    const content = await fs.readFile(filePath, "utf8");
+    const parsed = JSON.parse(content);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function appendRunLog(filePath, timestampMs) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const existing = await readRunLog(filePath);
+  existing.push(timestampMs);
+  await fs.writeFile(filePath, JSON.stringify(existing), "utf8");
 }

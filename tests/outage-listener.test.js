@@ -1,10 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   isDownAlert,
   extractCheckName,
   shouldDebounce,
   shouldCap,
+  readRunLog,
+  appendRunLog,
 } from "../scripts/outage-listener.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
 
 describe("isDownAlert", () => {
   it("returns true for canonical HC down message", () => {
@@ -97,5 +102,44 @@ describe("shouldCap", () => {
       now - 26 * 60 * 60_000,
     ];
     expect(shouldCap(runs, now, 24 * 60 * 60_000, 3)).toBe(false);
+  });
+});
+
+describe("readRunLog / appendRunLog", () => {
+  let tmpFile;
+
+  beforeEach(async () => {
+    tmpFile = path.join(os.tmpdir(), `outage-runs-test-${Date.now()}-${Math.random()}.json`);
+  });
+
+  afterEach(async () => {
+    try { await fs.unlink(tmpFile); } catch {}
+  });
+
+  it("returns empty array when file does not exist", async () => {
+    expect(await readRunLog(tmpFile)).toEqual([]);
+  });
+
+  it("appendRunLog persists timestamps and readRunLog returns them", async () => {
+    await appendRunLog(tmpFile, 100);
+    await appendRunLog(tmpFile, 200);
+    expect(await readRunLog(tmpFile)).toEqual([100, 200]);
+  });
+
+  it("readRunLog returns empty array on malformed JSON", async () => {
+    await fs.writeFile(tmpFile, "not json", "utf8");
+    expect(await readRunLog(tmpFile)).toEqual([]);
+  });
+
+  it("readRunLog returns empty array if file is not an array", async () => {
+    await fs.writeFile(tmpFile, '{"not":"array"}', "utf8");
+    expect(await readRunLog(tmpFile)).toEqual([]);
+  });
+
+  it("appendRunLog creates parent directory if missing", async () => {
+    const nested = path.join(os.tmpdir(), `nested-${Date.now()}`, "runs.json");
+    await appendRunLog(nested, 42);
+    expect(await readRunLog(nested)).toEqual([42]);
+    await fs.rm(path.dirname(nested), { recursive: true, force: true });
   });
 });
