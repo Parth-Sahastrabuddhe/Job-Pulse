@@ -185,3 +185,136 @@ export async function processAlert({
     }
   });
 }
+
+// ─── Discord client + start() entrypoint ─────────────────────────────────────
+
+import { Client, GatewayIntentBits, Events } from "discord.js";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+
+function requireEnv(name) {
+  const v = process.env[name];
+  if (!v || v.trim() === "") {
+    console.error(`[outage-listener] Missing required env var: ${name}`);
+    process.exit(1);
+  }
+  return v.trim();
+}
+
+function loadDotEnv() {
+  // Minimal .env loader (matches src/config.js pattern; no dotenv dep)
+  const require_ = createRequire(import.meta.url);
+  const fsSync = require_("node:fs");
+  const envPath = path.resolve(process.cwd(), ".env");
+  if (!fsSync.existsSync(envPath)) return;
+  const content = fsSync.readFileSync(envPath, "utf8");
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const idx = line.indexOf("=");
+    if (idx === -1) continue;
+    const key = line.slice(0, idx).trim();
+    let value = line.slice(idx + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (!(key in process.env)) process.env[key] = value;
+  }
+}
+
+function extractDiscordSummary(stdout, result) {
+  const m = stdout.match(/--- BEGIN DISCORD_SUMMARY ---([\s\S]*?)--- END DISCORD_SUMMARY ---/);
+  if (m) return m[1].trim().slice(0, 1900);
+  if (result.action === "timeout") return `Diagnostic run timed out (15 min). stderr tail:\n\`\`\`\n${(result.stderr || "").slice(-500)}\n\`\`\``;
+  if (result.action === "spawn-error") return `claude spawn failed: ${result.error}`;
+  if (result.exitCode !== 0) return `claude -p exited ${result.exitCode}, no DISCORD_SUMMARY block found.\nstderr tail:\n\`\`\`\n${(result.stderr || "").slice(-500)}\n\`\`\``;
+  return "Diagnostic run completed but produced no DISCORD_SUMMARY block.";
+}
+
+export async function start() {
+  loadDotEnv();
+
+  const token = requireEnv("WATCHDOG_BOT_TOKEN");
+  const channelId = requireEnv("WATCHDOG_CHANNEL_ID");
+  const ec2SshKeyPath = requireEnv("EC2_SSH_KEY_PATH");
+  const ec2Host = requireEnv("EC2_HOST");
+  const githubRepo = requireEnv("GITHUB_REPO");
+
+  const promptPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "outage-prompt.md"
+  );
+  const promptTemplate = await fs.readFile(promptPath, "utf8");
+  const runLogPath = path.resolve(process.cwd(), "data", "outage-runs.json");
+
+  let lockHeld = false;
+
+  const client = new Client({
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+    ],
+  });
+
+  client.once(Events.ClientReady, (c) => {
+    console.log(`[outage-listener] Ready as ${c.user.tag}, watching channel ${channelId}`);
+  });
+
+  client.on(Events.MessageCreate, async (message) => {
+    if (message.channelId !== channelId) return;
+    // Accept HC alert messages (which come from a webhook bot) but ignore
+    // the listener's own bot-posted summaries to avoid loops.
+    if (message.author.id === client.user?.id) return;
+
+    const content = message.content || "";
+    const now = Date.now();
+    const runLog = await readRunLog(runLogPath);
+    const checkName = extractCheckName(content);
+
+    const result = await processAlert({
+      content,
+      now,
+      runLog,
+      lockHeld,
+      spawnImpl: spawn,
+      promptTemplate,
+      promptVars: {
+        CHECK_NAME: checkName,
+        TRIGGER_AT_UTC: new Date(now).toISOString(),
+        EC2_HOST: ec2Host,
+        EC2_SSH_KEY_PATH: ec2SshKeyPath,
+        GITHUB_REPO: githubRepo,
+        UNIX_TS: String(Math.floor(now / 1000)),
+      },
+      runLogPath,
+      writeRun: appendRunLog,
+      acquireLock: () => { lockHeld = true; },
+      releaseLock: () => { lockHeld = false; },
+    });
+
+    console.log(`[outage-listener] alert "${checkName}" → ${result.action}`);
+
+    if (result.action === "spawned" || result.action === "timeout" || result.action === "spawn-error") {
+      const summary = extractDiscordSummary(result.stdout, result);
+      try {
+        const channel = await client.channels.fetch(channelId);
+        await channel.send(summary);
+      } catch (err) {
+        console.error(`[outage-listener] failed to post summary: ${err.message}`);
+      }
+    }
+  });
+
+  await client.login(token);
+}
+
+// Auto-start when run directly
+const isDirectRun = process.argv[1] && process.argv[1].endsWith("outage-listener.js");
+if (isDirectRun) {
+  start().catch((err) => {
+    console.error(`[outage-listener] fatal: ${err.message}`);
+    process.exit(1);
+  });
+}
