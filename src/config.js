@@ -157,7 +157,11 @@ export function getConfig() {
       sourceKey: "qualcomm",
       sourceLabel: "Qualcomm",
       apiUrl: "https://careers.qualcomm.com/api/pcsx/search?domain=qualcomm.com&query=software+engineer&location=United+States&start=0&sort_by=new&pg_size=20",
-      baseUrl: "https://careers.qualcomm.com"
+      baseUrl: "https://careers.qualcomm.com",
+      // Qualcomm's PCSX tenant ignores sort_by and caps pg_size at 10, so the
+      // first page is relevance-ranked and misses fresh roles. Paginate to
+      // walk the full corpus and let the freshness gate filter to <24h.
+      paginate: true
     },
     // Workday additions
     netflix: {
