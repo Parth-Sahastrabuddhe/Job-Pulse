@@ -925,6 +925,18 @@ async function pollLoop() {
   }
 }
 
+// Advance the poll cursor (in-memory + persisted). The persist is wrapped
+// because SQLITE_BUSY here used to throw out of the cycle and leave the
+// cursor frozen, so every subsequent cycle re-scanned the same window.
+function advanceMuCursor(db, nowIso) {
+  lastPollAt = nowIso;
+  try {
+    db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(nowIso);
+  } catch (err) {
+    console.error(`[multi-user] Cursor persist failed: ${err.message}`);
+  }
+}
+
 async function runPollCycle() {
   const db      = getDb();
   const cutoff  = lastPollAt;
@@ -938,7 +950,10 @@ async function runPollCycle() {
                  OR (posted_at > ? AND last_seen_at > ?)`)
     .all(cutoff, cutoff, cutoff);
 
-  if (rawJobs.length === 0) return;
+  if (rawJobs.length === 0) {
+    advanceMuCursor(db, nowIso);
+    return;
+  }
 
   // Normalise role_categories from JSON string to array
   const jobs = rawJobs.map((job) => {
@@ -987,7 +1002,10 @@ async function runPollCycle() {
     console.log(`[multi-user] Filtered ${jobs.length - freshJobs.length} stale postings (posted >24h / >3d ago).`);
   }
 
-  if (freshJobs.length === 0) return;
+  if (freshJobs.length === 0) {
+    advanceMuCursor(db, nowIso);
+    return;
+  }
 
   const users = getActiveUsers();
 
@@ -1074,11 +1092,7 @@ async function runPollCycle() {
     }
   }
 
-  // Advance lastPollAt only AFTER the cycle completes successfully —
-  // if the cycle throws (e.g. "database is locked"), the cutoff stays put
-  // so those jobs are retried next cycle instead of being permanently skipped.
-  lastPollAt = nowIso;
-  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(nowIso);
+  advanceMuCursor(db, nowIso);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
