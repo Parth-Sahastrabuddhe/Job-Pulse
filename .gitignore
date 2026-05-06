@@ -5,6 +5,7 @@ data/
 *.migrated
 docs/
 resume/
+outreach/
 google-credentials.json
 CLAUDE.md
 .claude/
