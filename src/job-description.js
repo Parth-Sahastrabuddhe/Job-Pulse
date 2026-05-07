@@ -9,8 +9,10 @@ import { fetchWithTimeout } from "./sources/shared.js";
 
 const JOBS_DIR = path.join(PROJECT_ROOT, "data", "jobs");
 
-// Stricter Chromium flags reduce per-process RAM and dodge /dev/shm sizing on small EC2.
-const CHROMIUM_ARGS = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"];
+// Stricter Chromium flags reduce per-process RAM. /dev/shm here is tmpfs with
+// plenty of headroom, so we keep Chrome's IPC there — using /tmp (EBS disk)
+// causes severe iowait stalls.
+const CHROMIUM_ARGS = ["--no-sandbox", "--disable-gpu"];
 
 function stripHtml(html) {
   return String(html ?? "")

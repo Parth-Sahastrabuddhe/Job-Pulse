@@ -39,7 +39,7 @@ function parseUberJob(raw) {
 export async function collectUberJobs(_unused, config, log) {
   let browser;
   try {
-    browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] });
+    browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-gpu"] });
     const page = await browser.newPage();
 
     let jobsData = null;
