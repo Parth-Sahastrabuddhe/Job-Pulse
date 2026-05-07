@@ -10,7 +10,7 @@ export function initDb(dbFile) {
   fs.mkdirSync(path.dirname(dbFile), { recursive: true });
   db = new Database(dbFile);
   db.pragma("journal_mode = WAL");
-  db.pragma("busy_timeout = 15000");
+  db.pragma("busy_timeout = 2000");
   db.pragma("foreign_keys = ON");
 
   db.exec(`
