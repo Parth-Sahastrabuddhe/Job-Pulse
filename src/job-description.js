@@ -9,6 +9,9 @@ import { fetchWithTimeout } from "./sources/shared.js";
 
 const JOBS_DIR = path.join(PROJECT_ROOT, "data", "jobs");
 
+// Stricter Chromium flags reduce per-process RAM and dodge /dev/shm sizing on small EC2.
+const CHROMIUM_ARGS = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"];
+
 function stripHtml(html) {
   return String(html ?? "")
     .replace(/<br\s*\/?>/gi, "\n")
@@ -256,7 +259,7 @@ async function fetchLeverDescription(job) {
 async function fetchConfluentDescription(job) {
   try {
     const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true, args: CHROMIUM_ARGS });
     try {
       const page = await browser.newPage();
       await page.goto(`https://careers.confluent.io/jobs/job/${job.id}`, { waitUntil: "networkidle", timeout: 30000 });
@@ -273,7 +276,7 @@ async function fetchConfluentDescription(job) {
 async function fetchOracleDescription(job) {
   try {
     const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true, args: CHROMIUM_ARGS });
     try {
       const page = await browser.newPage();
       await page.goto(`https://careers.oracle.com/jobs/#en/sites/jobsearch/job/${job.id}`, { timeout: 60000 });
@@ -296,7 +299,7 @@ async function fetchOracleHCMDescription(job) {
   // JPMorgan and Ford use Oracle HCM - same Playwright approach
   try {
     const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true, args: CHROMIUM_ARGS });
     try {
       const page = await browser.newPage();
       await page.goto(job.url, { timeout: 60000 });
@@ -321,7 +324,7 @@ async function fetchUberDescription(job) {
   // Uber's detail page doesn't work. Fetch via the search API which includes descriptions.
   try {
     const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true, args: CHROMIUM_ARGS });
     try {
       const page = await browser.newPage();
       let jobsData = null;
@@ -345,7 +348,7 @@ async function fetchUberDescription(job) {
 async function fetchGoldmanSachsDescription(job) {
   try {
     const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true, args: CHROMIUM_ARGS });
     try {
       const page = await browser.newPage();
       await page.goto(job.url, { waitUntil: "networkidle", timeout: 30000 });
