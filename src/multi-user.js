@@ -48,7 +48,7 @@ import { isJobUrlLive } from "./liveness.js";
 import { jobIsFresh } from "./sources/shared.js";
 import { COMPANIES } from "./companies.js";
 import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } from "./jd-filter.js";
-import { fetchJobDescription, jobDirId, loadJobData } from "./job-description.js";
+import { fetchJobDescription } from "./job-description.js";
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
 import { sendJobDm, sendDigestDm, jobButtonHash, buildDmButtons } from "./mu-delivery.js";
 import { getConfig } from "./config.js";
@@ -815,68 +815,43 @@ async function checkSavedJobExpiry() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Try to load a cached job description from disk. If not found, fetch it.
- * Returns the description text or null.
- */
-async function getJobDescription(job) {
-  const dirId = jobDirId(job);
-  try {
-    const data = await loadJobData(dirId);
-    if (data?.description) return data.description;
-  } catch {
-    // Not on disk yet — fall through to fetch
-  }
-  try {
-    return await fetchJobDescription(job);
-  } catch (err) {
-    console.error(`[multi-user] Failed to fetch JD for ${dirId}: ${err.message}`);
-    return null;
-  }
-}
-
-/**
- * Fetch the JD for a job and derive warnings + education-aware experience
- * years for a given user profile. Returns `{ warnings: [], experienceYears: null }`
- * on JD fetch failure (never throws).
- *
- * Used by both the immediate-send path in runPollCycle and the delayed-
- * delivery paths in runDigestCycle to keep warning generation consistent.
+ * Fetch live JD text through lightweight HTTP/API paths only, then derive
+ * warnings. MU never reads cached descriptions and never launches Chrome.
  */
 async function computeJobEnrichment(job, user) {
   let experienceYears = null;
   let warnings = [];
+
   try {
-    const description = await getJobDescription(job);
-    if (description) {
-      const rawWarnings = checkJobDescription(description);
+    // Live fetch only: no cached descriptions and no Playwright from MU.
+    const description = await fetchJobDescription(job, undefined, { allowPlaywright: false });
+    if (!description) return { warnings, experienceYears };
 
-      warnings = rawWarnings.filter((w) => {
-        // Sponsorship warnings → only shown to users requiring sponsorship
-        if (w.text.startsWith("No sponsorship")) {
-          return Boolean(user.requires_sponsorship);
-        }
-        // Strip generic experience warning — replaced with education-aware below
-        if (/^\d+\+ years required/.test(w.text)) {
-          return false;
-        }
-        return true;
-      });
-
-      const tierInfo = extractExperienceTiers(description);
-      const yearsForUser = pickTierYearsForUser(
-        tierInfo.tiers,
-        tierInfo.fallbackMax,
-        user.education_level
-      );
-      if (yearsForUser >= 5) {
-        experienceYears = yearsForUser;
-        warnings.push({ text: `${yearsForUser}+ years required`, severity: "soft" });
+    const rawWarnings = checkJobDescription(description);
+    warnings = rawWarnings.filter((w) => {
+      if (w.text.startsWith("No sponsorship")) {
+        return Boolean(user.requires_sponsorship);
       }
+      if (/^\d+\+ years required/.test(w.text)) {
+        return false;
+      }
+      return true;
+    });
+
+    const tierInfo = extractExperienceTiers(description);
+    const yearsForUser = pickTierYearsForUser(
+      tierInfo.tiers,
+      tierInfo.fallbackMax,
+      user.education_level
+    );
+    if (yearsForUser >= 5) {
+      experienceYears = yearsForUser;
+      warnings.push({ text: `${yearsForUser}+ years required`, severity: "soft" });
     }
   } catch (err) {
-    console.error(`[multi-user] JD processing failed for ${job.key}: ${err.message}`);
-    // Fall through — return empty warnings rather than throwing
+    console.error(`[multi-user] Live JD warning fetch failed for ${job.key}: ${err.message}`);
   }
+
   return { warnings, experienceYears };
 }
 
@@ -984,18 +959,29 @@ async function runPollCycle() {
     maxDateOnlyAgeDays: Number(process.env.MAX_DATE_ONLY_AGE_DAYS) || 1,
     timezone: "America/New_York",
   };
+  const nightlyPlaywrightSources = new Set(
+    (process.env.NIGHTLY_PLAYWRIGHT_SOURCES || "uber,confluent")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+  );
+  const nightlyPlaywrightMaxPostAgeMinutes =
+    Number(process.env.NIGHTLY_PLAYWRIGHT_MAX_POST_AGE_MINUTES) || freshConfig.maxPostAgeMinutes;
   const freshJobs = jobs.filter((job) => {
     const postedMs = Date.parse(job.postedAt ?? "");
     const firstSeenMs = Date.parse(job.first_seen_at ?? "");
     const reposted = Number.isFinite(postedMs) && Number.isFinite(firstSeenMs) && postedMs > firstSeenMs;
+    const jobFreshConfig = nightlyPlaywrightSources.has(job.sourceKey)
+      ? { ...freshConfig, maxPostAgeMinutes: nightlyPlaywrightMaxPostAgeMinutes }
+      : freshConfig;
     if (reposted) {
       // When the ATS timestamp is in the future (clock drift / scheduled posting),
       // using nowIso gives a large negative ageMinutes → incorrectly stale.
       // Use postedMs itself as reference so ageMinutes = 0 (always fresh).
       const nowMs = Date.now();
-      return jobIsFresh(job, postedMs > nowMs ? postedMs : nowMs, freshConfig);
+      return jobIsFresh(job, postedMs > nowMs ? postedMs : nowMs, jobFreshConfig);
     }
-    return jobIsFresh(job, job.first_seen_at, freshConfig);
+    return jobIsFresh(job, job.first_seen_at, jobFreshConfig);
   });
 
   if (freshJobs.length < jobs.length) {
@@ -1061,13 +1047,17 @@ async function runPollCycle() {
         }
         deadLinkFailures.delete(liveKey); // reset on success
 
-        // Compute JD-based warnings + education-aware experience years
+        // Live JD warning fetch uses HTTP/API only; Chrome is blocked in MU.
         const { warnings, experienceYears } = await computeJobEnrichment(job, user);
 
         const action = getDeliveryAction(user, new Date());
         const dmOptions = { timezone: userTz, experienceYears, warnings };
-        if (user.discord_id === ADMIN_DISCORD_ID && process.env.PERSONAL_CHANNEL_ID) {
-          dmOptions.notificationChannelId = process.env.PERSONAL_CHANNEL_ID;
+        const channelOverride =
+          user.notification_channel_id ||
+          (user.discord_id === ADMIN_DISCORD_ID && process.env.PERSONAL_CHANNEL_ID) ||
+          null;
+        if (channelOverride) {
+          dmOptions.notificationChannelId = channelOverride;
         }
 
         if (action === "send") {
@@ -1158,7 +1148,7 @@ async function runDigestCycle() {
 
           const userTz = user.quiet_hours_tz || "America/New_York";
 
-          // Compute warnings + experience per job before sending the digest
+          // Attach live JD warnings where lightweight HTTP/API fetches work.
           const enrichedJobs = [];
           for (const job of queuedJobs) {
             const normalisedJob = {
@@ -1175,8 +1165,12 @@ async function runDigestCycle() {
           }
 
           const digestOpts = { timezone: userTz };
-          if (user.discord_id === ADMIN_DISCORD_ID && process.env.PERSONAL_CHANNEL_ID) {
-            digestOpts.notificationChannelId = process.env.PERSONAL_CHANNEL_ID;
+          const digestChannelOverride =
+            user.notification_channel_id ||
+            (user.discord_id === ADMIN_DISCORD_ID && process.env.PERSONAL_CHANNEL_ID) ||
+            null;
+          if (digestChannelOverride) {
+            digestOpts.notificationChannelId = digestChannelOverride;
           }
           await sendDigestDm(client, user.discord_id, enrichedJobs, user.first_name, digestOpts);
 
@@ -1209,7 +1203,7 @@ async function runDigestCycle() {
             const job = db.prepare("SELECT * FROM seen_jobs WHERE key = ?").get(row.job_key);
             if (!job) continue;
 
-            // Normalise the DB row into the shape computeJobEnrichment expects
+            // Normalise the DB row into the shape sendJobDm expects.
             const normalisedJob = {
               ...job,
               sourceKey: job.source_key,
@@ -1218,8 +1212,12 @@ async function runDigestCycle() {
             const { warnings, experienceYears } = await computeJobEnrichment(normalisedJob, user);
 
             const flushOpts = { timezone: tz, experienceYears, warnings };
-            if (user.discord_id === ADMIN_DISCORD_ID && process.env.PERSONAL_CHANNEL_ID) {
-              flushOpts.notificationChannelId = process.env.PERSONAL_CHANNEL_ID;
+            const flushChannelOverride =
+              user.notification_channel_id ||
+              (user.discord_id === ADMIN_DISCORD_ID && process.env.PERSONAL_CHANNEL_ID) ||
+              null;
+            if (flushChannelOverride) {
+              flushOpts.notificationChannelId = flushChannelOverride;
             }
             const result = await sendJobDm(client, user.discord_id, job, user.first_name, flushOpts);
             if (result) {

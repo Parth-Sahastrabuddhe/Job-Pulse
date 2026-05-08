@@ -178,7 +178,7 @@ export function getMuDeliveredJobKeys(userId) {
   const db = getDb();
   // Jobs the mu bot delivered (or filtered)
   const dmRows = db
-    .prepare("SELECT DISTINCT job_key FROM dm_log WHERE user_id = ?")
+    .prepare("SELECT DISTINCT job_key FROM dm_log WHERE user_id = ? AND status IN ('sent','queued','dead_link')")
     .all(userId);
   // Jobs the user acted on (should not re-notify regardless of source)
   const actionRows = db

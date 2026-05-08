@@ -6,6 +6,7 @@ import {
   WORKDAY_KEYS, ASHBY_KEYS, LEVER_KEYS, SMARTRECRUITERS_KEYS
 } from "./companies.js";
 import { fetchWithTimeout } from "./sources/shared.js";
+import { launchChromiumWithGuard } from "./playwright-guard.js";
 
 const JOBS_DIR = path.join(PROJECT_ROOT, "data", "jobs");
 
@@ -261,7 +262,7 @@ async function fetchLeverDescription(job) {
 async function fetchConfluentDescription(job) {
   try {
     const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true, args: CHROMIUM_ARGS });
+    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS });
     try {
       const page = await browser.newPage();
       await page.goto(`https://careers.confluent.io/jobs/job/${job.id}`, { waitUntil: "networkidle", timeout: 30000 });
@@ -278,7 +279,7 @@ async function fetchConfluentDescription(job) {
 async function fetchOracleDescription(job) {
   try {
     const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true, args: CHROMIUM_ARGS });
+    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS });
     try {
       const page = await browser.newPage();
       await page.goto(`https://careers.oracle.com/jobs/#en/sites/jobsearch/job/${job.id}`, { timeout: 60000 });
@@ -301,7 +302,7 @@ async function fetchOracleHCMDescription(job) {
   // JPMorgan and Ford use Oracle HCM - same Playwright approach
   try {
     const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true, args: CHROMIUM_ARGS });
+    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS });
     try {
       const page = await browser.newPage();
       await page.goto(job.url, { timeout: 60000 });
@@ -326,7 +327,7 @@ async function fetchUberDescription(job) {
   // Uber's detail page doesn't work. Fetch via the search API which includes descriptions.
   try {
     const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true, args: CHROMIUM_ARGS });
+    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS });
     try {
       const page = await browser.newPage();
       let jobsData = null;
@@ -350,7 +351,7 @@ async function fetchUberDescription(job) {
 async function fetchGoldmanSachsDescription(job) {
   try {
     const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true, args: CHROMIUM_ARGS });
+    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS });
     try {
       const page = await browser.newPage();
       await page.goto(job.url, { waitUntil: "networkidle", timeout: 30000 });
@@ -585,9 +586,10 @@ async function fetchAshbyDescription(job) {
   return null;
 }
 
-export async function fetchJobDescription(job, rawJobData) {
+export async function fetchJobDescription(job, rawJobData, options = {}) {
   // Try company-specific fetcher first
   let description = null;
+  const allowPlaywright = options.allowPlaywright !== false;
 
   switch (job.sourceKey) {
     case "microsoft":
@@ -625,27 +627,27 @@ export async function fetchJobDescription(job, rawJobData) {
   }
 
   // Oracle (HCM SPA, needs Playwright to render)
-  if (!description && job.sourceKey === "oracle") {
+  if (!description && allowPlaywright && job.sourceKey === "oracle") {
     description = await fetchOracleDescription(job);
   }
 
   // Uber (description available from search API, but detail page doesn't exist)
-  if (!description && job.sourceKey === "uber") {
+  if (!description && allowPlaywright && job.sourceKey === "uber") {
     description = await fetchUberDescription(job);
   }
 
   // JPMorgan / Ford (Oracle HCM - same approach)
-  if (!description && (job.sourceKey === "jpmorgan" || job.sourceKey === "ford")) {
+  if (!description && allowPlaywright && (job.sourceKey === "jpmorgan" || job.sourceKey === "ford")) {
     description = await fetchOracleHCMDescription(job);
   }
 
   // Confluent (Vercel bot protection, needs Playwright)
-  if (!description && job.sourceKey === "confluent") {
+  if (!description && allowPlaywright && job.sourceKey === "confluent") {
     description = await fetchConfluentDescription(job);
   }
 
   // Goldman Sachs (Contentful CMS, needs Playwright to render)
-  if (!description && job.sourceKey === "goldmansachs") {
+  if (!description && allowPlaywright && job.sourceKey === "goldmansachs") {
     description = await fetchGoldmanSachsDescription(job);
   }
 

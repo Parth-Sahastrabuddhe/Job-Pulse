@@ -107,7 +107,7 @@ export default function VerifyPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="At least 6 characters" autoComplete="new-password"
                 className={inputClass} />
-              <p className="text-xs text-faint mt-1">You'll use this to log in next time.</p>
+              <p className="text-xs text-faint mt-1">You&apos;ll use this to log in next time.</p>
             </div>
             <button type="submit" disabled={loading || code.length < 6 || password.length < 6}
               className="w-full bg-pulse hover:bg-pulse-hover disabled:opacity-50 text-black font-semibold py-2.5 rounded-lg transition-colors">

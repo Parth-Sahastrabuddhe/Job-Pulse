@@ -1,16 +1,28 @@
 import { NextResponse } from "next/server";
 import { SignJWT } from "jose";
+import { cookies } from "next/headers";
 import { getUserProfile } from "@/lib/db";
 
 const SECRET = new TextEncoder().encode(process.env.SESSION_SECRET || "dev-secret-change-in-production-32ch");
 const COOKIE_NAME = "jobpulse_session";
 
+if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
+  throw new Error("SESSION_SECRET must be set in production");
+}
+
 export async function GET(request) {
   const { searchParams } = request.nextUrl;
   const code = searchParams.get("code");
+  const state = searchParams.get("state");
 
   if (!code) {
     return NextResponse.redirect(new URL("/auth?error=missing_code", request.url));
+  }
+
+  const cookieStore = await cookies();
+  const expectedState = cookieStore.get("jobpulse_oauth_state")?.value;
+  if (!state || !expectedState || state !== expectedState) {
+    return NextResponse.redirect(new URL("/auth?error=invalid_state", request.url));
   }
 
   const redirectUri =
@@ -55,24 +67,6 @@ export async function GET(request) {
     return NextResponse.redirect(new URL("/auth?error=invalid_user", request.url));
   }
 
-  // Auto-join user to the Discord server (best-effort, don't block login)
-  const guildId = process.env.DISCORD_GUILD_ID;
-  const botToken = process.env.MULTI_USER_BOT_TOKEN;
-  if (guildId && botToken && tokenData.access_token) {
-    try {
-      await fetch(`https://discord.com/api/v10/guilds/${guildId}/members/${discordUser.id}`, {
-        method: "PUT",
-        headers: {
-          Authorization: `Bot ${botToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ access_token: tokenData.access_token }),
-      });
-    } catch {
-      // Non-fatal — user can still join manually
-    }
-  }
-
   // Check if user exists in DB
   let existingUser = null;
   try {
@@ -87,13 +81,15 @@ export async function GET(request) {
   const isAdminById = process.env.ADMIN_DISCORD_ID && discordUser.id === process.env.ADMIN_DISCORD_ID;
   const role = isAdminById ? "admin" : (existingUser?.role || "user");
 
-  // Create JWT token
+  // Create JWT token. discordAccessToken is carried through to /api/otp/verify
+  // so it can add the user to the Discord guild after OTP verification completes.
   const token = await new SignJWT({
     discordId: discordUser.id,
     username: discordUser.username,
     avatar: discordUser.avatar,
     role,
     profileComplete,
+    discordAccessToken: profileComplete ? undefined : tokenData.access_token,
   })
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime("30d")
@@ -114,6 +110,7 @@ export async function GET(request) {
     maxAge: 30 * 24 * 60 * 60,
     path: "/",
   });
+  response.cookies.delete("jobpulse_oauth_state");
 
   return response;
 }

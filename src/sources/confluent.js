@@ -1,10 +1,15 @@
 import { chromium } from "playwright";
 import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { launchChromiumWithGuard } from "../playwright-guard.js";
 
 export async function collectConfluentJobs(_unused, config, log) {
   let browser;
   try {
-    browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-gpu"] });
+    browser = await launchChromiumWithGuard(
+      chromium,
+      { headless: true, args: ["--no-sandbox", "--disable-gpu"] },
+      config
+    );
     const page = await browser.newPage();
 
     await page.goto("https://careers.confluent.io/jobs/engineering?engineering=engineering", {

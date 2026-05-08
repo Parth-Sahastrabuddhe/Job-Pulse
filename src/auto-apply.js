@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import { getConfig } from "./config.js";
+import { launchChromiumWithGuard } from "./playwright-guard.js";
 import fs from "node:fs";
 
 function detectATS(url) {
@@ -100,7 +101,7 @@ export async function autoFillApplication(jobUrl, companyName, jobTitle) {
     return { screenshot: null, ats, success: false, error: "APPLICANT_NAME and APPLICANT_EMAIL must be set in .env" };
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchChromiumWithGuard(chromium, { headless: true }, getConfig());
   const page = await browser.newPage();
 
   try {

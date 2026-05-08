@@ -43,6 +43,11 @@ export function setPasswordHash(discordId, passwordHash) {
     .run(passwordHash, new Date().toISOString(), discordId);
 }
 
+export function setNotificationChannelId(discordId, channelId) {
+  getDb().prepare("UPDATE user_profiles SET notification_channel_id = ?, updated_at = ? WHERE discord_id = ?")
+    .run(channelId, new Date().toISOString(), discordId);
+}
+
 export function updateUserProfile(discordId, fields) {
   const d = getDb();
   const allowed = [

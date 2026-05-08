@@ -92,6 +92,11 @@ export function initDb(dbFile) {
     db.exec("ALTER TABLE user_profiles ADD COLUMN education_level TEXT DEFAULT ''");
   }
 
+  // Add notification_channel_id column to user_profiles (idempotent)
+  if (userCols.length > 0 && !userCols.includes("notification_channel_id")) {
+    db.exec("ALTER TABLE user_profiles ADD COLUMN notification_channel_id TEXT DEFAULT NULL");
+  }
+
   // Add applied_at column to user_seen_jobs (idempotent)
   const usjCols = db.pragma("table_info(user_seen_jobs)").map((c) => c.name);
   if (usjCols.length > 0 && !usjCols.includes("applied_at")) {
@@ -130,6 +135,7 @@ export function initDb(dbFile) {
       role TEXT DEFAULT 'user',
       password_hash TEXT DEFAULT NULL,
       education_level TEXT DEFAULT '',
+      notification_channel_id TEXT DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

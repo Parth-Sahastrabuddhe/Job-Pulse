@@ -5,5 +5,6 @@ export async function GET() {
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  return Response.json(session);
+  const { discordAccessToken: _discard, ...safeSession } = session;
+  return Response.json(safeSession);
 }

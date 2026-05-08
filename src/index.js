@@ -43,6 +43,7 @@ import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } fro
 import { checkLegitimacy } from "./legitimacy.js";
 import { isJobUrlLive } from "./liveness.js";
 import { ping, pingFail } from "./heartbeat.js";
+import { shouldRunScheduledPlaywrightSource } from "./playwright-guard.js";
 
 function timestamp() {
   return new Date().toISOString();
@@ -61,8 +62,8 @@ function buildRegistry(config) {
   const registry = [];
 
   // Helper: standalone collector (fn signature: fn(browser, config, log))
-  const solo = (key, fn, lane) => {
-    registry.push({ key, collect: (cfg) => fn(null, cfg, log), lane });
+  const solo = (key, fn, lane, options = {}) => {
+    registry.push({ key, collect: (cfg) => fn(null, cfg, log), lane, ...options });
   };
 
   // Helper: parameterized collector (fn signature: fn(browser, config, log, companyKey))
@@ -88,8 +89,8 @@ function buildRegistry(config) {
 
   // Slow lane — Playwright/HTML scrapers (run sequentially, less frequently)
   solo("apple", collectAppleJobs, "slow");
-  solo("uber", collectUberJobs, "slow");
-  solo("confluent", collectConfluentJobs, "slow");
+  solo("uber", collectUberJobs, "slow", { usesPlaywright: true });
+  solo("confluent", collectConfluentJobs, "slow", { usesPlaywright: true });
   solo("linkedin", collectLinkedInJobs, "slow");
   solo("intuit", collectIntuitJobs, "slow");
   solo("bloomberg", collectBloombergJobs, "slow");
@@ -341,6 +342,7 @@ async function runBatchLoop(config, flags, registry) {
 
   let batchIndex = 0;
   let lastSlowRun = 0;
+  const lastPlaywrightSourceRuns = new Map();
   let rotationCount = 0;
   let lastSavedExpiry = 0;
 
@@ -385,12 +387,30 @@ async function runBatchLoop(config, flags, registry) {
         log(`Running slow lane (${slowEntries.length} sources)...`);
         // Run slow entries sequentially with a 60-second timeout each
         for (const entry of slowEntries) {
+          if (entry.usesPlaywright) {
+            const schedule = shouldRunScheduledPlaywrightSource(config);
+            if (!schedule.ok) {
+              log(`[slow:${entry.key}] Skipped Playwright source: ${schedule.reason}`);
+              continue;
+            }
+
+            const minIntervalMs = Math.max(1, config.playwrightNightRunIntervalMinutes) * 60 * 1000;
+            const lastRunAt = lastPlaywrightSourceRuns.get(entry.key) || 0;
+            if ((Date.now() - lastRunAt) < minIntervalMs) {
+              continue;
+            }
+            lastPlaywrightSourceRuns.set(entry.key, Date.now());
+          }
+
           try {
+            const entryConfig = entry.usesPlaywright
+              ? { ...config, maxPostAgeMinutes: config.nightlyPlaywrightMaxPostAgeMinutes }
+              : config;
             const jobs = await Promise.race([
-              entry.collect(config),
+              entry.collect(entryConfig),
               new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout after 60s")), 60000))
             ]);
-            await processBatchResults(config, flags, jobs, `slow:${entry.key}`);
+            await processBatchResults(entryConfig, flags, jobs, `slow:${entry.key}`);
           } catch (error) {
             log(`[slow:${entry.key}] Error: ${error.message}`);
           }

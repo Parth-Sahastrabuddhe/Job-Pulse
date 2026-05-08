@@ -6,6 +6,10 @@ import { getUserProfileByEmail } from "@/lib/db";
 const SECRET = new TextEncoder().encode(process.env.SESSION_SECRET || "dev-secret-change-in-production-32ch");
 const COOKIE_NAME = "jobpulse_session";
 
+if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
+  throw new Error("SESSION_SECRET must be set in production");
+}
+
 export async function POST(request) {
   let email, password;
   try {

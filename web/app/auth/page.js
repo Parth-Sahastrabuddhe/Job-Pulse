@@ -86,7 +86,7 @@ export default function AuthPage() {
               Register with Discord
             </a>
             <p className="text-xs text-faint text-center">
-              After Discord auth, you'll verify your email and set a password for future logins.
+              After Discord auth, you&apos;ll verify your email and set a password for future logins.
             </p>
           </div>
         )}

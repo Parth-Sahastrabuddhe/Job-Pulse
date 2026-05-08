@@ -146,7 +146,7 @@ export default function SupportPage() {
                 <div className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-danger text-sm px-4 py-3 rounded-lg">{suggError}</div>
               )}
               {suggSuccess && (
-                <div className="bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.2)] text-pulse text-sm px-4 py-3 rounded-lg">Thanks! We'll review your suggestion.</div>
+                <div className="bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.2)] text-pulse text-sm px-4 py-3 rounded-lg">Thanks! We&apos;ll review your suggestion.</div>
               )}
               <div>
                 <label className="block text-sm font-medium text-foreground/80 mb-1">Company Name <span className="text-danger">*</span></label>
