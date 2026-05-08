@@ -102,13 +102,22 @@ async function fetchWorkdayPage(apiUrl, body) {
 // matching IDs and apply them together via Workday's multi-value facet support.
 async function discoverUsFacet(apiUrl) {
   const data = await fetchWorkdayPage(apiUrl, { appliedFacets: {}, limit: 1, offset: 0, searchText: "" });
-  const main = (data.facets || []).find((f) => f.facetParameter === "locationMainGroup");
+  const facets = data.facets || [];
+  const main = facets.find((f) => f.facetParameter === "locationMainGroup");
   const children = main?.values || [];
 
   // Country-level: single ID covering all US postings
   for (const param of ["locationHierarchy1", "locationCountry"]) {
     const child = children.find((v) => v.facetParameter === param);
     const us = (child?.values || []).find((v) => /^united states/i.test(v.descriptor || ""));
+    if (us?.id) return { param, ids: [us.id] };
+  }
+
+  // Some tenants (e.g. Morgan Stanley) expose Location_Country at the top level
+  // instead of nesting it under locationMainGroup.
+  for (const param of ["Location_Country", "locationCountry"]) {
+    const top = facets.find((f) => f.facetParameter === param);
+    const us = (top?.values || []).find((v) => /^united states/i.test(v.descriptor || ""));
     if (us?.id) return { param, ids: [us.id] };
   }
 

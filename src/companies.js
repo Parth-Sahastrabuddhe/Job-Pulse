@@ -61,6 +61,7 @@ export const COMPANIES = [
   { key: "dell", label: "Dell", ats: "workday", lane: "normal", urlPattern: /dell\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
   { key: "comcast", label: "Comcast", ats: "workday", lane: "normal", urlPattern: /comcast\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
   { key: "target", label: "Target", ats: "workday", lane: "normal", urlPattern: /target\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  { key: "morganstanley", label: "Morgan Stanley", ats: "workday", lane: "normal", banking: true, urlPattern: /ms\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
 
   // === Greenhouse companies ===
   { key: "stripe", label: "Stripe", ats: "greenhouse", lane: "normal", board: "stripe", urlPattern: /(?:stripe\.com|greenhouse\.io).*?(?:gh_jid=|jobs\/)(\d+)/i },

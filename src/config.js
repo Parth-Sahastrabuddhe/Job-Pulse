@@ -770,6 +770,12 @@ export function getConfig() {
       apiUrl: "https://dell.wd1.myworkdayjobs.com/wday/cxs/dell/External/jobs",
       baseUrl: "https://dell.wd1.myworkdayjobs.com/External"
     },
+    morganstanley: {
+      sourceKey: "morganstanley",
+      sourceLabel: "Morgan Stanley",
+      apiUrl: "https://ms.wd5.myworkdayjobs.com/wday/cxs/ms/External/jobs",
+      baseUrl: "https://ms.wd5.myworkdayjobs.com/External"
+    },
     // --- Solo companies (custom APIs) ---
     mercedesbenz: {
       sourceKey: "mercedesbenz",
