@@ -2,8 +2,12 @@ import bcrypt from "bcryptjs";
 import { getSession, createSession } from "@/lib/session";
 import { verifyOtp, createUserProfile, getUserProfile, getUserProfileByEmail, setNotificationChannelId } from "@/lib/db";
 import { addUserToGuildWithRole, createUserChannel } from "@/lib/discord-admin";
+import { requireSameOrigin } from "@/lib/security";
 
 export async function POST(request) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const session = await getSession();
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

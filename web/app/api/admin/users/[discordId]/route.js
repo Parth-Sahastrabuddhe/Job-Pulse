@@ -1,8 +1,12 @@
 import { getSession } from "@/lib/session";
 import { updateUserProfile } from "@/lib/db";
 import { deleteUser } from "@/lib/admin";
+import { requireSameOrigin } from "@/lib/security";
 
 export async function PUT(request, { params }) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const session = await getSession();
   if (!session || session.role !== "admin") {
     return Response.json({ error: "Forbidden" }, { status: 403 });
@@ -27,6 +31,9 @@ export async function PUT(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const session = await getSession();
   if (!session || session.role !== "admin") {
     return Response.json({ error: "Forbidden" }, { status: 403 });

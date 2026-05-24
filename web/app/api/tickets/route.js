@@ -1,5 +1,6 @@
 import { getSession } from "@/lib/session";
 import { getUserTickets, createSupportTicket } from "@/lib/db";
+import { requireSameOrigin } from "@/lib/security";
 
 export async function GET() {
   const session = await getSession();
@@ -17,6 +18,9 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const session = await getSession();
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

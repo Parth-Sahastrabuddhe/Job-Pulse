@@ -1,12 +1,16 @@
 import crypto from "node:crypto";
 import { getSession } from "@/lib/session";
 import { createOtp } from "@/lib/db";
+import { requireSameOrigin } from "@/lib/security";
 
 const otpAttempts = new Map();
 const OTP_RATE_LIMIT = 3;
 const OTP_RATE_WINDOW_MS = 5 * 60 * 1000;
 
 export async function POST(request) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const session = await getSession();
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

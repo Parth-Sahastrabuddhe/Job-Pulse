@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { SignJWT } from "jose";
 import { getUserProfileByEmail } from "@/lib/db";
+import { requireSameOrigin } from "@/lib/security";
 
 const SECRET = new TextEncoder().encode(process.env.SESSION_SECRET || "dev-secret-change-in-production-32ch");
 const COOKIE_NAME = "jobpulse_session";
@@ -11,6 +12,9 @@ if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
 }
 
 export async function POST(request) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   let email, password;
   try {
     const body = await request.json();

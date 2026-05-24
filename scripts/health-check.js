@@ -55,26 +55,44 @@ function check(name, fn) {
 
 // --- Check 0: pm2 process status ---
 check("Bot process running", () => {
+  let pm2Out;
   try {
-    const pm2Out = execSync("pm2 jlist 2>/dev/null", { encoding: "utf8" });
-    const procs = JSON.parse(pm2Out);
-    const bot = procs.find(p => p.name === "jobpulse");
-    if (!bot) {
-      throw new Error("jobpulse process not found in pm2");
-    }
-    if (bot.pm2_env.status !== "online") {
-      throw new Error(`jobpulse status is "${bot.pm2_env.status}" (not online)`);
-    }
-    const restarts = bot.pm2_env.restart_time || 0;
-    if (restarts > 5) {
-      report.warnings.push(`jobpulse has restarted ${restarts} times — possible crash loop`);
-    }
-    return { status: bot.pm2_env.status, restarts, uptime: bot.pm2_env.pm_uptime };
-  } catch (e) {
-    if (e.message.includes("jobpulse")) throw e;
-    // pm2 not available (e.g. running locally) — skip
+    pm2Out = execSync("pm2 jlist 2>/dev/null", { encoding: "utf8" });
+  } catch {
     return { status: "skipped", reason: "pm2 not available" };
   }
+
+  const procs = JSON.parse(pm2Out);
+  const expectedNames = ["micro-bot", "jobpulse-mu", "jobpulse-web"];
+  const byName = new Map(procs.map((p) => [p.name, p]));
+  const missing = expectedNames.filter((name) => !byName.has(name));
+  if (missing.length > 0) {
+    throw new Error(`pm2 process(es) not found: ${missing.join(", ")}`);
+  }
+
+  const offline = expectedNames
+    .map((name) => byName.get(name))
+    .filter((proc) => proc?.pm2_env?.status !== "online");
+  if (offline.length > 0) {
+    throw new Error(offline.map((proc) => `${proc.name}=${proc.pm2_env?.status || "unknown"}`).join(", "));
+  }
+
+  const restarts = Object.fromEntries(
+    expectedNames.map((name) => [name, byName.get(name).pm2_env.restart_time || 0])
+  );
+  for (const [name, count] of Object.entries(restarts)) {
+    if (count > 5) {
+      report.warnings.push(`${name} has restarted ${count} times - possible crash loop`);
+    }
+  }
+  return {
+    processes: expectedNames.map((name) => ({
+      name,
+      status: byName.get(name).pm2_env.status,
+      restarts: restarts[name],
+      uptime: byName.get(name).pm2_env.pm_uptime,
+    })),
+  };
 });
 
 // --- Check 1: Database exists and is readable ---

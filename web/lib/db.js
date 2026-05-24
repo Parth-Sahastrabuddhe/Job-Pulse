@@ -2,12 +2,20 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 let db = null;
+const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 2000;
+
+function sqliteBusyTimeoutMs() {
+  const parsed = Number.parseInt(String(process.env.SQLITE_BUSY_TIMEOUT_MS ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SQLITE_BUSY_TIMEOUT_MS;
+}
 
 export function getDb() {
   if (db) return db;
   const dbPath = process.env.DB_PATH || path.resolve(process.cwd(), "../data/jobs.db");
   db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
+  db.pragma(`busy_timeout = ${sqliteBusyTimeoutMs()}`);
+  db.pragma("wal_autocheckpoint = 500");
   db.pragma("foreign_keys = ON");
   return db;
 }

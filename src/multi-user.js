@@ -36,7 +36,7 @@ import {
   getExpiringReminders,
   markRemindersSent,
   expireSavedJobs,
-  logDm,
+  recordJobDelivery,
   isH1bSponsor,
   upsertH1bSponsor,
   getUserProfile,
@@ -920,10 +920,11 @@ async function runPollCycle() {
   // Fetch newly seen jobs since last poll, plus re-posted jobs
   // (where posted_at was updated to a recent date on an old listing)
   const rawJobs = db
-    .prepare(`SELECT * FROM seen_jobs
-              WHERE first_seen_at > ?
-                 OR (posted_at > ? AND last_seen_at > ?)`)
-    .all(cutoff, cutoff, cutoff);
+    .prepare(`SELECT * FROM seen_jobs WHERE first_seen_at > ?
+              UNION ALL
+              SELECT * FROM seen_jobs
+              WHERE posted_at > ? AND last_seen_at > ? AND first_seen_at <= ?`)
+    .all(cutoff, cutoff, cutoff, cutoff);
 
   if (rawJobs.length === 0) {
     advanceMuCursor(db, nowIso);
@@ -1022,7 +1023,7 @@ async function runPollCycle() {
     if (matchedJobs.length === 0) continue;
 
     // ── Per-job delivery (isolated try-catch per job) ───────────────────────
-    // A failure on one job (e.g. SQLITE_BUSY on logDm) must NOT skip the
+    // A failure on one job (e.g. SQLITE_BUSY while recording delivery) must NOT skip the
     // remaining jobs in this poll window — they would become permanently
     // invisible once lastPollAt advances past their first_seen_at.
     for (const job of matchedJobs) {
@@ -1036,8 +1037,7 @@ async function runPollCycle() {
           deadLinkFailures.set(liveKey, fails);
           if (fails >= DEAD_LINK_ABANDON_AFTER) {
             // After N strikes, record as dead_link so it stops retrying.
-            markJobNotified(user.id, job.key);
-            logDm(user.id, job.key, "dead_link");
+            recordJobDelivery(user.id, job.key, "dead_link");
             deadLinkFailures.delete(liveKey);
             console.log(`[multi-user] Dead link abandoned after ${fails} tries: ${job.sourceLabel} — ${job.title}`);
           } else {
@@ -1062,15 +1062,13 @@ async function runPollCycle() {
 
         if (action === "send") {
           const result = await sendJobDm(client, user.discord_id, job, user.first_name, dmOptions);
-          markJobNotified(user.id, job.key);
-          logDm(user.id, job.key, result ? "sent" : "failed");
+          recordJobDelivery(user.id, job.key, result ? "sent" : "failed");
           if (!result) {
             console.error(`[multi-user] DM to ${user.discord_id} (user ${user.id}) returned null for ${job.title}`);
             try { logError("dm-failed", `user=${user.id} discord=${user.discord_id} job=${job.title} (${job.sourceLabel})`); } catch (_) { /* DB may be busy */ }
           }
         } else {
-          markJobNotified(user.id, job.key);
-          logDm(user.id, job.key, "queued");
+          recordJobDelivery(user.id, job.key, "queued");
         }
 
         // Rate limit: 300ms between DMs

@@ -6,11 +6,19 @@ import { addressBookMigrate } from "./address-book.js";
 let db = null;
 let _hasSeenJobsCached = false;
 
+const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 2000;
+
+function sqliteBusyTimeoutMs() {
+  const parsed = Number.parseInt(String(process.env.SQLITE_BUSY_TIMEOUT_MS ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SQLITE_BUSY_TIMEOUT_MS;
+}
+
 export function initDb(dbFile) {
   fs.mkdirSync(path.dirname(dbFile), { recursive: true });
   db = new Database(dbFile);
   db.pragma("journal_mode = WAL");
-  db.pragma("busy_timeout = 2000");
+  db.pragma(`busy_timeout = ${sqliteBusyTimeoutMs()}`);
+  db.pragma("wal_autocheckpoint = 500");
   db.pragma("foreign_keys = ON");
 
   db.exec(`
@@ -31,6 +39,8 @@ export function initDb(dbFile) {
     );
     CREATE INDEX IF NOT EXISTS idx_seen_source ON seen_jobs(source_key, id);
     CREATE INDEX IF NOT EXISTS idx_seen_first_seen ON seen_jobs(first_seen_at);
+    CREATE INDEX IF NOT EXISTS idx_seen_last_seen ON seen_jobs(last_seen_at);
+    CREATE INDEX IF NOT EXISTS idx_seen_posted_last_seen ON seen_jobs(posted_at, last_seen_at);
     CREATE INDEX IF NOT EXISTS idx_seen_url ON seen_jobs(url) WHERE url != '';
 
     CREATE TABLE IF NOT EXISTS job_posts (
@@ -146,6 +156,8 @@ export function initDb(dbFile) {
       status TEXT DEFAULT 'notified',
       notified_at TEXT NOT NULL,
       applied_at TEXT,
+      saved_at TEXT,
+      save_reminder_sent BOOLEAN DEFAULT 0,
       updated_at TEXT,
       PRIMARY KEY (user_id, job_key),
       FOREIGN KEY (user_id) REFERENCES user_profiles(id)
@@ -209,7 +221,12 @@ export function initDb(dbFile) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_user_seen_jobs_user ON user_seen_jobs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_seen_jobs_user_status_job ON user_seen_jobs(user_id, status, job_key);
+    CREATE INDEX IF NOT EXISTS idx_user_seen_jobs_saved_reminder ON user_seen_jobs(status, saved_at, save_reminder_sent, user_id, job_key);
     CREATE INDEX IF NOT EXISTS idx_dm_log_user ON dm_log(user_id);
+    CREATE INDEX IF NOT EXISTS idx_dm_log_user_status_job ON dm_log(user_id, status, job_key);
+    CREATE INDEX IF NOT EXISTS idx_dm_log_user_status_sent ON dm_log(user_id, status, sent_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_dm_log_user_status_id ON dm_log(user_id, status, id);
     CREATE INDEX IF NOT EXISTS idx_otp_email ON otp_codes(email);
 
     CREATE TABLE IF NOT EXISTS company_research (
@@ -346,6 +363,74 @@ const _stmtGetBySourceId = () => db.prepare("SELECT key, first_seen_at FROM seen
 const _stmtGetByUrlDifferentKey = () => db.prepare("SELECT key FROM seen_jobs WHERE url = ? AND key != ?");
 const _stmtTouchLastSeen = () => db.prepare("UPDATE seen_jobs SET last_seen_at = ? WHERE key = ?");
 
+function userJobStatusRankSql(expr) {
+  return `CASE COALESCE(${expr}, '')
+    WHEN 'offer' THEN 60
+    WHEN 'rejected' THEN 55
+    WHEN 'interviewing' THEN 50
+    WHEN 'applied' THEN 40
+    WHEN 'saved' THEN 30
+    WHEN 'skipped' THEN 20
+    WHEN 'notified' THEN 10
+    ELSE 0
+  END`;
+}
+
+function earliestIsoSql(column, excludedColumn) {
+  return `CASE
+    WHEN ${column} IS NULL THEN ${excludedColumn}
+    WHEN ${excludedColumn} IS NULL THEN ${column}
+    WHEN ${excludedColumn} < ${column} THEN ${excludedColumn}
+    ELSE ${column}
+  END`;
+}
+
+function latestIsoSql(column, excludedColumn) {
+  return `CASE
+    WHEN ${column} IS NULL THEN ${excludedColumn}
+    WHEN ${excludedColumn} IS NULL THEN ${column}
+    WHEN ${excludedColumn} > ${column} THEN ${excludedColumn}
+    ELSE ${column}
+  END`;
+}
+
+function remapJobReferences(oldKey, newKey) {
+  if (!oldKey || !newKey || oldKey === newKey) return true;
+
+  const oldPost = db.prepare("SELECT 1 FROM job_posts WHERE job_key = ?").get(oldKey);
+  const newPost = db.prepare("SELECT 1 FROM job_posts WHERE job_key = ?").get(newKey);
+  if (oldPost && newPost) return false;
+
+  db.prepare(`
+    INSERT INTO user_seen_jobs
+      (user_id, job_key, status, notified_at, applied_at, saved_at, save_reminder_sent, updated_at)
+    SELECT user_id, ?, status, notified_at, applied_at, saved_at, save_reminder_sent, updated_at
+    FROM user_seen_jobs
+    WHERE job_key = ?
+    ON CONFLICT(user_id, job_key) DO UPDATE SET
+      status = CASE
+        WHEN ${userJobStatusRankSql("excluded.status")} > ${userJobStatusRankSql("user_seen_jobs.status")}
+        THEN excluded.status
+        ELSE user_seen_jobs.status
+      END,
+      notified_at = ${earliestIsoSql("user_seen_jobs.notified_at", "excluded.notified_at")},
+      applied_at = ${earliestIsoSql("user_seen_jobs.applied_at", "excluded.applied_at")},
+      saved_at = ${earliestIsoSql("user_seen_jobs.saved_at", "excluded.saved_at")},
+      save_reminder_sent = CASE
+        WHEN COALESCE(user_seen_jobs.save_reminder_sent, 0) = 1 OR COALESCE(excluded.save_reminder_sent, 0) = 1 THEN 1
+        ELSE 0
+      END,
+      updated_at = ${latestIsoSql("user_seen_jobs.updated_at", "excluded.updated_at")}
+  `).run(newKey, oldKey);
+  db.prepare("DELETE FROM user_seen_jobs WHERE job_key = ?").run(oldKey);
+
+  db.prepare("UPDATE dm_log SET job_key = ? WHERE job_key = ?").run(newKey, oldKey);
+
+  db.prepare("UPDATE job_posts SET job_key = ? WHERE job_key = ?").run(newKey, oldKey);
+  db.prepare("DELETE FROM job_posts WHERE job_key = ?").run(oldKey);
+  return true;
+}
+
 export function upsertJobs(jobs, seenAt) {
   _hasSeenJobsCached = true;
   const getFirstSeen = _stmtGetFirstSeen();
@@ -395,6 +480,10 @@ export function upsertJobs(jobs, seenAt) {
       const altRow = getBySourceId.get(job.sourceKey, String(job.id), job.key);
       if (altRow) {
         existingFirstSeen = altRow.first_seen_at;
+        if (!remapJobReferences(altRow.key, job.key)) {
+          touchLastSeen.run(seenAt, altRow.key);
+          continue;
+        }
         deleteStmt.run(altRow.key);
       }
 
@@ -432,7 +521,26 @@ export function upsertJobs(jobs, seenAt) {
 
 export function pruneState(retentionDays) {
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
-  db.prepare("DELETE FROM seen_jobs WHERE last_seen_at < ?").run(cutoff);
+
+  db.prepare("DELETE FROM dm_log WHERE sent_at < ?").run(cutoff);
+  db.prepare(`
+    DELETE FROM user_seen_jobs
+    WHERE notified_at < ?
+      AND status IN ('notified', 'skipped')
+  `).run(cutoff);
+  db.prepare(`
+    DELETE FROM job_posts
+    WHERE status IN ('pending', 'skipped')
+      AND job_key IN (SELECT key FROM seen_jobs WHERE last_seen_at < ?)
+  `).run(cutoff);
+
+  db.prepare(`
+    DELETE FROM seen_jobs
+    WHERE last_seen_at < ?
+      AND NOT EXISTS (SELECT 1 FROM user_seen_jobs usj WHERE usj.job_key = seen_jobs.key)
+      AND NOT EXISTS (SELECT 1 FROM job_posts jp WHERE jp.job_key = seen_jobs.key)
+      AND NOT EXISTS (SELECT 1 FROM dm_log dl WHERE dl.job_key = seen_jobs.key)
+  `).run(cutoff);
 
   // Prune old cached job data directories
   const jobsDir = path.join(path.dirname(db.name), "jobs");

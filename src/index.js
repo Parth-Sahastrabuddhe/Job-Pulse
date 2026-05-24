@@ -1,6 +1,6 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { execSync } from "node:child_process";
 import { getConfig, PROJECT_ROOT } from "./config.js";
 import { sendDiscordBotNotification, startDiscordBot, stopDiscordBot } from "./discord-bot.js";
 import { fetchJobDescription, jobDirId, saveJobData } from "./job-description.js";
@@ -505,46 +505,152 @@ function parseFlags(argv) {
 
 const LOCK_FILE = path.join(PROJECT_ROOT, "data", "bot.lock");
 const PID_FILE = path.join(PROJECT_ROOT, "data", "bot.pid");
+const INCOMPLETE_LOCK_GRACE_MS = 10_000;
 let lockFd = null;
 
-function killOldProcess() {
-  for (const file of [PID_FILE, LOCK_FILE]) {
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function readLockOwner(file) {
+  try {
+    const raw = fs.readFileSync(file, "utf8").trim();
+    if (!raw) return { incomplete: true };
     try {
-      const pid = parseInt(fs.readFileSync(file, "utf8").trim(), 10);
-      if (pid && pid !== process.pid) {
-        console.log(`[startup] Killing old bot process ${pid}`);
-        try { process.kill(pid, "SIGKILL"); } catch {}
-        // Windows fallback: taskkill force-kills the process tree
-        try {
-          execSync(`taskkill /F /T /PID ${pid}`, { stdio: "ignore", timeout: 5000 });
-        } catch {}
-      }
-    } catch {}
+      const owner = JSON.parse(raw);
+      const pid = Number.parseInt(String(owner.pid ?? ""), 10);
+      return Number.isFinite(pid) && pid > 0 ? { ...owner, pid } : { invalid: true };
+    } catch {
+      const pid = Number.parseInt(raw, 10);
+      return Number.isFinite(pid) && pid > 0 ? { pid } : { invalid: true };
+    }
+  } catch (err) {
+    if (err?.code === "ENOENT") return null;
+    return null;
   }
+}
+
+function readPidFile(file) {
+  return readLockOwner(file)?.pid ?? null;
+}
+
+function processIsRunning(pid) {
+  if (!pid || pid === process.pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === "EPERM";
+  }
+}
+
+function procCommand(pid) {
+  if (process.platform !== "linux") return "";
+  try {
+    return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ").trim();
+  } catch {
+    return "";
+  }
+}
+
+function processLooksLikeBot(pid) {
+  const command = procCommand(pid);
+  if (!command) return true;
+  return /\bnode(?:\.exe)?\b/i.test(command) &&
+    (command.includes("src/index.js") ||
+      command.includes("job-alert-bot") ||
+      command.includes("Job-Pulse"));
+}
+
+function lockOwnerIsLive(owner) {
+  return Boolean(owner?.pid && processIsRunning(owner.pid) && processLooksLikeBot(owner.pid));
+}
+
+function fileIsFresh(file, maxAgeMs) {
+  try {
+    return Date.now() - fs.statSync(file).mtimeMs < maxAgeMs;
+  } catch {
+    return false;
+  }
+}
+
+function clearStaleLockFiles() {
   try { fs.unlinkSync(LOCK_FILE); } catch {}
   try { fs.unlinkSync(PID_FILE); } catch {}
 }
 
+function writeLockMetadata(fd) {
+  const owner = {
+    pid: process.pid,
+    hostname: os.hostname(),
+    startedAt: new Date().toISOString(),
+    argv: process.argv,
+  };
+  fs.writeSync(fd, JSON.stringify(owner));
+  fs.fsyncSync(fd);
+}
+
 function acquireLock() {
-  try {
-    fs.mkdirSync(path.dirname(LOCK_FILE), { recursive: true });
-    // Skip killing old process when managed by pm2 — pm2 handles restarts.
-    // The kill-old-process logic causes an infinite restart loop under pm2:
-    // new instance kills old → pm2 restarts old → old kills new → repeat.
-    if (!process.env.PM2_HOME && !process.env.pm_id) {
-      killOldProcess();
+  fs.mkdirSync(path.dirname(LOCK_FILE), { recursive: true });
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const existingOwner = readLockOwner(LOCK_FILE) || readLockOwner(PID_FILE);
+    if (lockOwnerIsLive(existingOwner)) {
+      console.error(`[startup] Existing bot process ${existingOwner.pid} is still running.`);
+      return false;
     }
-    lockFd = fs.openSync(LOCK_FILE, "wx");
-    fs.writeSync(lockFd, String(process.pid));
-    return true;
-  } catch {
+    if (existingOwner?.pid) {
+      console.warn(`[startup] Removing stale bot lock for dead process ${existingOwner.pid}.`);
+      clearStaleLockFiles();
+    } else if ((existingOwner?.incomplete || existingOwner?.invalid) && fileIsFresh(LOCK_FILE, INCOMPLETE_LOCK_GRACE_MS)) {
+      sleepSync(100);
+      continue;
+    } else if (existingOwner?.incomplete || existingOwner?.invalid) {
+      console.warn("[startup] Removing stale bot lock with unreadable owner metadata.");
+      clearStaleLockFiles();
+    }
+
     try {
-      try { fs.unlinkSync(LOCK_FILE); } catch {}
       lockFd = fs.openSync(LOCK_FILE, "wx");
-      fs.writeSync(lockFd, String(process.pid));
+      writeLockMetadata(lockFd);
       return true;
-    } catch {}
-    return false;
+    } catch (err) {
+      if (err?.code !== "EEXIST") {
+        console.error(`[startup] Failed to create lock file: ${err.message}`);
+        return false;
+      }
+
+      const lockOwner = readLockOwner(LOCK_FILE);
+      if (lockOwnerIsLive(lockOwner)) {
+        console.error(`[startup] Existing bot process ${lockOwner.pid} owns the lock.`);
+        return false;
+      }
+
+      if ((lockOwner?.incomplete || lockOwner?.invalid) && fileIsFresh(LOCK_FILE, INCOMPLETE_LOCK_GRACE_MS)) {
+        sleepSync(100);
+        continue;
+      }
+
+      console.warn("[startup] Removing stale bot lock with no live owner.");
+      clearStaleLockFiles();
+    }
+  }
+
+  console.error("[startup] Failed to acquire lock after retries.");
+  return false;
+}
+
+function writePidFile() {
+  try {
+    fs.writeFileSync(PID_FILE, String(process.pid), { flag: "wx" });
+  } catch (err) {
+    if (err?.code !== "EEXIST") throw err;
+    const owner = readLockOwner(PID_FILE);
+    if (lockOwnerIsLive(owner)) {
+      throw new Error(`PID file is owned by live process ${owner.pid}`);
+    }
+    try { fs.unlinkSync(PID_FILE); } catch {}
+    fs.writeFileSync(PID_FILE, String(process.pid), { flag: "wx" });
   }
 }
 
@@ -553,7 +659,17 @@ function releaseLock() {
     try { fs.closeSync(lockFd); } catch {}
     lockFd = null;
   }
-  try { fs.unlinkSync(LOCK_FILE); } catch {}
+  const lockPid = readPidFile(LOCK_FILE);
+  if (!lockPid || lockPid === process.pid) {
+    try { fs.unlinkSync(LOCK_FILE); } catch {}
+  }
+}
+
+function releasePidFile() {
+  const pid = readPidFile(PID_FILE);
+  if (!pid || pid === process.pid) {
+    try { fs.unlinkSync(PID_FILE); } catch {}
+  }
 }
 
 // --- Main ---
@@ -584,11 +700,18 @@ async function main() {
   }
 
   if (flags.watch) {
-    fs.writeFileSync(PID_FILE, String(process.pid));
-    const cleanup = () => { try { fs.unlinkSync(PID_FILE); } catch {} };
-    process.on("exit", () => { releaseLock(); cleanup(); });
-    process.on("SIGINT", () => { stopDiscordBot(); closeDb(); releaseLock(); cleanup(); process.exit(0); });
-    process.on("SIGTERM", () => { stopDiscordBot(); closeDb(); releaseLock(); cleanup(); process.exit(0); });
+    try {
+      writePidFile();
+    } catch (err) {
+      releaseLock();
+      console.error(`[${timestamp()}] Failed to write PID file: ${err.message}`);
+      process.exitCode = 1;
+      return;
+    }
+    const cleanup = () => { releasePidFile(); releaseLock(); };
+    process.on("exit", cleanup);
+    process.on("SIGINT", () => { stopDiscordBot(); closeDb(); cleanup(); process.exit(0); });
+    process.on("SIGTERM", () => { stopDiscordBot(); closeDb(); cleanup(); process.exit(0); });
   }
 
   const config = getConfig();

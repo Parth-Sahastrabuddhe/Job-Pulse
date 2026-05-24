@@ -1,5 +1,6 @@
 import { getSession } from "@/lib/session";
 import { getAllSuggestions, respondToSuggestion } from "@/lib/admin";
+import { requireSameOrigin } from "@/lib/security";
 
 export async function GET(request) {
   const session = await getSession();
@@ -20,6 +21,9 @@ export async function GET(request) {
 }
 
 export async function PUT(request) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const session = await getSession();
   if (!session || session.role !== "admin") {
     return Response.json({ error: "Forbidden" }, { status: 403 });

@@ -392,6 +392,28 @@ export function logDm(userId, jobKey, status = "sent") {
     .run(userId, jobKey, status, new Date().toISOString());
 }
 
+/**
+ * Atomically records that the MU bot processed a job for a user.
+ * This combines the notification ledger and delivery log into one short
+ * write transaction, reducing lock churn during high-match bursts.
+ */
+export function recordJobDelivery(userId, jobKey, status = "sent") {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const tx = db.transaction(() => {
+    db.prepare(
+      `INSERT OR IGNORE INTO user_seen_jobs (user_id, job_key, status, notified_at)
+       VALUES (?, ?, 'notified', ?)`
+    ).run(userId, jobKey, now);
+
+    db.prepare(
+      `INSERT INTO dm_log (user_id, job_key, status, sent_at)
+       VALUES (?, ?, ?, ?)`
+    ).run(userId, jobKey, status, now);
+  });
+  tx();
+}
+
 // ---------------------------------------------------------------------------
 // Error Log
 // ---------------------------------------------------------------------------

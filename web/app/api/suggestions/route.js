@@ -1,7 +1,11 @@
 import { getSession } from "@/lib/session";
 import { createCompanySuggestion } from "@/lib/db";
+import { requireSameOrigin } from "@/lib/security";
 
 export async function POST(request) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const session = await getSession();
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

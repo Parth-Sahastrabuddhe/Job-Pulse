@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { getSession } from "@/lib/session";
 import { getUserProfile, updateUserProfile, setPasswordHash } from "@/lib/db";
+import { requireSameOrigin } from "@/lib/security";
 
 export async function GET() {
   const session = await getSession();
@@ -30,6 +31,9 @@ export async function GET() {
 }
 
 export async function PUT(request) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const session = await getSession();
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

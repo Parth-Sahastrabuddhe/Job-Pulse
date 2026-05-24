@@ -73,7 +73,10 @@ async function main() {
   console.log(`Fetched ${dataRows} rows from sheet`);
 
   const db = new Database(DB_PATH);
+  const busyTimeoutMs = Number.parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || "2000", 10);
   db.pragma("journal_mode = WAL");
+  db.pragma(`busy_timeout = ${Number.isFinite(busyTimeoutMs) && busyTimeoutMs > 0 ? busyTimeoutMs : 2000}`);
+  db.pragma("wal_autocheckpoint = 500");
 
   const user = db.prepare("SELECT id FROM user_profiles WHERE discord_id = ?").get(DISCORD_ID);
   if (!user) { console.error("User not found"); db.close(); process.exit(1); }

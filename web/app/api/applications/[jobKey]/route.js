@@ -1,9 +1,13 @@
 import { getSession } from "@/lib/session";
 import { updateApplicationStatus } from "@/lib/db";
+import { requireSameOrigin } from "@/lib/security";
 
 const ALLOWED_STATUSES = ["notified", "saved", "applied", "skipped", "interviewing", "offer", "rejected"];
 
 export async function PUT(request, { params }) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const session = await getSession();
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

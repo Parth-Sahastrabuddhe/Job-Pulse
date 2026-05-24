@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { SignJWT } from "jose";
 import { cookies } from "next/headers";
+import { publicBaseUrl } from "@/lib/security";
 import { getUserProfile } from "@/lib/db";
 
 const SECRET = new TextEncoder().encode(process.env.SESSION_SECRET || "dev-secret-change-in-production-32ch");
@@ -95,14 +96,11 @@ export async function GET(request) {
     .setExpirationTime("30d")
     .sign(SECRET);
 
-  // Redirect with session cookie set on the response
-  // Use forwarded headers to get the real public URL (Nginx proxies to localhost:3000)
-  const proto = request.headers.get("x-forwarded-proto") || "http";
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
-  const baseUrl = `${proto}://${host}`;
+  // Redirect with session cookie set on the response.
+  const baseUrl = publicBaseUrl(request);
   const destination = profileComplete ? "/profile" : "/verify";
   const response = NextResponse.redirect(new URL(destination, baseUrl));
-  const isHttps = proto === "https";
+  const isHttps = baseUrl.startsWith("https://");
   response.cookies.set(COOKIE_NAME, token, {
     httpOnly: true,
     secure: isHttps,
