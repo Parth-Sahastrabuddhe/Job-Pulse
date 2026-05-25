@@ -460,12 +460,10 @@ export function upsertJobs(jobs, seenAt) {
       archetype = COALESCE(excluded.archetype, seen_jobs.archetype)
   `);
 
-  const run = db.transaction(() => {
-    for (const job of jobs) {
-      // URL match under a different key → ATS re-indexed the same listing with
-      // a new internal ID. Just bump last_seen_at on the existing row; skip the
-      // insert so the existing key (and its job_posts/Applied state) stays
-      // canonical.
+  const UPSERT_CHUNK_SIZE = 50;
+
+  const processChunk = db.transaction((chunk) => {
+    for (const job of chunk) {
       if (job.url) {
         const urlRow = getByUrlDifferentKey.get(job.url, job.key);
         if (urlRow) {
@@ -476,7 +474,6 @@ export function upsertJobs(jobs, seenAt) {
 
       let existingFirstSeen = null;
 
-      // Check if same source+id exists under a different key (re-keyed job)
       const altRow = getBySourceId.get(job.sourceKey, String(job.id), job.key);
       if (altRow) {
         existingFirstSeen = altRow.first_seen_at;
@@ -487,7 +484,6 @@ export function upsertJobs(jobs, seenAt) {
         deleteStmt.run(altRow.key);
       }
 
-      // Check if exists under same key
       if (!existingFirstSeen) {
         const sameRow = getFirstSeen.get(job.key);
         if (sameRow) existingFirstSeen = sameRow.first_seen_at;
@@ -512,11 +508,13 @@ export function upsertJobs(jobs, seenAt) {
         lastSeenAt: seenAt
       });
     }
-
-    db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('lastRunAt', ?)").run(seenAt);
   });
 
-  run();
+  for (let i = 0; i < jobs.length; i += UPSERT_CHUNK_SIZE) {
+    processChunk(jobs.slice(i, i + UPSERT_CHUNK_SIZE));
+  }
+
+  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('lastRunAt', ?)").run(seenAt);
 }
 
 export function pruneState(retentionDays) {
