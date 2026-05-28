@@ -53,6 +53,18 @@ function log(message) {
   console.log(`[${timestamp()}] ${message}`);
 }
 
+function isSqliteBusy(error) {
+  return error?.code?.startsWith("SQLITE_BUSY") ||
+    /database is locked|SQLITE_BUSY/i.test(String(error?.message || ""));
+}
+
+async function backoffAfterDbBusy(config, label, error) {
+  const backoffMs = Math.max(0, Number(config.dbBusyBackoffMs) || 0);
+  log(`[${label}] Database busy: ${error.message}. Backing off ${backoffMs}ms.`);
+  void pingFail(config.heartbeat.micro, `${label}: ${error.message}`);
+  if (backoffMs > 0) await delay(backoffMs);
+}
+
 // --- Company Registry ---
 // Each entry: { key, collector, collectorArgs, lane }
 // lane: "fast" (every batch), "normal" (batched rotation), "slow" (separate timer)
@@ -303,6 +315,7 @@ async function runBatchLoop(config, flags, registry) {
 
   const batchSize = config.batchSize;
   const batchDelayMs = config.batchDelayMs;
+  const fastTrackIntervalMs = Math.max(0, config.fastTrackIntervalSeconds || 0) * 1000;
   const slowCycleMs = config.slowCycleMinutes * 60 * 1000;
 
   // Split normal entries into batches
@@ -342,43 +355,73 @@ async function runBatchLoop(config, flags, registry) {
 
   let batchIndex = 0;
   let lastSlowRun = 0;
+  let lastFastRun = 0;
   const lastPlaywrightSourceRuns = new Map();
   let rotationCount = 0;
   let lastSavedExpiry = 0;
+
+  function advanceBatchIndex() {
+    batchIndex = (batchIndex + 1) % totalBatches;
+    return batchIndex === 0;
+  }
+
+  async function finishRotation() {
+    rotationCount++;
+    try {
+      pruneState(config.retentionDays);
+    } catch (error) {
+      if (isSqliteBusy(error)) {
+        await backoffAfterDbBusy(config, "prune", error);
+      } else {
+        throw error;
+      }
+    }
+    if (rotationCount % 10 === 0) {
+      log(`Completed ${rotationCount} full rotations.`);
+    }
+  }
 
   while (true) {
     const cycleStart = Date.now();
 
     try {
-      // --- Fast lane: always runs ---
-      try {
-        const { jobs: fastJobs } = await collectBatch(config, fastEntries);
-        await processBatchResults(config, flags, fastJobs, "fast");
-      } catch (fastError) {
-        log(`[fast lane] Error: ${fastError.message}`);
+      // --- Fast lane: runs on its own short interval ---
+      if (fastEntries.length > 0 && (lastFastRun === 0 || (Date.now() - lastFastRun) >= fastTrackIntervalMs)) {
+        lastFastRun = Date.now();
+        try {
+          const { jobs: fastJobs } = await collectBatch(config, fastEntries);
+          await processBatchResults(config, flags, fastJobs, "fast");
+        } catch (fastError) {
+          if (isSqliteBusy(fastError)) {
+            await backoffAfterDbBusy(config, "fast lane", fastError);
+          } else {
+            log(`[fast lane] Error: ${fastError.message}`);
+          }
+        }
       }
 
       // --- Normal lane: current batch ---
       if (batches.length > 0) {
         const currentBatch = batches[batchIndex];
         const batchLabel = `batch ${batchIndex + 1}/${totalBatches}`;
-        log(`[${batchLabel}] Running ${currentBatch.length} companies: ${currentBatch.map((e) => e.key).join(", ")}`);
-        const batchResult = await collectBatch(config, currentBatch);
-        await processBatchResults(config, flags, batchResult.jobs, batchLabel);
+        try {
+          log(`[${batchLabel}] Running ${currentBatch.length} companies: ${currentBatch.map((e) => e.key).join(", ")}`);
+          const batchResult = await collectBatch(config, currentBatch);
+          await processBatchResults(config, flags, batchResult.jobs, batchLabel);
 
-        if (batchResult.totalCount > 0 && batchResult.errorCount === batchResult.totalCount) {
-          void pingFail(config.heartbeat.micro, `all ${batchResult.totalCount} collectors in ${batchLabel} failed`);
-        } else {
-          void ping(config.heartbeat.micro);
-        }
-
-        batchIndex = (batchIndex + 1) % totalBatches;
-        if (batchIndex === 0) {
-          rotationCount++;
-          pruneState(config.retentionDays);
-          if (rotationCount % 10 === 0) {
-            log(`Completed ${rotationCount} full rotations.`);
+          if (batchResult.totalCount > 0 && batchResult.errorCount === batchResult.totalCount) {
+            void pingFail(config.heartbeat.micro, `all ${batchResult.totalCount} collectors in ${batchLabel} failed`);
+          } else {
+            void ping(config.heartbeat.micro);
           }
+
+          if (advanceBatchIndex()) {
+            await finishRotation();
+          }
+        } catch (batchError) {
+          if (!isSqliteBusy(batchError)) throw batchError;
+          advanceBatchIndex();
+          await backoffAfterDbBusy(config, batchLabel, batchError);
         }
       }
 
@@ -412,7 +455,11 @@ async function runBatchLoop(config, flags, registry) {
             ]);
             await processBatchResults(entryConfig, flags, jobs, `slow:${entry.key}`);
           } catch (error) {
-            log(`[slow:${entry.key}] Error: ${error.message}`);
+            if (isSqliteBusy(error)) {
+              await backoffAfterDbBusy(config, `slow:${entry.key}`, error);
+            } else {
+              log(`[slow:${entry.key}] Error: ${error.message}`);
+            }
           }
         }
         lastSlowRun = Date.now();
@@ -421,8 +468,16 @@ async function runBatchLoop(config, flags, registry) {
       // Hourly: expire saved job_posts older than 7 days
       if (Date.now() - lastSavedExpiry >= 60 * 60 * 1000) {
         lastSavedExpiry = Date.now();
-        const expired = expireSavedJobPosts();
-        if (expired > 0) log(`Expired ${expired} saved job posts`);
+        try {
+          const expired = expireSavedJobPosts();
+          if (expired > 0) log(`Expired ${expired} saved job posts`);
+        } catch (error) {
+          if (isSqliteBusy(error)) {
+            await backoffAfterDbBusy(config, "saved-expiry", error);
+          } else {
+            throw error;
+          }
+        }
       }
     } catch (cycleError) {
       log(`[cycle] Unhandled error: ${cycleError.message}`);

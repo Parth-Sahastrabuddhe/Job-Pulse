@@ -41,7 +41,7 @@ import {
   upsertH1bSponsor,
   getUserProfile,
   searchUserJobs,
-  logError,
+  safeLogError,
 } from "./multi-user-state.js";
 import { filterJobForUser } from "./filter.js";
 import { isJobUrlLive } from "./liveness.js";
@@ -757,7 +757,7 @@ client.on("interactionCreate", async (interaction) => {
     }
   } catch (err) {
     console.error(`[multi-user] Interaction error: ${err.message}`);
-    logError("multi-user-interaction", err.message);
+    safeLogError("multi-user-interaction", err.message);
     try {
       const reply = { content: "An error occurred. Please try again.", ephemeral: true };
       if (!interaction.replied && !interaction.deferred) {
@@ -806,7 +806,7 @@ async function checkSavedJobExpiry() {
     }
   } catch (err) {
     console.error(`[expiry] Error in saved job expiry check: ${err.message}`);
-    logError("expiry-check", err.message);
+    safeLogError("expiry-check", err.message);
   }
 }
 
@@ -893,7 +893,7 @@ async function pollLoop() {
       void ping(getConfig().heartbeat.mu);
     } catch (err) {
       console.error(`[multi-user] Poll cycle error: ${err.message}`);
-      try { logError("multi-user-poll", err.message); } catch (_) { /* DB may be busy */ }
+      safeLogError("multi-user-poll", err.message);
       void pingFail(getConfig().heartbeat.mu, `pollCycle: ${err.message}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 10_000));
@@ -1011,12 +1011,12 @@ async function runPollCycle() {
       userTz = user.quiet_hours_tz || "America/New_York";
     } catch (err) {
       console.error(`[multi-user] Setup error for user ${user.id}: ${err.message}`);
-      try { logError("multi-user-poll-user", `user=${user.id} ${err.message}`); } catch (_) { /* DB may be busy */ }
+      safeLogError("multi-user-poll-user", `user=${user.id} ${err.message}`);
       continue;
     }
 
     if (profileInvalid) {
-      try { logError("filter-bad-profile", `user=${user.id}`); } catch (_) { /* DB may be busy */ }
+      safeLogError("filter-bad-profile", `user=${user.id}`);
       continue;
     }
 
@@ -1065,7 +1065,7 @@ async function runPollCycle() {
           recordJobDelivery(user.id, job.key, result ? "sent" : "failed");
           if (!result) {
             console.error(`[multi-user] DM to ${user.discord_id} (user ${user.id}) returned null for ${job.title}`);
-            try { logError("dm-failed", `user=${user.id} discord=${user.discord_id} job=${job.title} (${job.sourceLabel})`); } catch (_) { /* DB may be busy */ }
+            safeLogError("dm-failed", `user=${user.id} discord=${user.discord_id} job=${job.title} (${job.sourceLabel})`);
           }
         } else {
           recordJobDelivery(user.id, job.key, "queued");
@@ -1075,7 +1075,7 @@ async function runPollCycle() {
         await new Promise((resolve) => setTimeout(resolve, 300));
       } catch (err) {
         console.error(`[multi-user] Error on job ${job.key} for user ${user.id}: ${err.message}`);
-        try { logError("multi-user-poll-job", `user=${user.id} job=${job.key} ${err.message}`); } catch (_) { /* DB may be busy */ }
+        safeLogError("multi-user-poll-job", `user=${user.id} job=${job.key} ${err.message}`);
       }
     }
   }
@@ -1101,7 +1101,7 @@ async function digestLoop() {
       }
     } catch (err) {
       console.error(`[multi-user] Digest cycle error: ${err.message}`);
-      try { logError("multi-user-digest", err.message); } catch (_) { /* DB may be busy */ }
+      safeLogError("multi-user-digest", err.message);
       void pingFail(getConfig().heartbeat.mu, `digestCycle: ${err.message}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 60_000));
@@ -1230,7 +1230,7 @@ async function runDigestCycle() {
       }
     } catch (err) {
       console.error(`[multi-user] Digest error for user ${user.id}: ${err.message}`);
-      try { logError("multi-user-digest-user", `user=${user.id} ${err.message}`); } catch (_) { /* DB may be busy */ }
+      safeLogError("multi-user-digest-user", `user=${user.id} ${err.message}`);
     }
   }
 }

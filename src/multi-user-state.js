@@ -430,6 +430,20 @@ export function logError(sourceKey, errorMessage) {
     .run(sourceKey, errorMessage, new Date().toISOString());
 }
 
+function isSqliteBusy(error) {
+  return error?.code?.startsWith("SQLITE_BUSY") ||
+    /database is locked|SQLITE_BUSY/i.test(String(error?.message || ""));
+}
+
+export function safeLogError(sourceKey, errorMessage) {
+  try {
+    logError(sourceKey, errorMessage);
+  } catch (error) {
+    const prefix = isSqliteBusy(error) ? "DB busy while logging" : "Failed to log";
+    console.error(`[multi-user-state] ${prefix} ${sourceKey}: ${error.message}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Support Tickets
 // ---------------------------------------------------------------------------

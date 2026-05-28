@@ -13,6 +13,16 @@ function sqliteBusyTimeoutMs() {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SQLITE_BUSY_TIMEOUT_MS;
 }
 
+function envPositiveInt(name, fallback) {
+  const parsed = Number.parseInt(String(process.env[name] ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function sleepSync(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 export function initDb(dbFile) {
   fs.mkdirSync(path.dirname(dbFile), { recursive: true });
   db = new Database(dbFile);
@@ -358,10 +368,71 @@ export function getUnnotifiedJobs(jobs) {
 }
 
 // SQL-indexed upsert — no full table scan
-const _stmtGetFirstSeen = () => db.prepare("SELECT first_seen_at FROM seen_jobs WHERE key = ?");
-const _stmtGetBySourceId = () => db.prepare("SELECT key, first_seen_at FROM seen_jobs WHERE source_key = ? AND id = ? AND key != ?");
-const _stmtGetByUrlDifferentKey = () => db.prepare("SELECT key FROM seen_jobs WHERE url = ? AND key != ?");
+const _stmtGetExistingJob = () => db.prepare(`
+  SELECT key, source_key, id, posted_at, posted_precision, country_code,
+         seniority_level, role_categories, archetype, first_seen_at, last_seen_at
+  FROM seen_jobs
+  WHERE key = ?
+`);
+const _stmtGetBySourceId = () => db.prepare(
+  "SELECT key, first_seen_at, last_seen_at FROM seen_jobs WHERE source_key = ? AND id = ? AND key != ?"
+);
+const _stmtGetByUrlDifferentKey = () => db.prepare("SELECT key, last_seen_at FROM seen_jobs WHERE url = ? AND key != ?");
 const _stmtTouchLastSeen = () => db.prepare("UPDATE seen_jobs SET last_seen_at = ? WHERE key = ?");
+
+function seenJobTouchIntervalMs() {
+  return envPositiveInt("SEEN_JOB_TOUCH_INTERVAL_MINUTES", 360) * 60 * 1000;
+}
+
+function upsertChunkSize() {
+  return envPositiveInt("SQLITE_UPSERT_CHUNK_SIZE", 50);
+}
+
+function upsertChunkDelayMs() {
+  return envPositiveInt("SQLITE_UPSERT_CHUNK_DELAY_MS", 25);
+}
+
+function shouldTouchLastSeen(lastSeenAt, seenAt, intervalMs) {
+  if (intervalMs <= 0) return true;
+  const seenMs = Date.parse(seenAt);
+  const lastSeenMs = Date.parse(lastSeenAt || "");
+  return !Number.isFinite(seenMs) ||
+    !Number.isFinite(lastSeenMs) ||
+    (seenMs - lastSeenMs) >= intervalMs;
+}
+
+function jobDbValues(job, seenAt, firstSeenAt = seenAt) {
+  return {
+    key: job.key,
+    sourceKey: job.sourceKey || "",
+    sourceLabel: job.sourceLabel || "",
+    id: String(job.id || ""),
+    title: job.title || "",
+    location: job.location || "",
+    url: job.url || "",
+    postedText: job.postedText || "",
+    postedAt: job.postedAt || "",
+    postedPrecision: job.postedPrecision || "",
+    countryCode: job.countryCode || "",
+    seniorityLevel: job.seniorityLevel || "mid",
+    roleCategories: JSON.stringify(job.roleCategories || []),
+    archetype: job.archetype || null,
+    firstSeenAt,
+    lastSeenAt: seenAt,
+  };
+}
+
+function existingJobNeedsUpsert(existing, values) {
+  if (!existing) return true;
+  return (
+    (values.postedAt !== "" && existing.posted_at !== values.postedAt) ||
+    (values.postedPrecision !== "" && existing.posted_precision !== values.postedPrecision) ||
+    (values.countryCode !== "" && existing.country_code !== values.countryCode) ||
+    (values.seniorityLevel !== "" && existing.seniority_level !== values.seniorityLevel) ||
+    (values.roleCategories !== "[]" && existing.role_categories !== values.roleCategories) ||
+    (values.archetype != null && existing.archetype !== values.archetype)
+  );
+}
 
 function userJobStatusRankSql(expr) {
   return `CASE COALESCE(${expr}, '')
@@ -433,11 +504,12 @@ function remapJobReferences(oldKey, newKey) {
 
 export function upsertJobs(jobs, seenAt) {
   _hasSeenJobsCached = true;
-  const getFirstSeen = _stmtGetFirstSeen();
+  const getExistingJob = _stmtGetExistingJob();
   const getBySourceId = _stmtGetBySourceId();
   const getByUrlDifferentKey = _stmtGetByUrlDifferentKey();
   const touchLastSeen = _stmtTouchLastSeen();
   const deleteStmt = db.prepare("DELETE FROM seen_jobs WHERE key = ?");
+  const touchIntervalMs = seenJobTouchIntervalMs();
 
   const upsert = db.prepare(`
     INSERT INTO seen_jobs
@@ -460,14 +532,25 @@ export function upsertJobs(jobs, seenAt) {
       archetype = COALESCE(excluded.archetype, seen_jobs.archetype)
   `);
 
-  const UPSERT_CHUNK_SIZE = 50;
+  const chunkSize = upsertChunkSize();
+  const chunkDelayMs = upsertChunkDelayMs();
+  const stats = { upserted: 0, touched: 0, skipped: 0, remapped: 0 };
+
+  function touchIfDue(key, lastSeenAt) {
+    if (shouldTouchLastSeen(lastSeenAt, seenAt, touchIntervalMs)) {
+      touchLastSeen.run(seenAt, key);
+      stats.touched++;
+    } else {
+      stats.skipped++;
+    }
+  }
 
   const processChunk = db.transaction((chunk) => {
     for (const job of chunk) {
       if (job.url) {
         const urlRow = getByUrlDifferentKey.get(job.url, job.key);
         if (urlRow) {
-          touchLastSeen.run(seenAt, urlRow.key);
+          touchIfDue(urlRow.key, urlRow.last_seen_at);
           continue;
         }
       }
@@ -478,43 +561,34 @@ export function upsertJobs(jobs, seenAt) {
       if (altRow) {
         existingFirstSeen = altRow.first_seen_at;
         if (!remapJobReferences(altRow.key, job.key)) {
-          touchLastSeen.run(seenAt, altRow.key);
+          touchIfDue(altRow.key, altRow.last_seen_at);
           continue;
         }
         deleteStmt.run(altRow.key);
+        stats.remapped++;
       }
 
-      if (!existingFirstSeen) {
-        const sameRow = getFirstSeen.get(job.key);
-        if (sameRow) existingFirstSeen = sameRow.first_seen_at;
+      const sameRow = getExistingJob.get(job.key);
+      if (!existingFirstSeen && sameRow) existingFirstSeen = sameRow.first_seen_at;
+
+      const values = jobDbValues(job, seenAt, existingFirstSeen || seenAt);
+      if (sameRow && !existingJobNeedsUpsert(sameRow, values)) {
+        touchIfDue(job.key, sameRow.last_seen_at);
+        continue;
       }
 
-      upsert.run({
-        key: job.key,
-        sourceKey: job.sourceKey || "",
-        sourceLabel: job.sourceLabel || "",
-        id: String(job.id || ""),
-        title: job.title || "",
-        location: job.location || "",
-        url: job.url || "",
-        postedText: job.postedText || "",
-        postedAt: job.postedAt || "",
-        postedPrecision: job.postedPrecision || "",
-        countryCode: job.countryCode || "",
-        seniorityLevel: job.seniorityLevel || "mid",
-        roleCategories: JSON.stringify(job.roleCategories || []),
-        archetype: job.archetype || null,
-        firstSeenAt: existingFirstSeen || seenAt,
-        lastSeenAt: seenAt
-      });
+      upsert.run(values);
+      stats.upserted++;
     }
   });
 
-  for (let i = 0; i < jobs.length; i += UPSERT_CHUNK_SIZE) {
-    processChunk(jobs.slice(i, i + UPSERT_CHUNK_SIZE));
+  for (let i = 0; i < jobs.length; i += chunkSize) {
+    processChunk(jobs.slice(i, i + chunkSize));
+    if (i + chunkSize < jobs.length) sleepSync(chunkDelayMs);
   }
 
   db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('lastRunAt', ?)").run(seenAt);
+  return stats;
 }
 
 export function pruneState(retentionDays) {

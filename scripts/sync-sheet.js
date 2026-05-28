@@ -6,11 +6,33 @@
  * Each sheet row gets its own entry — no deduplication.
  */
 import Database from "better-sqlite3";
+import fs from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolve(__dirname, "..");
 const DB_PATH = resolve(__dirname, "../data/jobs.db");
+const ENV_PATH = resolve(PROJECT_ROOT, ".env");
+
+function loadEnvFile() {
+  if (!fs.existsSync(ENV_PATH)) return;
+  for (const rawLine of fs.readFileSync(ENV_PATH, "utf8").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const separatorIndex = line.indexOf("=");
+    if (separatorIndex === -1) continue;
+    const key = line.slice(0, separatorIndex).trim();
+    let value = line.slice(separatorIndex + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (!(key in process.env)) process.env[key] = value;
+  }
+}
+
+loadEnvFile();
+
 const DISCORD_ID = process.env.ADMIN_DISCORD_ID;
 const SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/1cBerym6t8Ws_SxWQCX06BbWVOCK3oQnxh9lqc8WTDVw/export?format=csv&gid=1100127803";
@@ -65,6 +87,11 @@ function slugify(str) {
 async function main() {
   console.log(`[${new Date().toISOString()}] Sheet sync starting...`);
 
+  if (!DISCORD_ID) {
+    console.error("ADMIN_DISCORD_ID is not set; skipping sheet sync before opening DB or fetching sheet.");
+    process.exit(1);
+  }
+
   const res = await fetch(SHEET_CSV_URL);
   if (!res.ok) { console.error("Failed to fetch sheet:", res.status); process.exit(1); }
   const csv = await res.text();
@@ -91,60 +118,96 @@ async function main() {
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
+  const deleteUserJob = db.prepare("DELETE FROM user_seen_jobs WHERE user_id = ? AND job_key = ?");
+  const deleteSeenJob = db.prepare("DELETE FROM seen_jobs WHERE key = ? AND key NOT IN (SELECT job_key FROM user_seen_jobs)");
+
   const now = new Date().toISOString();
+  const CHUNK_SIZE = Number.parseInt(process.env.SHEET_SYNC_CHUNK_SIZE || "100", 10);
+  const CHUNK_DELAY_MS = Number.parseInt(process.env.SHEET_SYNC_CHUNK_DELAY_MS || "50", 10);
   let inserted = 0, skipped = 0;
 
-  const tx = db.transaction(() => {
-    // Delete all existing sheet entries for admin
-    const deleted = db.prepare("DELETE FROM user_seen_jobs WHERE user_id = ? AND job_key LIKE 'sheet:%'").run(user.id).changes;
-    db.prepare("DELETE FROM seen_jobs WHERE key LIKE 'sheet:%' AND key NOT IN (SELECT job_key FROM user_seen_jobs)").run();
-    console.log(`Cleared ${deleted} old sheet entries`);
+  // Build the desired row set first (no DB writes yet)
+  const desiredRows = [];
+  const desiredKeys = new Set();
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const company = row[0];
+    const role = row[1];
+    const jobId = (row[2] || "").trim();
+    const dateApplied = row[3];
+    const status = row[4];
+    const url = (row[6] || "").trim();
 
-    // Insert every row — one entry per row, keyed by row index
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      const company = row[0];
-      const role = row[1];
-      const jobId = (row[2] || "").trim();
-      const dateApplied = row[3];
-      const status = row[4];
-      const url = (row[6] || "").trim();
+    if (!company || !role) { skipped++; continue; }
 
-      if (!company || !role) { skipped++; continue; }
+    const cleanUrl = url.startsWith("http") ? url : "";
+    const baseDate = parseDate(dateApplied);
+    // Add row index as seconds offset so within-day ordering is preserved (higher row = later)
+    const appliedAt = new Date(new Date(baseDate).getTime() + i * 1000).toISOString();
+    const dbStatus = mapStatus(status);
+    const slug = slugify(company);
+    const key = `sheet:${slug}:row-${i}`;
+    const id = jobId || `row-${i}`;
 
-      const cleanUrl = url.startsWith("http") ? url : "";
-      const baseDate = parseDate(dateApplied);
-      // Add row index as seconds offset so within-day ordering is preserved (higher row = later)
-      const appliedAt = new Date(new Date(baseDate).getTime() + i * 1000).toISOString();
-      const dbStatus = mapStatus(status);
-      const slug = slugify(company);
-      const key = `sheet:${slug}:row-${i}`;
-      const id = jobId || `row-${i}`;
+    desiredRows.push({ key, slug, company, id, role, cleanUrl, appliedAt, dbStatus });
+    desiredKeys.add(key);
+  }
 
-      insertJob.run(key, slug, company, id, role, "", cleanUrl, appliedAt, now);
-      insertUserJob.run(user.id, key, dbStatus, appliedAt, appliedAt, now);
+  // Stale key cleanup: rows present in DB but not in current sheet snapshot
+  const existingKeys = db
+    .prepare("SELECT job_key FROM user_seen_jobs WHERE user_id = ? AND job_key LIKE 'sheet:%'")
+    .all(user.id)
+    .map((r) => r.job_key);
+  const staleKeys = existingKeys.filter((k) => !desiredKeys.has(k));
+
+  // Upsert in small transactions to release the write lock between chunks
+  const upsertChunk = db.transaction((chunk) => {
+    for (const r of chunk) {
+      insertJob.run(r.key, r.slug, r.company, r.id, r.role, "", r.cleanUrl, r.appliedAt, now);
+      insertUserJob.run(user.id, r.key, r.dbStatus, r.appliedAt, r.appliedAt, now);
       inserted++;
     }
-
-    // Remove bot entries that duplicate a sheet entry (same company + title)
-    const dupes = db.prepare(`
-      DELETE FROM user_seen_jobs WHERE rowid IN (
-        SELECT usj.rowid FROM user_seen_jobs usj
-        JOIN seen_jobs sj ON sj.key = usj.job_key
-        WHERE usj.user_id = ? AND usj.job_key NOT LIKE 'sheet:%'
-        AND EXISTS (
-          SELECT 1 FROM user_seen_jobs usj2
-          JOIN seen_jobs sj2 ON sj2.key = usj2.job_key
-          WHERE usj2.user_id = usj.user_id AND usj2.job_key LIKE 'sheet:%'
-          AND sj2.source_label = sj.source_label AND sj2.title = sj.title
-        )
-      )
-    `).run(user.id).changes;
-    if (dupes) console.log(`Removed ${dupes} duplicate bot entries`);
   });
 
-  tx();
-  console.log(`Done. Inserted: ${inserted}, Skipped: ${skipped}`);
+  for (let i = 0; i < desiredRows.length; i += CHUNK_SIZE) {
+    upsertChunk(desiredRows.slice(i, i + CHUNK_SIZE));
+    if (i + CHUNK_SIZE < desiredRows.length && CHUNK_DELAY_MS > 0) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, CHUNK_DELAY_MS);
+    }
+  }
+
+  // Delete stale entries in small chunks too
+  const deleteStaleChunk = db.transaction((chunk) => {
+    for (const key of chunk) {
+      deleteUserJob.run(user.id, key);
+      deleteSeenJob.run(key);
+    }
+  });
+  for (let i = 0; i < staleKeys.length; i += CHUNK_SIZE) {
+    deleteStaleChunk(staleKeys.slice(i, i + CHUNK_SIZE));
+    if (i + CHUNK_SIZE < staleKeys.length && CHUNK_DELAY_MS > 0) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, CHUNK_DELAY_MS);
+    }
+  }
+  if (staleKeys.length) console.log(`Removed ${staleKeys.length} stale sheet entries`);
+
+  // Remove bot entries that duplicate a sheet entry (same company + title)
+  const dupes = db.prepare(`
+    DELETE FROM user_seen_jobs WHERE rowid IN (
+      SELECT usj.rowid FROM user_seen_jobs usj
+      JOIN seen_jobs sj ON sj.key = usj.job_key
+      WHERE usj.user_id = ? AND usj.job_key NOT LIKE 'sheet:%'
+      AND EXISTS (
+        SELECT 1 FROM user_seen_jobs usj2
+        JOIN seen_jobs sj2 ON sj2.key = usj2.job_key
+        WHERE usj2.user_id = usj.user_id AND usj2.job_key LIKE 'sheet:%'
+        AND sj2.source_label = sj.source_label AND sj2.title = sj.title
+      )
+    )
+  `).run(user.id).changes;
+  if (dupes) console.log(`Removed ${dupes} duplicate bot entries`);
+
+  console.log(`Done. Inserted: ${inserted}, Skipped: ${skipped}, Stale removed: ${staleKeys.length}`);
   db.close();
 }
 
