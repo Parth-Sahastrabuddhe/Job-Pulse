@@ -4,7 +4,7 @@
  * Uses the shared better-sqlite3 handle from state.js (synchronous API, no async/await).
  */
 
-import { getDb } from "./state.js";
+import { getDb, withBusyRetry } from "./state.js";
 
 // ---------------------------------------------------------------------------
 // User Profiles
@@ -411,7 +411,7 @@ export function recordJobDelivery(userId, jobKey, status = "sent") {
        VALUES (?, ?, ?, ?)`
     ).run(userId, jobKey, status, now);
   });
-  tx();
+  withBusyRetry(() => tx());
 }
 
 // ---------------------------------------------------------------------------

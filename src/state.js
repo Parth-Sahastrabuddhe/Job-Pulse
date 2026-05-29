@@ -23,6 +23,24 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+function isSqliteBusy(err) {
+  const code = err?.code || "";
+  const msg = String(err?.message || "");
+  return code.startsWith("SQLITE_BUSY") || /database is locked|SQLITE_BUSY/i.test(msg);
+}
+
+export function withBusyRetry(fn, { retries = 2, baseDelayMs = 200 } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return fn();
+    } catch (err) {
+      if (!isSqliteBusy(err) || attempt >= retries) throw err;
+      const jitter = Math.floor(Math.random() * 100);
+      sleepSync(baseDelayMs * Math.pow(2, attempt) + jitter);
+    }
+  }
+}
+
 export function initDb(dbFile) {
   fs.mkdirSync(path.dirname(dbFile), { recursive: true });
   db = new Database(dbFile);
@@ -583,11 +601,14 @@ export function upsertJobs(jobs, seenAt) {
   });
 
   for (let i = 0; i < jobs.length; i += chunkSize) {
-    processChunk(jobs.slice(i, i + chunkSize));
+    const slice = jobs.slice(i, i + chunkSize);
+    withBusyRetry(() => processChunk(slice));
     if (i + chunkSize < jobs.length) sleepSync(chunkDelayMs);
   }
 
-  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('lastRunAt', ?)").run(seenAt);
+  withBusyRetry(() =>
+    db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('lastRunAt', ?)").run(seenAt)
+  );
   return stats;
 }
 
