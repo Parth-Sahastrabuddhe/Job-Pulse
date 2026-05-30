@@ -186,6 +186,10 @@ export function getMuDeliveredJobKeys(userId) {
     .all(userId);
   const keys = new Set(dmRows.map((r) => r.job_key));
   for (const r of actionRows) keys.add(r.job_key);
+  // Merge unflushed buffered deliveries — same poll cycle might enqueue and
+  // re-check before the buffer hits disk.
+  const buffered = _bufferedKeysByUser.get(userId);
+  if (buffered) for (const k of buffered) keys.add(k);
   return keys;
 }
 
@@ -392,26 +396,144 @@ export function logDm(userId, jobKey, status = "sent") {
     .run(userId, jobKey, status, new Date().toISOString());
 }
 
+// ---------------------------------------------------------------------------
+// DM Log write-behind buffer
+// ---------------------------------------------------------------------------
+// Coalesces dm_log + user_seen_jobs inserts into batched transactions to
+// reduce per-DM lock acquisitions during high-match bursts. A single 50-entry
+// flush is one transaction instead of 50. Trades up to ~5s of dm_log
+// durability (lost on crash before flush) for fewer lock collisions.
+//
+// Cross-session dedup safety: getMuDeliveredJobKeys reads from buffer + DB so
+// a freshly-buffered key is treated as delivered even before it hits disk.
+
+function dmLogFlushIntervalMs() {
+  const v = Number.parseInt(process.env.DM_LOG_FLUSH_INTERVAL_MS ?? "", 10);
+  return Number.isFinite(v) && v > 0 ? v : 5000;
+}
+function dmLogFlushMaxSize() {
+  const v = Number.parseInt(process.env.DM_LOG_FLUSH_MAX_SIZE ?? "", 10);
+  return Number.isFinite(v) && v > 0 ? v : 100;
+}
+const _DM_LOG_DEDUP_STATUSES = new Set(["sent", "queued", "dead_link"]);
+
+const _dmLogBuffer = [];
+const _bufferedKeysByUser = new Map(); // userId -> Set<jobKey>
+let _flushTimer = null;
+
+function _addBufferedKey(userId, jobKey) {
+  let set = _bufferedKeysByUser.get(userId);
+  if (!set) { set = new Set(); _bufferedKeysByUser.set(userId, set); }
+  set.add(jobKey);
+}
+
+function _clearBufferedKey(userId, jobKey) {
+  const set = _bufferedKeysByUser.get(userId);
+  if (!set) return;
+  set.delete(jobKey);
+  if (set.size === 0) _bufferedKeysByUser.delete(userId);
+}
+
+function _scheduleFlush() {
+  if (_flushTimer) return;
+  _flushTimer = setTimeout(() => {
+    _flushTimer = null;
+    try { flushDmLog(); }
+    catch (err) { console.error(`[dm-log] Scheduled flush failed: ${err.message}`); }
+  }, dmLogFlushIntervalMs());
+  if (_flushTimer.unref) _flushTimer.unref();
+}
+
+function _doFlush(useRetry) {
+  if (_flushTimer) { clearTimeout(_flushTimer); _flushTimer = null; }
+  if (_dmLogBuffer.length === 0) return 0;
+  const toFlush = _dmLogBuffer.splice(0);
+  const db = getDb();
+  const insertUserJob = db.prepare(
+    `INSERT OR IGNORE INTO user_seen_jobs (user_id, job_key, status, notified_at)
+     VALUES (?, ?, 'notified', ?)`
+  );
+  const insertDm = db.prepare(
+    `INSERT INTO dm_log (user_id, job_key, status, sent_at)
+     VALUES (?, ?, ?, ?)`
+  );
+  const tx = db.transaction(() => {
+    for (const e of toFlush) {
+      insertUserJob.run(e.userId, e.jobKey, e.timestamp);
+      insertDm.run(e.userId, e.jobKey, e.status, e.timestamp);
+    }
+  });
+  try {
+    if (useRetry) withBusyRetry(() => tx());
+    else tx();
+    for (const e of toFlush) {
+      if (_DM_LOG_DEDUP_STATUSES.has(e.status)) _clearBufferedKey(e.userId, e.jobKey);
+    }
+    return toFlush.length;
+  } catch (err) {
+    // Restore buffer state for a later retry (preserves original order).
+    _dmLogBuffer.unshift(...toFlush);
+    if (useRetry) _scheduleFlush();
+    throw err;
+  }
+}
+
 /**
- * Atomically records that the MU bot processed a job for a user.
- * This combines the notification ledger and delivery log into one short
- * write transaction, reducing lock churn during high-match bursts.
+ * Flush buffered dm_log entries with busy-retry. Called by timer / size trigger.
+ * Returns number of entries flushed.
+ */
+export function flushDmLog() {
+  return _doFlush(true);
+}
+
+/**
+ * Synchronous flush for shutdown — no busy-retry, drops entries on failure
+ * with a single log line. Bounded latency for pm2's SIGINT->SIGKILL window.
+ */
+export function flushDmLogSync() {
+  if (_flushTimer) { clearTimeout(_flushTimer); _flushTimer = null; }
+  if (_dmLogBuffer.length === 0) return 0;
+  try {
+    return _doFlush(false);
+  } catch (err) {
+    // Capture per-user counts BEFORE clearing so the operator can audit
+    // which deliveries went unrecorded after shutdown.
+    const droppedByUser = new Map();
+    for (const e of _dmLogBuffer) {
+      droppedByUser.set(e.userId, (droppedByUser.get(e.userId) || 0) + 1);
+    }
+    const dropped = _dmLogBuffer.length;
+    const breakdown = [...droppedByUser.entries()]
+      .map(([u, n]) => `user=${u}:${n}`).join(" ");
+    _dmLogBuffer.length = 0;
+    _bufferedKeysByUser.clear();
+    console.error(`[dm-log] Shutdown flush dropped ${dropped} entries [${breakdown}]: ${err.message}`);
+    return 0;
+  }
+}
+
+/**
+ * Records that the MU bot processed a job for a user. Buffered: actual DB
+ * write happens on the next flush (every DM_LOG_FLUSH_INTERVAL_MS or when
+ * the buffer reaches DM_LOG_FLUSH_MAX_SIZE). For dedup-eligible statuses
+ * the (user, job) pair is tracked in memory so getMuDeliveredJobKeys
+ * returns it immediately.
  */
 export function recordJobDelivery(userId, jobKey, status = "sent") {
-  const db = getDb();
-  const now = new Date().toISOString();
-  const tx = db.transaction(() => {
-    db.prepare(
-      `INSERT OR IGNORE INTO user_seen_jobs (user_id, job_key, status, notified_at)
-       VALUES (?, ?, 'notified', ?)`
-    ).run(userId, jobKey, now);
+  const timestamp = new Date().toISOString();
+  _dmLogBuffer.push({ userId, jobKey, status, timestamp });
+  if (_DM_LOG_DEDUP_STATUSES.has(status)) _addBufferedKey(userId, jobKey);
+  if (_dmLogBuffer.length >= dmLogFlushMaxSize()) {
+    try { flushDmLog(); }
+    catch (err) { console.error(`[dm-log] Size-triggered flush failed: ${err.message}`); }
+  } else {
+    _scheduleFlush();
+  }
+}
 
-    db.prepare(
-      `INSERT INTO dm_log (user_id, job_key, status, sent_at)
-       VALUES (?, ?, ?, ?)`
-    ).run(userId, jobKey, status, now);
-  });
-  withBusyRetry(() => tx());
+/** Test/introspection helper. Returns count of unflushed entries. */
+export function _dmLogBufferSize() {
+  return _dmLogBuffer.length;
 }
 
 // ---------------------------------------------------------------------------

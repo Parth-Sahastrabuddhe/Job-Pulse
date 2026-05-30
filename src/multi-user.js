@@ -42,6 +42,7 @@ import {
   getUserProfile,
   searchUserJobs,
   safeLogError,
+  flushDmLogSync,
 } from "./multi-user-state.js";
 import { filterJobForUser } from "./filter.js";
 import { isJobUrlLive } from "./liveness.js";
@@ -1302,6 +1303,12 @@ await client.login(token);
 function shutdown(signal) {
   console.log(`[multi-user] Received ${signal}, shutting down...`);
   running = false;
+  try {
+    const flushed = flushDmLogSync();
+    if (flushed > 0) console.log(`[multi-user] Flushed ${flushed} buffered dm_log entries on ${signal}.`);
+  } catch (err) {
+    console.error(`[multi-user] dm_log flush failed on ${signal}: ${err.message}`);
+  }
   client.destroy();
   closeDb();
   process.exit(0);
