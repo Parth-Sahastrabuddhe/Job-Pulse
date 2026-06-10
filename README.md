@@ -1,6 +1,6 @@
 # JobPulse
 
-Real-time multi-user job aggregation platform. Monitors 120+ companies across 8 integration types and delivers personalized job alerts via Discord DM within minutes of posting.
+Real-time multi-user job aggregation platform. Monitors 185+ companies across 8 integration types and delivers personalized job alerts via Discord DM within minutes of posting.
 
 > **6,000+** jobs tracked &middot; **3,900+** personalized DMs delivered &middot; **900+** applications in user trackers &middot; Running 24/7 on AWS EC2 since March 2026
 
