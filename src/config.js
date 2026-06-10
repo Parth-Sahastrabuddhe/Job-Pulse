@@ -796,6 +796,382 @@ export function getConfig() {
       sourceLabel: "Dynatrace",
       apiUrl: "https://www.dynatrace.com/api/coveo/search/",
       jobUrlBase: "https://www.dynatrace.com/careers/jobs/"
+    },
+    // --- 2026-06 expansion batch (endpoints live-verified before adding) ---
+    brex: {
+      sourceKey: "brex",
+      sourceLabel: "Brex",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/brex/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/brex/jobs/"
+    },
+    xai: {
+      sourceKey: "xai",
+      sourceLabel: "xAI",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/xai/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/xai/jobs/"
+    },
+    adyen: {
+      sourceKey: "adyen",
+      sourceLabel: "Adyen",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/adyen/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/adyen/jobs/"
+    },
+    braze: {
+      sourceKey: "braze",
+      sourceLabel: "Braze",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/braze/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/braze/jobs/"
+    },
+    scaleai: {
+      sourceKey: "scaleai",
+      sourceLabel: "Scale AI",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/scaleai/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/scaleai/jobs/"
+    },
+    clickhouse: {
+      sourceKey: "clickhouse",
+      sourceLabel: "ClickHouse",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/clickhouse/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/clickhouse/jobs/"
+    },
+    glean: {
+      sourceKey: "glean",
+      sourceLabel: "Glean",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/gleanwork/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/gleanwork/jobs/"
+    },
+    wiz: {
+      sourceKey: "wiz",
+      sourceLabel: "Wiz",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/wizinc/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/wizinc/jobs/"
+    },
+    klaviyo: {
+      sourceKey: "klaviyo",
+      sourceLabel: "Klaviyo",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/klaviyo/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/klaviyo/jobs/"
+    },
+    affirm: {
+      sourceKey: "affirm",
+      sourceLabel: "Affirm",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/affirm/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/affirm/jobs/"
+    },
+    aurora: {
+      sourceKey: "aurora",
+      sourceLabel: "Aurora",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/aurorainnovation/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/aurorainnovation/jobs/"
+    },
+    drw: {
+      sourceKey: "drw",
+      sourceLabel: "DRW",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/drweng/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/drweng/jobs/"
+    },
+    gitlab: {
+      sourceKey: "gitlab",
+      sourceLabel: "GitLab",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/gitlab/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/gitlab/jobs/"
+    },
+    ripple: {
+      sourceKey: "ripple",
+      sourceLabel: "Ripple",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/ripple/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/ripple/jobs/"
+    },
+    asana: {
+      sourceKey: "asana",
+      sourceLabel: "Asana",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/asana/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/asana/jobs/"
+    },
+    imc: {
+      sourceKey: "imc",
+      sourceLabel: "IMC Trading",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/imc/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/imc/jobs/"
+    },
+    sofi: {
+      sourceKey: "sofi",
+      sourceLabel: "SoFi",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/sofi/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/sofi/jobs/"
+    },
+    figureai: {
+      sourceKey: "figureai",
+      sourceLabel: "Figure AI",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/figureai/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/figureai/jobs/"
+    },
+    fivetran: {
+      sourceKey: "fivetran",
+      sourceLabel: "Fivetran",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/fivetran/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/fivetran/jobs/"
+    },
+    grafana: {
+      sourceKey: "grafana",
+      sourceLabel: "Grafana Labs",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/grafanalabs/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/grafanalabs/jobs/"
+    },
+    flexport: {
+      sourceKey: "flexport",
+      sourceLabel: "Flexport",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/flexport/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/flexport/jobs/"
+    },
+    motional: {
+      sourceKey: "motional",
+      sourceLabel: "Motional",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/motional/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/motional/jobs/"
+    },
+    nuro: {
+      sourceKey: "nuro",
+      sourceLabel: "Nuro",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/nuro/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/nuro/jobs/"
+    },
+    purestorage: {
+      sourceKey: "purestorage",
+      sourceLabel: "Pure Storage",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/purestorage/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/purestorage/jobs/"
+    },
+    verkada: {
+      sourceKey: "verkada",
+      sourceLabel: "Verkada",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/verkada/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/verkada/jobs/"
+    },
+    gusto: {
+      sourceKey: "gusto",
+      sourceLabel: "Gusto",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/gusto/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/gusto/jobs/"
+    },
+    upstart: {
+      sourceKey: "upstart",
+      sourceLabel: "Upstart",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/upstart/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/upstart/jobs/"
+    },
+    faire: {
+      sourceKey: "faire",
+      sourceLabel: "Faire",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/faire/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/faire/jobs/"
+    },
+    chime: {
+      sourceKey: "chime",
+      sourceLabel: "Chime",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/chime/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/chime/jobs/"
+    },
+    newrelic: {
+      sourceKey: "newrelic",
+      sourceLabel: "New Relic",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/newrelic/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/newrelic/jobs/"
+    },
+    towerresearch: {
+      sourceKey: "towerresearch",
+      sourceLabel: "Tower Research",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/towerresearchcapital/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/towerresearchcapital/jobs/"
+    },
+    jumptrading: {
+      sourceKey: "jumptrading",
+      sourceLabel: "Jump Trading",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/jumptrading/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/jumptrading/jobs/"
+    },
+    checkr: {
+      sourceKey: "checkr",
+      sourceLabel: "Checkr",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/checkr/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/checkr/jobs/"
+    },
+    carta: {
+      sourceKey: "carta",
+      sourceLabel: "Carta",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/carta/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/carta/jobs/"
+    },
+    amplitude: {
+      sourceKey: "amplitude",
+      sourceLabel: "Amplitude",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/amplitude/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/amplitude/jobs/"
+    },
+    temporal: {
+      sourceKey: "temporal",
+      sourceLabel: "Temporal",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/temporaltechnologies/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/temporaltechnologies/jobs/"
+    },
+    launchdarkly: {
+      sourceKey: "launchdarkly",
+      sourceLabel: "LaunchDarkly",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/launchdarkly/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/launchdarkly/jobs/"
+    },
+    singlestore: {
+      sourceKey: "singlestore",
+      sourceLabel: "SingleStore",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/singlestore/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/singlestore/jobs/"
+    },
+    neo4j: {
+      sourceKey: "neo4j",
+      sourceLabel: "Neo4j",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/neo4j/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/neo4j/jobs/"
+    },
+    sixsense: {
+      sourceKey: "sixsense",
+      sourceLabel: "6sense",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/6sense/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/6sense/jobs/"
+    },
+    mixpanel: {
+      sourceKey: "mixpanel",
+      sourceLabel: "Mixpanel",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/mixpanel/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/mixpanel/jobs/"
+    },
+    dbtlabs: {
+      sourceKey: "dbtlabs",
+      sourceLabel: "dbt Labs",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/dbtlabsinc/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/dbtlabsinc/jobs/"
+    },
+    cockroachlabs: {
+      sourceKey: "cockroachlabs",
+      sourceLabel: "Cockroach Labs",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/cockroachlabs/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/cockroachlabs/jobs/"
+    },
+    marqeta: {
+      sourceKey: "marqeta",
+      sourceLabel: "Marqeta",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/marqeta/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/marqeta/jobs/"
+    },
+    akuna: {
+      sourceKey: "akuna",
+      sourceLabel: "Akuna Capital",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/akunacapital/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/akunacapital/jobs/"
+    },
+    gemini: {
+      sourceKey: "gemini",
+      sourceLabel: "Gemini",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/gemini/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/gemini/jobs/"
+    },
+    squarespace: {
+      sourceKey: "squarespace",
+      sourceLabel: "Squarespace",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/squarespace/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/squarespace/jobs/"
+    },
+    redpanda: {
+      sourceKey: "redpanda",
+      sourceLabel: "Redpanda",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/redpandadata/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/redpandadata/jobs/"
+    },
+    sambanova: {
+      sourceKey: "sambanova",
+      sourceLabel: "SambaNova",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/sambanovasystems/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/sambanovasystems/jobs/"
+    },
+    nextdoor: {
+      sourceKey: "nextdoor",
+      sourceLabel: "Nextdoor",
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/nextdoor/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/nextdoor/jobs/"
+    },
+    mistral: {
+      sourceKey: "mistral",
+      sourceLabel: "Mistral AI",
+      apiUrl: "https://api.lever.co/v0/postings/mistral?mode=json"
+    },
+    kraken: {
+      sourceKey: "kraken",
+      sourceLabel: "Kraken",
+      apiUrl: "https://api.lever.co/v0/postings/kraken123?mode=json"
+    },
+    cohere: {
+      sourceKey: "cohere",
+      sourceLabel: "Cohere",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/cohere",
+      boardSlug: "cohere"
+    },
+    perplexity: {
+      sourceKey: "perplexity",
+      sourceLabel: "Perplexity",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/perplexity",
+      boardSlug: "perplexity"
+    },
+    baseten: {
+      sourceKey: "baseten",
+      sourceLabel: "Baseten",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/baseten",
+      boardSlug: "baseten"
+    },
+    modal: {
+      sourceKey: "modal",
+      sourceLabel: "Modal",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/modal",
+      boardSlug: "modal"
+    },
+    linear: {
+      sourceKey: "linear",
+      sourceLabel: "Linear",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/linear",
+      boardSlug: "linear"
+    },
+    render: {
+      sourceKey: "render",
+      sourceLabel: "Render",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/render",
+      boardSlug: "render"
+    },
+    warp: {
+      sourceKey: "warp",
+      sourceLabel: "Warp",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/warp",
+      boardSlug: "warp"
+    },
+    posthog: {
+      sourceKey: "posthog",
+      sourceLabel: "PostHog",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/posthog",
+      boardSlug: "posthog"
+    },
+    sift: {
+      sourceKey: "sift",
+      sourceLabel: "Sift",
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/sift",
+      boardSlug: "sift"
+    },
+    experian: {
+      sourceKey: "experian",
+      sourceLabel: "Experian",
+      companySlug: "Experian"
+    },
+    appliedmaterials: {
+      sourceKey: "appliedmaterials",
+      sourceLabel: "Applied Materials",
+      apiUrl: "https://amat.wd1.myworkdayjobs.com/wday/cxs/amat/External/jobs",
+      baseUrl: "https://amat.wd1.myworkdayjobs.com/External"
     }
   };
 }
