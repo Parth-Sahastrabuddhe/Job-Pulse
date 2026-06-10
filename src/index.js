@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { getConfig, PROJECT_ROOT } from "./config.js";
-import { sendDiscordBotNotification, startDiscordBot, stopDiscordBot } from "./discord-bot.js";
+import { sendDiscordBotNotification, startDiscordBot, stopDiscordBot, isDiscordBotConnected } from "./discord-bot.js";
 import { fetchJobDescription, jobDirId, saveJobData } from "./job-description.js";
 import { sendDiscordNotification } from "./notifiers/discord.js";
 import { sendTelegramNotification } from "./notifiers/telegram.js";
@@ -37,7 +37,7 @@ import { collectDynatraceJobs } from "./sources/dynatrace.js";
 import {
   initDb, closeDb, migrateFromJson,
   getNewJobs, getUnnotifiedJobs, upsertJobs, pruneState, hasSeenJobs, expireSavedJobPosts,
-  updateJobLegitimacy
+  updateJobLegitimacy, upsertJobPost
 } from "./state.js";
 import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } from "./jd-filter.js";
 import { checkLegitimacy } from "./legitimacy.js";
@@ -135,7 +135,7 @@ function buildRegistry(config) {
 
 // --- Notifications ---
 
-async function sendNotifications(config, jobs, filteredResults, options) {
+async function sendNotifications(config, jobs, filteredResults, options = {}) {
   let notified = false;
 
   const warningsMap = new Map();
@@ -147,10 +147,25 @@ async function sendNotifications(config, jobs, filteredResults, options) {
     }
   }
 
-  if (config.notifications.discordBotToken && config.notifications.discordChannelId) {
-    await sendDiscordBotNotification(jobs, warningsMap, options);
-    notified = true;
-  } else if (config.notifications.discordWebhookUrl) {
+  // Discord bot is the primary channel, but only when it's actually connected.
+  // A failed startup or a later disconnect must fall through to the webhook rather
+  // than throw every cycle and silently deliver nothing (heartbeats stay green).
+  const botConfigured = config.notifications.discordBotToken && config.notifications.discordChannelId;
+  let botDelivered = false;
+  if (botConfigured && isDiscordBotConnected()) {
+    try {
+      await sendDiscordBotNotification(jobs, warningsMap, options);
+      botDelivered = true;
+      notified = true;
+    } catch (error) {
+      log(`[notify] Discord bot send failed (${error.message}); falling back to webhook if configured.`);
+    }
+  } else if (botConfigured) {
+    log("[notify] Discord bot not connected; using webhook fallback if configured.");
+  }
+
+  // Webhook fallback, used when the bot path is unavailable or failed.
+  if (!botDelivered && config.notifications.discordWebhookUrl) {
     await sendDiscordNotification(config.notifications.discordWebhookUrl, jobs, options);
     notified = true;
   }
@@ -163,6 +178,20 @@ async function sendNotifications(config, jobs, filteredResults, options) {
       options
     );
     notified = true;
+  }
+
+  // Dedupe ledger: the Discord-bot path records job_posts per successful send (with
+  // the real message_id, needed for button/status updates). Webhook/telegram-only
+  // delivery records nothing, so getUnnotifiedJobs would re-admit these jobs every
+  // cycle. Record a ledger row here for any job delivered via a non-bot path.
+  if (notified && !botDelivered && !options.dryRun) {
+    for (const job of jobs) {
+      try {
+        upsertJobPost(job.key, null, null, config.notifications.discordChannelId || null);
+      } catch (error) {
+        log(`[notify] Ledger write failed for ${job.key}: ${error.message}`);
+      }
+    }
   }
 
   return notified;
@@ -359,6 +388,11 @@ async function runBatchLoop(config, flags, registry) {
   const lastPlaywrightSourceRuns = new Map();
   let rotationCount = 0;
   let lastSavedExpiry = 0;
+  // pruneState does unindexed-ish range scans + a synchronous fs sweep; the
+  // retention boundary only moves once a day, so run it hourly rather than on
+  // every ~minute rotation. (The initial prune already ran above at startup.)
+  let lastPruneAt = Date.now();
+  const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
   function advanceBatchIndex() {
     batchIndex = (batchIndex + 1) % totalBatches;
@@ -367,13 +401,16 @@ async function runBatchLoop(config, flags, registry) {
 
   async function finishRotation() {
     rotationCount++;
-    try {
-      pruneState(config.retentionDays);
-    } catch (error) {
-      if (isSqliteBusy(error)) {
-        await backoffAfterDbBusy(config, "prune", error);
-      } else {
-        throw error;
+    if (Date.now() - lastPruneAt >= PRUNE_INTERVAL_MS) {
+      lastPruneAt = Date.now();
+      try {
+        pruneState(config.retentionDays);
+      } catch (error) {
+        if (isSqliteBusy(error)) {
+          await backoffAfterDbBusy(config, "prune", error);
+        } else {
+          throw error;
+        }
       }
     }
     if (rotationCount % 10 === 0) {

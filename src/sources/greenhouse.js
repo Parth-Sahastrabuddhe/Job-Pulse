@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function slugifyTitle(title) {
   return title
@@ -52,7 +52,7 @@ export async function collectGreenhouseJobs(_unused, config, log, companyKey) {
   if (!companyConfig) return [];
 
   try {
-    const response = await fetch(companyConfig.apiUrl, {
+    const response = await fetchWithTimeout(companyConfig.apiUrl, {
       headers: { accept: "application/json" }
     });
 
@@ -65,6 +65,10 @@ export async function collectGreenhouseJobs(_unused, config, log, companyKey) {
     const rawJobs = data.jobs ?? [];
 
     const jobs = rawJobs.map((raw) => parseGreenhouseJob(raw, companyConfig)).filter(Boolean);
+
+    // Board API orders by relevance/department, not date. Sort by postedAt DESC so
+    // the maxJobsPerSource cap keeps the freshest postings rather than truncating them.
+    jobs.sort((a, b) => (Date.parse(b.postedAt) || 0) - (Date.parse(a.postedAt) || 0));
 
     log(`${companyConfig.sourceLabel} API returned ${rawJobs.length} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);

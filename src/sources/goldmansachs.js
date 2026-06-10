@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 const GS_GRAPHQL_URL = "https://api-higher.gs.com/gateway/api/v1/graphql";
 
@@ -67,7 +67,7 @@ function parseGSJob(raw) {
 
 export async function collectGoldmanSachsJobs(_unused, config, log) {
   try {
-    const response = await fetch(GS_GRAPHQL_URL, {
+    const response = await fetchWithTimeout(GS_GRAPHQL_URL, {
       method: "POST",
       headers: {
         "content-type": "application/json",

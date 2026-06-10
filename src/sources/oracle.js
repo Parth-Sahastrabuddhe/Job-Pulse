@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseOracleJob(raw) {
   const title = raw.Title?.trim();
@@ -45,7 +45,7 @@ export async function collectOracleJobs(_unused, config, log) {
       ",selectedLocationsFacet=300000000149325" +
       ",sortBy=POSTING_DATES_DESC";
 
-    const response = await fetch(apiUrl, {
+    const response = await fetchWithTimeout(apiUrl, {
       headers: {
         "accept": "application/json",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"

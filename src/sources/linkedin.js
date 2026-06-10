@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseLinkedInCards(html) {
   const jobs = [];
@@ -23,7 +23,10 @@ function parseLinkedInCards(html) {
     let postedPrecision = "";
     if (postedDate) {
       postedAt = new Date(postedDate).toISOString();
-      postedPrecision = "exact";
+      // Guest cards expose a date-only datetime (e.g. "2026-06-03"), which parses to
+      // UTC midnight. Marking it "exact" makes the 180-min freshness gate treat the
+      // job as stale for ~21h/day, so treat date-only values as "date" precision.
+      postedPrecision = /^\d{4}-\d{2}-\d{2}$/.test(postedDate) ? "date" : "exact";
     }
 
     const url = `https://www.linkedin.com/jobs/view/${id}`;
@@ -51,7 +54,7 @@ export async function collectLinkedInJobs(_unused, config, log) {
     "?keywords=software+engineer&location=United+States&f_C=1337&sortBy=DD&start=0";
 
   try {
-    const response = await fetch(apiUrl, {
+    const response = await fetchWithTimeout(apiUrl, {
       headers: {
         "accept": "text/html",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"

@@ -151,6 +151,9 @@ export function createOtp(email, code) {
   const d = getDb();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 5 * 60 * 1000).toISOString();
+  // Invalidate any prior unused codes for this email so a resend doesn't leave
+  // extra guessable codes live in the 5-minute window.
+  d.prepare("UPDATE otp_codes SET used = 1 WHERE email = ? AND used = 0").run(email);
   d.prepare("INSERT INTO otp_codes (email, code, expires_at, created_at) VALUES (?, ?, ?, ?)").run(email, code, expiresAt, now.toISOString());
 }
 

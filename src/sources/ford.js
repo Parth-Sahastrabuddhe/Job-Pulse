@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseFordJob(raw) {
   const title = raw.Title?.trim();
@@ -44,7 +44,7 @@ export async function collectFordJobs(_unused, config, log) {
       ",keyword=software+engineer" +
       ",sortBy=POSTING_DATES_DESC";
 
-    const response = await fetch(apiUrl, {
+    const response = await fetchWithTimeout(apiUrl, {
       headers: {
         "accept": "application/json",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"

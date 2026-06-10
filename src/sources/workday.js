@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function isSalesforceSwe(title) {
   const t = title.trim();
@@ -46,14 +46,19 @@ function parseRelativeDate(postedOn) {
   return { postedText: text, postedAt: "", postedPrecision: "" };
 }
 
-function parseWorkdayJob(raw, companyConfig) {
+function parseWorkdayJob(raw, companyConfig, usFacetApplied) {
   const title = raw.title?.trim();
   const titleFilter = TITLE_FILTERS[companyConfig.sourceKey] || isTargetRole;
   if (!title || !titleFilter(title)) return null;
 
   const id = raw.bulletFields?.[0] || "";
   const location = raw.locationsText || raw.bulletFields?.[1] || "";
-  const countryCode = "";
+  // When the US facet was applied, Workday has already server-side-restricted the
+  // corpus to the US, so multi-location postings ("4 Locations") whose country can't
+  // be inferred from the text are still US. Without this they're dropped by the
+  // central country filter. If facet discovery failed, leave it empty so the filter
+  // falls back to inferring the country from the location string.
+  const countryCode = usFacetApplied ? "US" : "";
   const posted = parseRelativeDate(raw.postedOn);
   const url = `${companyConfig.baseUrl}${raw.externalPath}`;
 
@@ -83,7 +88,7 @@ const WORKDAY_MAX_RESULTS = 1500;
 const usFacetCache = new Map();
 
 async function fetchWorkdayPage(apiUrl, body) {
-  const response = await fetch(apiUrl, {
+  const response = await fetchWithTimeout(apiUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
@@ -188,7 +193,7 @@ export async function collectWorkdayJobs(_unused, config, log, companyKey) {
       }
     }
 
-    const jobs = rawJobs.map((raw) => parseWorkdayJob(raw, companyConfig)).filter(Boolean);
+    const jobs = rawJobs.map((raw) => parseWorkdayJob(raw, companyConfig, !!facet)).filter(Boolean);
 
     // Server-side ordering is relevance, not date. Sort by postedAt DESC so the
     // maxJobsPerSource cap preserves the freshest postings.

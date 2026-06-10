@@ -15,7 +15,10 @@ npm install --production
 # Install web dependencies and build
 echo "Installing web dependencies..."
 cd web
-npm install --production
+# Full install (including devDependencies): the Tailwind v4 PostCSS plugin that
+# `next build` loads via postcss.config.mjs lives in devDependencies, so
+# --production would omit it and break the build on a clean machine.
+npm ci
 echo "Building Next.js..."
 npm run build
 cd ..

@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseMercedesBenzJob(raw) {
   const desc = raw.MatchedObjectDescriptor;
@@ -41,7 +41,7 @@ function parseMercedesBenzJob(raw) {
 }
 
 async function fetchPage(apiUrl, offset) {
-  const response = await fetch(apiUrl, {
+  const response = await fetchWithTimeout(apiUrl, {
     method: "POST",
     headers: {
       "content-type": "application/json",

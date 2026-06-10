@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseDynatraceJob(result) {
   const raw = result.raw || {};
@@ -31,7 +31,7 @@ export async function collectDynatraceJobs(_unused, config, log) {
   try {
     const apiUrl = "https://www.dynatrace.com/api/coveo/search/";
 
-    const response = await fetch(apiUrl, {
+    const response = await fetchWithTimeout(apiUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json",

@@ -877,3 +877,10 @@ export function stopDiscordBot() {
     client = null;
   }
 }
+
+// Reflects live gateway connection state, not merely "was started once". Used by
+// the notifier to decide whether the bot path is usable or it should fall back to
+// the webhook (covers both a failed startup and a later disconnect).
+export function isDiscordBotConnected() {
+  return Boolean(client && client.isReady());
+}

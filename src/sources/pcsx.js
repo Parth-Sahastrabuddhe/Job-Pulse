@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parsePcsxJob(raw, companyConfig) {
   const title = raw.name?.trim();
@@ -58,7 +58,7 @@ function setStartParam(apiUrl, start) {
 }
 
 async function fetchPcsxPage(apiUrl, start) {
-  const response = await fetch(setStartParam(apiUrl, start), {
+  const response = await fetchWithTimeout(setStartParam(apiUrl, start), {
     headers: { accept: "application/json", "user-agent": "Mozilla/5.0" }
   });
   if (!response.ok) {

@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseHexawareJob(raw) {
   const title = raw.Title?.trim();
@@ -42,7 +42,7 @@ export async function collectHexawareJobs(_unused, config, log) {
       ",limit=25" +
       ",sortBy=POSTING_DATES_DESC";
 
-    const response = await fetch(apiUrl, {
+    const response = await fetchWithTimeout(apiUrl, {
       headers: {
         "accept": "application/json",
         "accept-encoding": "identity",

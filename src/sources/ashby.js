@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseAshbyJob(raw, companyConfig) {
   const title = raw.title?.trim();
@@ -35,14 +35,26 @@ function parseAshbyJob(raw, companyConfig) {
   });
 }
 
+// Cache the parsed result per board. Ashby boards honor Last-Modified, so a
+// conditional GET returns 304 when nothing changed and we skip re-downloading
+// and re-parsing the multi-MB payload (OpenAI's board is ~11 MB). Bounded by the
+// fixed number of Ashby companies.
+const ashbyBoardCache = new Map(); // companyKey -> { lastModified, jobs }
+
 export async function collectAshbyJobs(_unused, config, log, companyKey) {
   const companyConfig = config[companyKey];
   if (!companyConfig) return [];
 
+  const cached = ashbyBoardCache.get(companyKey);
   try {
-    const response = await fetch(companyConfig.apiUrl, {
-      headers: { accept: "application/json" }
-    });
+    const headers = { accept: "application/json" };
+    if (cached?.lastModified) headers["if-modified-since"] = cached.lastModified;
+
+    const response = await fetchWithTimeout(companyConfig.apiUrl, { headers });
+
+    if (response.status === 304 && cached) {
+      return [...cached.jobs];
+    }
 
     if (!response.ok) {
       log(`${companyConfig.sourceLabel} API returned status ${response.status}`);
@@ -54,8 +66,15 @@ export async function collectAshbyJobs(_unused, config, log, companyKey) {
 
     const jobs = rawJobs.map((raw) => parseAshbyJob(raw, companyConfig)).filter(Boolean);
 
+    // Board API orders by relevance, not date. Sort by postedAt DESC so the
+    // maxJobsPerSource cap keeps the freshest postings rather than truncating them.
+    jobs.sort((a, b) => (Date.parse(b.postedAt) || 0) - (Date.parse(a.postedAt) || 0));
+
+    const result = dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
+    ashbyBoardCache.set(companyKey, { lastModified: response.headers.get("last-modified"), jobs: result });
+
     log(`${companyConfig.sourceLabel} API returned ${rawJobs.length} results, ${jobs.length} matched filters.`);
-    return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
+    return result;
   } catch (error) {
     log(`${companyConfig.sourceLabel} API error: ${error.message}`);
     return [];

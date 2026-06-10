@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
-import { initDb, getDb, closeDb, cleanupExpiredOtps } from "./state.js";
+import { initDb, getDb, closeDb, cleanupExpiredOtps, withBusyRetry } from "./state.js";
 import {
   getActiveUsers,
   getUserSeenJobKeys,
@@ -151,36 +151,44 @@ const DEAD_LINK_ABANDON_AFTER = 3;
  * @param {number} userId
  * @returns {string|null}
  */
+// Cache hash -> job_key so repeated button clicks don't re-scan and re-hash the
+// tables on every click. The hash is a deterministic SHA1 prefix of the key, so
+// entries never go stale; the cache only grows to the number of distinct jobs
+// scanned (bounded by seen_jobs, which is pruned to the retention window).
+const _hashToKeyCache = new Map();
+
 function findJobKeyByHash(hash, userId) {
+  const cached = _hashToKeyCache.get(hash);
+  if (cached) return cached;
+
   const db = getDb();
+
+  // Common path: the job is in the user's delivered set (bounded per user).
   const rows = db
     .prepare("SELECT job_key FROM user_seen_jobs WHERE user_id = ?")
     .all(userId);
-
-  console.log(`[btn-debug] findJobKeyByHash: hash=${hash} userId=${userId} user_seen_jobs_count=${rows.length}`);
-
   for (const row of rows) {
-    if (jobButtonHash(row.job_key) === hash) {
-      return row.job_key;
-    }
+    const h = jobButtonHash(row.job_key);
+    _hashToKeyCache.set(h, row.job_key);
+    if (h === hash) return row.job_key;
   }
 
-  // Fallback: scan seen_jobs for a matching hash and auto-heal user_seen_jobs
+  // Fallback: scan seen_jobs once, populate the cache for every key (so future
+  // clicks are O(1)), and auto-heal user_seen_jobs for the matched job.
   const allKeys = db.prepare("SELECT key FROM seen_jobs").all();
-  console.log(`[btn-debug] Fallback: scanning ${allKeys.length} seen_jobs keys`);
   for (const row of allKeys) {
-    if (jobButtonHash(row.key) === hash) {
-      console.log(`[btn-debug] Auto-healing: user=${userId} key=${row.key}`);
+    const h = jobButtonHash(row.key);
+    _hashToKeyCache.set(h, row.key);
+    if (h === hash) {
       try {
         markJobNotified(userId, row.key);
       } catch (err) {
-        console.error(`[btn-debug] markJobNotified failed: ${err.message}`);
+        console.error(`[multi-user] markJobNotified failed: ${err.message}`);
       }
       return row.key;
     }
   }
 
-  console.log(`[btn-debug] No match found in seen_jobs either`);
   return null;
 }
 
@@ -819,14 +827,27 @@ async function checkSavedJobExpiry() {
  * Fetch live JD text through lightweight HTTP/API paths only, then derive
  * warnings. MU never reads cached descriptions and never launches Chrome.
  */
-async function computeJobEnrichment(job, user) {
-  let experienceYears = null;
-  let warnings = [];
+// Fetch the JD text used for enrichment. MU does live HTTP/API only (no cached
+// descriptions, no Playwright). Returns null on failure or when there's no JD.
+async function fetchJdForEnrichment(job) {
+  try {
+    return await fetchJobDescription(job, undefined, { allowPlaywright: false });
+  } catch (err) {
+    console.error(`[multi-user] Live JD warning fetch failed for ${job.key}: ${err.message}`);
+    return null;
+  }
+}
+
+// Derive per-user warnings/experience from an already-fetched JD. Cheap (no
+// network), so it runs per user even when the JD itself is shared across users.
+// Never throws: a parse error yields empty warnings (job still delivered).
+function enrichFromDescription(description, user) {
+  const empty = { warnings: [], experienceYears: null };
+  if (!description) return empty;
 
   try {
-    // Live fetch only: no cached descriptions and no Playwright from MU.
-    const description = await fetchJobDescription(job, undefined, { allowPlaywright: false });
-    if (!description) return { warnings, experienceYears };
+    let experienceYears = null;
+    let warnings = [];
 
     const rawWarnings = checkJobDescription(description);
     warnings = rawWarnings.filter((w) => {
@@ -849,11 +870,19 @@ async function computeJobEnrichment(job, user) {
       experienceYears = yearsForUser;
       warnings.push({ text: `${yearsForUser}+ years required`, severity: "soft" });
     }
-  } catch (err) {
-    console.error(`[multi-user] Live JD warning fetch failed for ${job.key}: ${err.message}`);
-  }
 
-  return { warnings, experienceYears };
+    return { warnings, experienceYears };
+  } catch (err) {
+    console.error(`[multi-user] JD enrichment failed for user ${user.id}: ${err.message}`);
+    return empty;
+  }
+}
+
+// Convenience wrapper for the digest / quiet-hours flush paths, which fetch one
+// JD per (job, user) and don't share the poll loop's per-cycle cache.
+async function computeJobEnrichment(job, user) {
+  const description = await fetchJdForEnrichment(job);
+  return enrichFromDescription(description, user);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -904,10 +933,20 @@ async function pollLoop() {
 // Advance the poll cursor (in-memory + persisted). The persist is wrapped
 // because SQLITE_BUSY here used to throw out of the cycle and leave the
 // cursor frozen, so every subsequent cycle re-scanned the same window.
+// Trail the cursor behind cycle-start time. The collector stamps first_seen_at
+// before its chunked upsert, but the commits land seconds later (inter-chunk
+// delays + busy-retry backoff), so a row stamped before our SELECT can be
+// committed after it. Without a trailing margin the cursor advances past such
+// rows and they are never delivered. Re-scanning the overlap is harmless;
+// getMuDeliveredJobKeys dedups already-delivered jobs (and a failed send gets a
+// free retry while it is still inside the window).
+const MU_CURSOR_SAFETY_MARGIN_MS = Number(process.env.MU_CURSOR_SAFETY_MARGIN_MS) || 60_000;
+
 function advanceMuCursor(db, nowIso) {
-  lastPollAt = nowIso;
+  const trailed = new Date(Date.parse(nowIso) - MU_CURSOR_SAFETY_MARGIN_MS).toISOString();
+  lastPollAt = trailed;
   try {
-    db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(nowIso);
+    db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(trailed);
   } catch (err) {
     console.error(`[multi-user] Cursor persist failed: ${err.message}`);
   }
@@ -997,6 +1036,13 @@ async function runPollCycle() {
 
   const users = getActiveUsers();
 
+  // Per-cycle memoization: a job matching N users would otherwise be liveness-
+  // checked and JD-fetched N times. Liveness is keyed by URL and the JD by
+  // job.key; the per-user enrichment (sponsorship/education filters) stays per
+  // user. Both caches are cycle-scoped, so they never go stale or grow unbounded.
+  const livenessCache = new Map(); // url -> boolean
+  const jdCache = new Map();       // job.key -> description|null
+
   for (const user of users) {
     // ── Setup phase (per-user) ──────────────────────────────────────────────
     let seenKeys, profileInvalid, matchedJobs, userTz;
@@ -1031,8 +1077,15 @@ async function runPollCycle() {
       try {
         const liveKey = `${user.id}:${job.key}`;
 
-        // Check if job URL is still live — skip ghost listings.
-        const live = await isJobUrlLive(job.url);
+        // Check if job URL is still live, skip ghost listings. Memoized per URL
+        // for this cycle so a job matching many users is checked only once.
+        let live;
+        if (livenessCache.has(job.url)) {
+          live = livenessCache.get(job.url);
+        } else {
+          live = await isJobUrlLive(job.url);
+          livenessCache.set(job.url, live);
+        }
         if (!live) {
           const fails = (deadLinkFailures.get(liveKey) ?? 0) + 1;
           deadLinkFailures.set(liveKey, fails);
@@ -1049,7 +1102,16 @@ async function runPollCycle() {
         deadLinkFailures.delete(liveKey); // reset on success
 
         // Live JD warning fetch uses HTTP/API only; Chrome is blocked in MU.
-        const { warnings, experienceYears } = await computeJobEnrichment(job, user);
+        // Fetch the JD once per job per cycle; the per-user warning/experience
+        // filtering below is cheap and reuses the shared description.
+        let description;
+        if (jdCache.has(job.key)) {
+          description = jdCache.get(job.key);
+        } else {
+          description = await fetchJdForEnrichment(job);
+          jdCache.set(job.key, description);
+        }
+        const { warnings, experienceYears } = enrichFromDescription(description, user);
 
         const action = getDeliveryAction(user, new Date());
         const dmOptions = { timezone: userTz, experienceYears, warnings };
@@ -1171,12 +1233,28 @@ async function runDigestCycle() {
           if (digestChannelOverride) {
             digestOpts.notificationChannelId = digestChannelOverride;
           }
-          await sendDigestDm(client, user.discord_id, enrichedJobs, user.first_name, digestOpts);
+          const digestResult = await sendDigestDm(
+            client, user.discord_id, enrichedJobs, user.first_name, digestOpts
+          );
 
-          // Mark all queued DMs as sent
-          db.prepare(
-            "UPDATE dm_log SET status = 'sent' WHERE user_id = ? AND status = 'queued'"
-          ).run(user.id);
+          // Only mark the jobs we actually delivered, and only if the digest was
+          // sent. Scoping to deliveredKeys (not a blanket status sweep) avoids
+          // marking jobs the poll loop queued *during* this digest, and leaves any
+          // overflow (>20) queued for the next digest. Refresh sent_at so the
+          // daily/weekly cadence check reads the real delivery time, not the
+          // original enqueue time (which would let the digest fire twice a day).
+          if (digestResult.ok && digestResult.deliveredKeys.length > 0) {
+            const sentAt = new Date().toISOString();
+            const ph = digestResult.deliveredKeys.map(() => "?").join(",");
+            withBusyRetry(() =>
+              db
+                .prepare(
+                  `UPDATE dm_log SET status = 'sent', sent_at = ?
+                   WHERE user_id = ? AND status = 'queued' AND job_key IN (${ph})`
+                )
+                .run(sentAt, user.id, ...digestResult.deliveredKeys)
+            );
+          }
         }
         continue;
       }
@@ -1220,9 +1298,16 @@ async function runDigestCycle() {
             }
             const result = await sendJobDm(client, user.discord_id, job, user.first_name, flushOpts);
             if (result) {
-              db.prepare(
-                "UPDATE dm_log SET status = 'sent' WHERE user_id = ? AND job_key = ? AND status = 'queued'"
-              ).run(user.id, row.job_key);
+              // Busy-retry the post-send write: a SQLITE_BUSY here after a
+              // successful DM would otherwise leave the row 'queued' and re-deliver
+              // it next cycle.
+              withBusyRetry(() =>
+                db
+                  .prepare(
+                    "UPDATE dm_log SET status = 'sent', sent_at = ? WHERE user_id = ? AND job_key = ? AND status = 'queued'"
+                  )
+                  .run(new Date().toISOString(), user.id, row.job_key)
+              );
             }
 
             await new Promise((resolve) => setTimeout(resolve, 300));
@@ -1285,12 +1370,27 @@ client.on("error", (err) => {
 const muHeartbeatUrl = () => {
   try { return getConfig().heartbeat.mu; } catch { return ""; }
 };
+// Flush the write-behind dm_log buffer before a crash exit. Without this, the
+// in-memory 'sent' records (up to DM_LOG_FLUSH_MAX_SIZE) are lost and the
+// restarted process re-sends DMs the user already received. flushDmLogSync is
+// bounded and swallows its own errors, but wrap defensively since we're already
+// on the way down.
+function flushBufferOnCrash() {
+  try {
+    const flushed = flushDmLogSync();
+    if (flushed > 0) console.log(`[multi-user] Flushed ${flushed} buffered dm_log entries before crash exit.`);
+  } catch (flushErr) {
+    console.error(`[multi-user] dm_log flush on crash failed: ${flushErr?.message ?? flushErr}`);
+  }
+}
 process.on("uncaughtException", (err) => {
   console.error(`[multi-user] uncaughtException: ${err?.message}`);
+  flushBufferOnCrash();
   pingFail(muHeartbeatUrl(), `uncaughtException: ${err?.message}`).finally(() => process.exit(1));
 });
 process.on("unhandledRejection", (reason) => {
   console.error(`[multi-user] unhandledRejection: ${reason?.message ?? reason}`);
+  flushBufferOnCrash();
   pingFail(muHeartbeatUrl(), `unhandledRejection: ${reason?.message ?? reason}`).finally(() => process.exit(1));
 });
 

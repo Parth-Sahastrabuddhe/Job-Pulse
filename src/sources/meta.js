@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 const META_CAREERS_URL = "https://www.metacareers.com";
 const META_GRAPHQL_URL = "https://www.metacareers.com/graphql";
@@ -14,7 +14,7 @@ async function getLsdToken() {
     return cachedLsdToken;
   }
 
-  const response = await fetch(META_CAREERS_URL, {
+  const response = await fetchWithTimeout(META_CAREERS_URL, {
     headers: { "user-agent": "Mozilla/5.0" }
   });
   const html = await response.text();
@@ -99,7 +99,7 @@ export async function collectMetaJobs(_unused, config, log) {
       variables
     });
 
-    const response = await fetch(META_GRAPHQL_URL, {
+    const response = await fetchWithTimeout(META_GRAPHQL_URL, {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded",

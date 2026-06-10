@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function inferCountry(locations) {
   if (!Array.isArray(locations)) return "";
@@ -57,7 +57,7 @@ const APPLE_SEARCH_TERMS = [
 async function fetchAppleSearchResults(term, log) {
   const searchUrl = `https://jobs.apple.com/en-us/search?search=${term}&sort=newest&location=united-states-USA`;
   try {
-    const response = await fetch(searchUrl, {
+    const response = await fetchWithTimeout(searchUrl, {
       headers: {
         "accept": "text/html",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -118,6 +118,11 @@ export async function collectAppleJobs(_unused, config, log) {
     const jobs = allRaw
       .map((raw) => parseAppleJob(raw))
       .filter(Boolean);
+
+    // Apple concatenates several relevance-ordered term searches; sort by postedAt
+    // DESC so the maxJobsPerSource cap keeps the freshest across all terms instead
+    // of truncating the later search terms entirely.
+    jobs.sort((a, b) => (Date.parse(b.postedAt) || 0) - (Date.parse(a.postedAt) || 0));
 
     const deduped = dedupeJobs(jobs);
     log(`Apple returned ${allRaw.length} raw results across ${APPLE_SEARCH_TERMS.length} queries, ${deduped.length} unique matched.`);

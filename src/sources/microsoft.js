@@ -1,7 +1,8 @@
 import {
   dedupeJobs,
   finalizeJob,
-  isTargetRole
+  isTargetRole,
+  fetchWithTimeout
 } from "./shared.js";
 
 const MICROSOFT_BASE_URL = "https://apply.careers.microsoft.com";
@@ -61,7 +62,7 @@ export async function collectMicrosoftJobs(_browserUnused, config, log) {
   const apiUrl = config.microsoft.apiUrl || MICROSOFT_API_URL;
 
   try {
-    const response = await fetch(apiUrl, {
+    const response = await fetchWithTimeout(apiUrl, {
       headers: { accept: "application/json", "user-agent": "Mozilla/5.0" }
     });
 

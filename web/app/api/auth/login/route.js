@@ -1,15 +1,8 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { SignJWT } from "jose";
 import { getUserProfileByEmail } from "@/lib/db";
 import { requireSameOrigin } from "@/lib/security";
-
-const SECRET = new TextEncoder().encode(process.env.SESSION_SECRET || "dev-secret-change-in-production-32ch");
-const COOKIE_NAME = "jobpulse_session";
-
-if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
-  throw new Error("SESSION_SECRET must be set in production");
-}
+import { signSession, sessionCookieOptions, COOKIE_NAME } from "@/lib/session";
 
 export async function POST(request) {
   const originError = requireSameOrigin(request);
@@ -44,28 +37,19 @@ export async function POST(request) {
 
   // Create JWT session
   const isAdmin = user.discord_id === process.env.ADMIN_DISCORD_ID;
-  const token = await new SignJWT({
+  const token = await signSession({
     discordId: user.discord_id,
     username: user.discord_username,
     avatar: null,
     role: isAdmin ? "admin" : (user.role || "user"),
     profileComplete: true,
-  })
-    .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("30d")
-    .sign(SECRET);
+  });
 
   const proto = request.headers.get("x-forwarded-proto") || "http";
   const isHttps = proto === "https";
 
   const response = NextResponse.json({ success: true });
-  response.cookies.set(COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: isHttps,
-    sameSite: "lax",
-    maxAge: 30 * 24 * 60 * 60,
-    path: "/",
-  });
+  response.cookies.set(COOKIE_NAME, token, sessionCookieOptions(isHttps));
 
   return response;
 }

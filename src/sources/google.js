@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 const GOOGLE_RPC_URL =
   "https://www.google.com/about/careers/applications/_/HiringCportalFrontendUi/data/batchexecute";
@@ -94,7 +94,7 @@ export async function collectGoogleJobs(_unused, config, log) {
       0     // first page
     );
 
-    const response = await fetch(GOOGLE_RPC_URL + "?rpcids=r06xKb&source-path=/about/careers/applications/jobs/results&hl=en-US&soc-app=1&soc-platform=1&soc-device=1&_reqid=1000&rt=c", {
+    const response = await fetchWithTimeout(GOOGLE_RPC_URL + "?rpcids=r06xKb&source-path=/about/careers/applications/jobs/results&hl=en-US&soc-app=1&soc-platform=1&soc-device=1&_reqid=1000&rt=c", {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",

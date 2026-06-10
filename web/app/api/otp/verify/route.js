@@ -4,6 +4,13 @@ import { verifyOtp, createUserProfile, getUserProfile, getUserProfileByEmail, se
 import { addUserToGuildWithRole, createUserChannel } from "@/lib/discord-admin";
 import { requireSameOrigin } from "@/lib/security";
 
+// Brute-force guard for OTP verification: a 6-digit code is only ~1e6 wide, so
+// cap failed attempts per session and lock out for a window. In-memory (per
+// process), matching the single pm2 web fork; revisit if the web scales out.
+const verifyAttempts = new Map();
+const VERIFY_MAX_ATTEMPTS = 5;
+const VERIFY_WINDOW_MS = 15 * 60 * 1000;
+
 export async function POST(request) {
   const originError = requireSameOrigin(request);
   if (originError) return originError;
@@ -34,6 +41,17 @@ export async function POST(request) {
 
   const normalizedEmail = email.toLowerCase().trim();
 
+  // Enforce the brute-force lockout before checking the code.
+  const attemptKey = session.discordId;
+  const nowMs = Date.now();
+  const priorAttempts = verifyAttempts.get(attemptKey);
+  if (priorAttempts && priorAttempts.resetAt > nowMs && priorAttempts.count >= VERIFY_MAX_ATTEMPTS) {
+    return Response.json(
+      { error: "Too many attempts. Please request a new code and try again later." },
+      { status: 429 }
+    );
+  }
+
   let valid = false;
   try {
     valid = verifyOtp(normalizedEmail, String(code));
@@ -43,8 +61,17 @@ export async function POST(request) {
   }
 
   if (!valid) {
+    // Count the failed attempt toward the lockout.
+    if (!priorAttempts || priorAttempts.resetAt <= nowMs) {
+      verifyAttempts.set(attemptKey, { count: 1, resetAt: nowMs + VERIFY_WINDOW_MS });
+    } else {
+      priorAttempts.count++;
+    }
     return Response.json({ error: "Invalid or expired code" }, { status: 400 });
   }
+
+  // Verified. Clear the attempt counter for this session.
+  verifyAttempts.delete(attemptKey);
 
   // Check if this Discord account is already registered
   const existingByDiscord = getUserProfile(session.discordId);

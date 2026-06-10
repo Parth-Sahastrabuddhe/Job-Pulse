@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseBloombergJobs(html) {
   const jobs = [];
@@ -51,7 +51,7 @@ export async function collectBloombergJobs(_unused, config, log) {
   const searchUrl = "https://bloomberg.avature.net/careers/SearchJobs?search=software+engineer";
 
   try {
-    const response = await fetch(searchUrl, {
+    const response = await fetchWithTimeout(searchUrl, {
       headers: {
         "accept": "text/html",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"

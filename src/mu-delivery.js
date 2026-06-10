@@ -8,7 +8,7 @@
  *   buildDmButtons(hash, jobUrl, status)                         → ActionRow[]
  *   buildJobEmbed(job, { timezone?, experienceYears? })           → EmbedBuilder
  *   sendJobDm(client, discordId, job, firstName, { timezone?, experienceYears? })  → { messageId } | null
- *   sendDigestDm(client, discordId, jobs, firstName, { timezone? })               → void
+ *   sendDigestDm(client, discordId, jobs, firstName, { timezone? })  → { ok, deliveredKeys }
  */
 
 import crypto from "node:crypto";
@@ -204,38 +204,60 @@ export async function sendJobDm(client, discordId, job, firstName, options = {})
  * @param {string}   firstName
  * @param {object}   [options]
  * @param {string}   [options.timezone]  IANA timezone for date formatting
- * @returns {Promise<void>}
+ * @returns {Promise<{ ok: boolean, deliveredKeys: string[] }>}
+ *          ok=false if the digest could not be sent (target unresolved or the
+ *          summary embed failed); deliveredKeys lists the job keys included in the
+ *          summary, so the caller marks only those sent and rolls the rest over.
  */
 export async function sendDigestDm(client, discordId, jobs, firstName, options = {}) {
+  let target;
   try {
-    let target;
     if (options.notificationChannelId) {
       target = await client.channels.fetch(options.notificationChannelId);
     } else {
       target = await client.users.fetch(discordId);
     }
+  } catch (err) {
+    console.error(`[mu-delivery] Failed to resolve digest target for ${discordId}: ${err.message}`);
+    return { ok: false, deliveredKeys: [] };
+  }
 
-    // Build the summary embed
-    const displayJobs  = jobs.slice(0, 20);
-    const individualJobs = jobs.slice(0, 10);
+  // The summary lists up to 20 jobs (with links); the first 10 also get their own
+  // embed with action buttons. Only these are communicated to the user, so only
+  // these count as delivered; any overflow stays queued for the next digest.
+  const displayJobs    = jobs.slice(0, 20);
+  const individualJobs = jobs.slice(0, 10);
+  const deliveredKeys  = displayJobs.map((j) => j.key ?? j.jobKey ?? "").filter(Boolean);
 
-    const summaryLines = displayJobs.map((job, i) => {
-      const company = job.source_label ?? job.sourceLabel ?? "Unknown";
-      const title   = job.title        ?? "Untitled";
-      const url     = job.url          ?? "";
-      const line    = isValidJobUrl(url) ? `${i + 1}. [${title}](${url}) — ${company}` : `${i + 1}. **${title}** — ${company}`;
-      return line;
-    });
+  const summaryLines = displayJobs.map((job, i) => {
+    const company = job.source_label ?? job.sourceLabel ?? "Unknown";
+    const title   = job.title        ?? "Untitled";
+    const url     = job.url          ?? "";
+    return isValidJobUrl(url) ? `${i + 1}. [${title}](${url}) — ${company}` : `${i + 1}. **${title}** — ${company}`;
+  });
 
-    const summaryEmbed = new EmbedBuilder()
-      .setTitle(`Hey ${firstName}, here are your job matches (${jobs.length} new)`)
-      .setDescription(summaryLines.join("\n") || "No jobs to show.")
-      .setColor(0x5865F2);
+  const overflow = jobs.length - displayJobs.length;
+  const summaryEmbed = new EmbedBuilder()
+    .setTitle(`Hey ${firstName}, here are your job matches (${jobs.length} new)`)
+    .setDescription(
+      (summaryLines.join("\n") || "No jobs to show.") +
+      (overflow > 0 ? `\n\n…and ${overflow} more in your next digest.` : "")
+    )
+    .setColor(0x5865F2);
 
+  try {
     await target.send({ embeds: [summaryEmbed] });
+  } catch (err) {
+    // The summary is what notifies the user of these jobs; if it fails, nothing
+    // was delivered, so report failure and the caller leaves them queued for retry.
+    console.error(`[mu-delivery] Failed digest summary send to ${discordId}: ${err.message}`);
+    return { ok: false, deliveredKeys: [] };
+  }
 
-    // Send individual embeds with action buttons
-    for (const job of individualJobs) {
+  // Individual embeds are best-effort enhancements (action buttons); the jobs are
+  // already listed in the summary, so a failure here does not un-deliver them.
+  for (const job of individualJobs) {
+    try {
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       const jobKey = job.key ?? job.jobKey ?? "";
@@ -250,8 +272,10 @@ export async function sendDigestDm(client, discordId, jobs, firstName, options =
       const buttons = buildDmButtons(hash, jobUrl, "pending");
 
       await target.send({ embeds: [embed], components: buttons });
+    } catch (err) {
+      console.error(`[mu-delivery] Failed digest item send to ${discordId}: ${err.message}`);
     }
-  } catch (err) {
-    console.error(`[mu-delivery] Failed digest send to ${discordId}: ${err.message}`);
   }
+
+  return { ok: true, deliveredKeys };
 }

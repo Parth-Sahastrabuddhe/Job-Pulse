@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseCitiJobs(html) {
   const jobs = [];
@@ -43,7 +43,7 @@ export async function collectCitiJobs(_unused, config, log) {
   const searchUrl = "https://jobs.citi.com/search-jobs/software%20engineer/287/1?fl=6252001";
 
   try {
-    const response = await fetch(searchUrl, {
+    const response = await fetchWithTimeout(searchUrl, {
       headers: {
         "accept": "text/html",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"

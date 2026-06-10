@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseSmartRecruitersJob(raw, companyConfig) {
   const title = raw.name?.trim();
@@ -42,7 +42,7 @@ export async function collectSmartRecruitersJobs(_unused, config, log, companyKe
   try {
     const apiUrl = `https://api.smartrecruiters.com/v1/companies/${companyConfig.companySlug}/postings?q=software+engineer&limit=100`;
 
-    const response = await fetch(apiUrl, {
+    const response = await fetchWithTimeout(apiUrl, {
       headers: {
         "accept": "application/json",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"

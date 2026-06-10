@@ -2,7 +2,8 @@ import {
   dedupeJobs,
   finalizeJob,
   isTargetRole,
-  normalizeUrl
+  normalizeUrl,
+  fetchWithTimeout
 } from "./shared.js";
 
 const AMAZON_BASE_URL = "https://www.amazon.jobs";
@@ -74,7 +75,7 @@ export async function collectAmazonJobs(_browserUnused, config, log) {
   const apiUrl = config.amazon.apiUrl || AMAZON_API_URL;
 
   try {
-    const response = await fetch(apiUrl, {
+    const response = await fetchWithTimeout(apiUrl, {
       headers: { accept: "application/json", "user-agent": "Mozilla/5.0" }
     });
 

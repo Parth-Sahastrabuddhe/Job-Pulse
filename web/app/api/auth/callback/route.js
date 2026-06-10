@@ -1,15 +1,8 @@
 import { NextResponse } from "next/server";
-import { SignJWT } from "jose";
 import { cookies } from "next/headers";
 import { publicBaseUrl } from "@/lib/security";
 import { getUserProfile } from "@/lib/db";
-
-const SECRET = new TextEncoder().encode(process.env.SESSION_SECRET || "dev-secret-change-in-production-32ch");
-const COOKIE_NAME = "jobpulse_session";
-
-if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
-  throw new Error("SESSION_SECRET must be set in production");
-}
+import { signSession, sessionCookieOptions, COOKIE_NAME } from "@/lib/session";
 
 export async function GET(request) {
   const { searchParams } = request.nextUrl;
@@ -84,30 +77,21 @@ export async function GET(request) {
 
   // Create JWT token. discordAccessToken is carried through to /api/otp/verify
   // so it can add the user to the Discord guild after OTP verification completes.
-  const token = await new SignJWT({
+  const token = await signSession({
     discordId: discordUser.id,
     username: discordUser.username,
     avatar: discordUser.avatar,
     role,
     profileComplete,
     discordAccessToken: profileComplete ? undefined : tokenData.access_token,
-  })
-    .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("30d")
-    .sign(SECRET);
+  });
 
   // Redirect with session cookie set on the response.
   const baseUrl = publicBaseUrl(request);
   const destination = profileComplete ? "/profile" : "/verify";
   const response = NextResponse.redirect(new URL(destination, baseUrl));
   const isHttps = baseUrl.startsWith("https://");
-  response.cookies.set(COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: isHttps,
-    sameSite: "lax",
-    maxAge: 30 * 24 * 60 * 60,
-    path: "/",
-  });
+  response.cookies.set(COOKIE_NAME, token, sessionCookieOptions(isHttps));
   response.cookies.delete("jobpulse_oauth_state");
 
   return response;
