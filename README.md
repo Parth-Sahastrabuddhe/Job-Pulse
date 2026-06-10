@@ -88,16 +88,16 @@ Email      AWS SES (OTP verification)
 
 | Integration | Companies | Method |
 |---|---|---|
-| Greenhouse | 36 &mdash; Stripe, Databricks, Figma, Airbnb, DoorDash, Reddit, and more | REST API |
-| Workday | 25 &mdash; Nvidia, Adobe, Intel, PayPal, Samsung, Broadcom, and more | REST API |
-| Ashby | 24 &mdash; OpenAI, Notion, Ramp, Snowflake, Cursor, and more | REST API |
-| Lever | 14 &mdash; Palantir, Plaid, Spotify, and more | REST API |
-| SmartRecruiters | 6 &mdash; ServiceNow, Visa, and more | REST API |
-| PCSX | 1 &mdash; Citi-hosted PCSX board | REST API |
+| Greenhouse | 86 &mdash; Stripe, Databricks, Brex, xAI, Scale AI, Affirm, GitLab, and more | REST API |
+| Workday | 27 &mdash; Nvidia, Adobe, Intel, PayPal, Applied Materials, Broadcom, and more | REST API |
+| Ashby | 33 &mdash; OpenAI, Notion, Ramp, Snowflake, Cohere, Perplexity, and more | REST API |
+| Lever | 16 &mdash; Palantir, Plaid, Spotify, Mistral AI, and more | REST API |
+| SmartRecruiters | 7 &mdash; ServiceNow, Visa, Experian, and more | REST API |
+| PCSX (Phenom) | 1 &mdash; Qualcomm | REST API |
 | Custom APIs | 12 &mdash; Microsoft, Amazon, Google, Meta, Goldman Sachs, Oracle, JPMorgan, and more | Reverse-engineered APIs |
 | Custom scrapers | 6 &mdash; Apple, Uber, LinkedIn, Bloomberg, Intuit, Confluent | HTML + Playwright |
 
-**Total: 124 companies.**
+**Total: 188 companies.**
 
 ---
 
