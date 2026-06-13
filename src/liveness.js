@@ -4,7 +4,10 @@
  */
 
 const DEAD_TEXT_PATTERNS = [
-  /this\s+(?:position|job|role)\s+(?:has been|is no longer|is not)/i,
+  // Must end with a dead-status word: JD boilerplate like Boeing's "This
+  // position is not contingent upon program award" renders into the first
+  // 10 KB on Workday and must NOT match.
+  /this\s+(?:position|job|role)\s+(?:has been|is no longer|is not(?:\s+currently)?)\s+(?:available|open|accepting|active|filled|closed|removed|posted)/i,
   /no longer (?:available|accepting|open)/i,
   /position\s+(?:has been\s+)?filled/i,
   /job\s+(?:has been\s+)?(?:closed|removed|expired)/i,
