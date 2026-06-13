@@ -10,7 +10,7 @@ const AMAZON_BASE_URL = "https://www.amazon.jobs";
 
 // Direct API endpoint — append .json to the search URL
 const AMAZON_API_URL =
-  "https://www.amazon.jobs/en/search.json?category%5B%5D=Software+Development&normalized_country_code%5B%5D=USA&sort=recent&result_limit=100&offset=0";
+  "https://www.amazon.jobs/en/search.json?category%5B%5D=Software+Development&normalized_country_code%5B%5D=USA&normalized_country_code%5B%5D=CAN&sort=recent&result_limit=100&offset=0";
 
 function normalizeAmazonUrl(rawPath, fallbackId) {
   if (rawPath) {
@@ -55,7 +55,10 @@ function parseAmazonJob(raw, config) {
   }
 
   const location = raw.normalized_location ?? raw.location ?? "";
-  const countryCode = raw.country_code?.toUpperCase() ?? "";
+  // Amazon's country_code is ISO-3 (USA/CAN); normalize to the 2-letter codes
+  // the gate and filter use. Unknown values pass through for inference downstream.
+  const rawCc = raw.country_code?.toUpperCase() ?? "";
+  const countryCode = rawCc === "USA" ? "US" : rawCc === "CAN" ? "CA" : rawCc;
 
   return finalizeJob({
     sourceKey: config.amazon.sourceKey,

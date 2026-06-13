@@ -56,9 +56,12 @@ function parseGoogleJob(raw, config) {
     : [];
   const location = locations.join(" | ");
 
-  // Country filtering — check if any location is in the US
-  const countryCode = locations.some((l) => /\bUS(A)?\b|United States/i.test(l)) ? "US" :
-    (Array.isArray(raw[9]) && raw[9].some((loc) => Array.isArray(loc) && loc[5] === "US")) ? "US" : "";
+  // Country: prefer the explicit location country code (raw[9][n][5]), then text.
+  const countryCode =
+    locations.some((l) => /\bUS(A)?\b|United States/i.test(l)) ? "US" :
+    (Array.isArray(raw[9]) && raw[9].some((loc) => Array.isArray(loc) && loc[5] === "US")) ? "US" :
+    locations.some((l) => /\bCanada\b/i.test(l)) ? "CA" :
+    (Array.isArray(raw[9]) && raw[9].some((loc) => Array.isArray(loc) && loc[5] === "CA")) ? "CA" : "";
 
   // Posted date: raw[12] is [unix_seconds, nanoseconds]
   let postedAt = "";
@@ -86,44 +89,33 @@ function parseGoogleJob(raw, config) {
 }
 
 export async function collectGoogleJobs(_unused, config, log) {
-  try {
-    const body = buildRequestBody(
-      "\"Software Engineer\"",
-      "United States",
-      true, // sort by date
-      0     // first page
-    );
+  const LOCATIONS = ["United States", "Canada"];
+  const endpoint = GOOGLE_RPC_URL + "?rpcids=r06xKb&source-path=/about/careers/applications/jobs/results&hl=en-US&soc-app=1&soc-platform=1&soc-device=1&_reqid=1000&rt=c";
 
-    const response = await fetchWithTimeout(GOOGLE_RPC_URL + "?rpcids=r06xKb&source-path=/about/careers/applications/jobs/results&hl=en-US&soc-app=1&soc-platform=1&soc-device=1&_reqid=1000&rt=c", {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "user-agent": "Mozilla/5.0"
-      },
-      body
+  try {
+    const texts = await Promise.all(LOCATIONS.map((loc) =>
+      fetchWithTimeout(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded;charset=UTF-8", "user-agent": "Mozilla/5.0" },
+        body: buildRequestBody("\"Software Engineer\"", loc, true, 0)
+      }).then((r) => (r.ok ? r.text() : "")).catch(() => "")
+    ));
+
+    const rawJobs = texts.flatMap((text) => {
+      const jobData = text ? parseResponse(text) : null;
+      return jobData && Array.isArray(jobData[0]) ? jobData[0] : [];
     });
 
-    if (!response.ok) {
-      log(`Google API returned status ${response.status}`);
-      return [];
-    }
-
-    const text = await response.text();
-    const jobData = parseResponse(text);
-
-    if (!jobData || !Array.isArray(jobData[0])) {
+    if (rawJobs.length === 0) {
       log("Google API returned no parseable job data.");
       return [];
     }
-
-    const rawJobs = jobData[0];
-    const totalResults = jobData[2] || 0;
 
     const jobs = rawJobs
       .map((raw) => parseGoogleJob(raw, config))
       .filter(Boolean);
 
-    log(`Google API returned ${rawJobs.length} results (${totalResults} total), ${jobs.length} matched filters.`);
+    log(`Google API returned ${rawJobs.length} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Google API error: ${error.message}`);

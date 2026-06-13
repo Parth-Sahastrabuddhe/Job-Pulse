@@ -48,26 +48,21 @@ function parseIntuitJobs(html) {
 }
 
 export async function collectIntuitJobs(_unused, config, log) {
-  // fl=6252001 is the GeoNames ID for United States
-  const searchUrl = "https://jobs.intuit.com/search-jobs/software%20engineer/27595/1?fl=6252001";
+  // fl=6252001 = United States, fl=6251999 = Canada (GeoNames country ids)
+  const urls = [
+    "https://jobs.intuit.com/search-jobs/software%20engineer/27595/1?fl=6252001",
+    "https://jobs.intuit.com/search-jobs/software%20engineer/27595/1?fl=6251999",
+  ];
 
   try {
-    const response = await fetchWithTimeout(searchUrl, {
-      headers: {
-        "accept": "text/html",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      }
-    });
+    const htmls = await Promise.all(urls.map((u) =>
+      fetchWithTimeout(u, {
+        headers: { "accept": "text/html", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+      }).then((r) => (r.ok ? r.text() : "")).catch(() => "")
+    ));
 
-    if (!response.ok) {
-      log(`Intuit returned status ${response.status}`);
-      return [];
-    }
-
-    const html = await response.text();
-    const jobs = parseIntuitJobs(html);
-
-    const totalCards = (html.match(/data-job-id="/g) || []).length;
+    const jobs = htmls.flatMap((html) => parseIntuitJobs(html));
+    const totalCards = htmls.reduce((n, html) => n + (html.match(/data-job-id="/g) || []).length, 0);
     log(`Intuit returned ${totalCards} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {

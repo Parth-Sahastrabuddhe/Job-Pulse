@@ -49,27 +49,19 @@ function parseLinkedInCards(html) {
 }
 
 export async function collectLinkedInJobs(_unused, config, log) {
-  // f_C=1337 is LinkedIn's own company ID
-  const apiUrl = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search" +
-    "?keywords=software+engineer&location=United+States&f_C=1337&sortBy=DD&start=0";
+  // f_C=1337 is LinkedIn's own company ID. Fetch US and Canada, tag by inference.
+  const base = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=software+engineer&f_C=1337&sortBy=DD&start=0";
+  const urls = [`${base}&location=United+States`, `${base}&location=Canada`];
 
   try {
-    const response = await fetchWithTimeout(apiUrl, {
-      headers: {
-        "accept": "text/html",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      }
-    });
+    const htmls = await Promise.all(urls.map((u) =>
+      fetchWithTimeout(u, {
+        headers: { "accept": "text/html", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+      }).then((r) => (r.ok ? r.text() : "")).catch(() => "")
+    ));
 
-    if (!response.ok) {
-      log(`LinkedIn API returned status ${response.status}`);
-      return [];
-    }
-
-    const html = await response.text();
-    const jobs = parseLinkedInCards(html);
-
-    const totalCards = (html.match(/data-entity-urn="urn:li:jobPosting:/g) || []).length;
+    const jobs = htmls.flatMap((html) => parseLinkedInCards(html));
+    const totalCards = htmls.reduce((n, html) => n + (html.match(/data-entity-urn="urn:li:jobPosting:/g) || []).length, 0);
     log(`LinkedIn returned ${totalCards} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {

@@ -7,6 +7,11 @@ function inferCountry(locations) {
       return "US";
     }
   }
+  for (const loc of locations) {
+    if (loc.countryID === "iso-country-CAN" || /Canada/i.test(loc.countryName || "")) {
+      return "CA";
+    }
+  }
   return "";
 }
 
@@ -54,8 +59,8 @@ const APPLE_SEARCH_TERMS = [
   "product+manager",
 ];
 
-async function fetchAppleSearchResults(term, log) {
-  const searchUrl = `https://jobs.apple.com/en-us/search?search=${term}&sort=newest&location=united-states-USA`;
+async function fetchAppleSearchResults(term, locationParam, log) {
+  const searchUrl = `https://jobs.apple.com/en-us/search?search=${term}&sort=newest&location=${locationParam}`;
   try {
     const response = await fetchWithTimeout(searchUrl, {
       headers: {
@@ -107,12 +112,16 @@ async function fetchAppleSearchResults(term, log) {
 
 export async function collectAppleJobs(_unused, config, log) {
   try {
+    // canada-CANA mirrors Apple's united-states-USA location-slug convention.
+    const APPLE_LOCATIONS = ["united-states-USA", "canada-CANA"];
     const allRaw = [];
     for (const term of APPLE_SEARCH_TERMS) {
-      const results = await fetchAppleSearchResults(term, log);
-      allRaw.push(...results);
-      // Small delay to avoid hammering Apple's servers
-      await new Promise((r) => setTimeout(r, 300));
+      for (const locationParam of APPLE_LOCATIONS) {
+        const results = await fetchAppleSearchResults(term, locationParam, log);
+        allRaw.push(...results);
+        // Small delay to avoid hammering Apple's servers
+        await new Promise((r) => setTimeout(r, 300));
+      }
     }
 
     const jobs = allRaw
