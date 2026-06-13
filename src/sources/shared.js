@@ -63,6 +63,30 @@ export function normalizeCountryCode(value) {
   return normalized.toUpperCase();
 }
 
+/**
+ * Parse a stored user country preference into an uppercased array.
+ * Accepts a JSON array string ('["US","CA"]'), a legacy scalar ("US", "ALL"),
+ * or empty/null. Always returns a non-empty array; falls back to ["US"].
+ */
+export function parseUserCountries(value) {
+  let list;
+  try {
+    if (typeof value === "string" && value.trim().startsWith("[")) {
+      list = JSON.parse(value);
+    } else if (value !== undefined && value !== null && value !== "") {
+      list = [value];
+    } else {
+      list = ["US"];
+    }
+  } catch {
+    list = ["US"];
+  }
+  const normalized = (Array.isArray(list) ? list : ["US"])
+    .map((c) => String(c).toUpperCase())
+    .filter(Boolean);
+  return normalized.length ? normalized : ["US"];
+}
+
 // --- Role category patterns (one per supported category) ---
 const ROLE_CATEGORY_PATTERNS = {
   software_engineer: /(?:(?:software|backend|back[\s-]?end|full[\s-]?stack|systems|cloud)\s+(?:engineer|develop)|application\s+(?:software\s+)?develop|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i,
@@ -246,7 +270,20 @@ export function splitLines(value) {
     .filter(Boolean);
 }
 
-const NON_US_CITIES = /\b(Bengaluru|Bangalore|Hyderabad|Mumbai|Pune|Chennai|Delhi|Gurgaon|Gurugram|Noida|Kolkata|Ahmedabad|Jaipur|Lucknow|Chandigarh|Thiruvananthapuram|Kochi|Coimbatore|Indore|Nagpur|Visakhapatnam|Bhubaneswar|Mangalore|Mysore|Vadodara|Surat|Amsterdam|London|Berlin|Munich|Frankfurt|Paris|Dublin|Tokyo|Singapore|Toronto|Vancouver|Montreal|Sydney|Melbourne|Shanghai|Beijing|Shenzhen|Seoul|Zurich|Stockholm|Warsaw|Prague|Lisbon|Madrid|Milan|Rome|Barcelona|Brussels|Vienna|Copenhagen|Oslo|Helsinki|Bucharest|Budapest|Krakow|Tel Aviv|Sao Paulo|Mexico City|Bogota|Manila|Kuala Lumpur|Jakarta|Bangkok|Ho Chi Minh|Cairo|Lagos|Nairobi|Johannesburg|Cape Town|Dubai|Riyadh|Hong Kong|Luxembourg|Zagreb|Belgrade|Tallinn|Riga|Vilnius|Kyiv|Minsk|Moscow|Istanbul|Karachi|Lahore|Dhaka|Colombo|Auckland|Wellington|Oxford|Cambridge|Edinburgh|Manchester|Birmingham UK|Bristol|Leeds|Glasgow|Hamburg|Cologne|Stuttgart|Lyon|Marseille|Toulouse|Osaka|Nagoya|Taipei|Hsinchu|Mississauga|Ottawa|Calgary|Edmonton|Brisbane|Perth|Adelaide|Guelph|Waterloo ON|Belfast|Cork|Limerick|Gothenburg|Malmo|Rotterdam|The Hague|Eindhoven|Shinjuku|Minato|Chiyoda|Chuo|Shibuya)\b/i;
+const NON_US_CITIES = /\b(Bengaluru|Bangalore|Hyderabad|Mumbai|Pune|Chennai|Delhi|Gurgaon|Gurugram|Noida|Kolkata|Ahmedabad|Jaipur|Lucknow|Chandigarh|Thiruvananthapuram|Kochi|Coimbatore|Indore|Nagpur|Visakhapatnam|Bhubaneswar|Mangalore|Mysore|Vadodara|Surat|Amsterdam|London|Berlin|Munich|Frankfurt|Paris|Dublin|Tokyo|Singapore|Sydney|Melbourne|Shanghai|Beijing|Shenzhen|Seoul|Zurich|Stockholm|Warsaw|Prague|Lisbon|Madrid|Milan|Rome|Barcelona|Brussels|Vienna|Copenhagen|Oslo|Helsinki|Bucharest|Budapest|Krakow|Tel Aviv|Sao Paulo|Mexico City|Bogota|Manila|Kuala Lumpur|Jakarta|Bangkok|Ho Chi Minh|Cairo|Lagos|Nairobi|Johannesburg|Cape Town|Dubai|Riyadh|Hong Kong|Luxembourg|Zagreb|Belgrade|Tallinn|Riga|Vilnius|Kyiv|Minsk|Moscow|Istanbul|Karachi|Lahore|Dhaka|Colombo|Auckland|Wellington|Oxford|Cambridge|Edinburgh|Manchester|Birmingham UK|Bristol|Leeds|Glasgow|Hamburg|Cologne|Stuttgart|Lyon|Marseille|Toulouse|Osaka|Nagoya|Taipei|Hsinchu|Brisbane|Perth|Adelaide|Belfast|Cork|Limerick|Gothenburg|Malmo|Rotterdam|The Hague|Eindhoven|Shinjuku|Minato|Chiyoda|Chuo|Shibuya)\b/i;
+
+// Canada province two-letter codes (comma-anchored, mirrors US_CITY_STATE_CODE_PATTERN).
+// Deliberately excludes "CA" so "San Francisco, CA" stays US (CA = California).
+// No overlap with US_STATE_CODES, so this can be evaluated before the US patterns.
+const CA_PROVINCE_CODES = ["ON", "BC", "QC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"];
+const CA_CITY_PROVINCE_CODE_PATTERN = new RegExp(
+  `\\b[A-Za-z][A-Za-z .'-]+,\\s*(?:${CA_PROVINCE_CODES.join("|")})(?:\\b|\\s*,|\\s*\\|)`,
+  "i"
+);
+const CA_PROVINCE_NAME_PATTERN = /\b(Ontario|British Columbia|Quebec|Qu[eé]bec|Alberta|Manitoba|Saskatchewan|Nova Scotia|New Brunswick|Newfoundland(?: and Labrador)?|Prince Edward Island|Yukon|Northwest Territories|Nunavut)\b/i;
+const CA_CITIES = /\b(Toronto|Vancouver|Montreal|Montr[eé]al|Mississauga|Ottawa|Calgary|Edmonton|Guelph|Waterloo ON|Kitchener|Burnaby|Brampton|Hamilton ON|Halifax|Winnipeg|Victoria BC|Markham|Richmond Hill|North York|Scarborough|Etobicoke|Quebec City)\b/i;
+const CA_EXPLICIT = /\bCanada\b/i;
+const CA_CODE = /\bCAN\b/; // case-sensitive 3-letter ISO; avoids matching "can"
 
 export function inferCountryCodeFromLocation(location) {
   const text = normalizeWhitespace(location);
@@ -255,11 +292,7 @@ export function inferCountryCodeFromLocation(location) {
     return "";
   }
 
-  // Check NON-US FIRST — prevents false positives like "INDIA, in" matching as "City, IN" (Indiana)
-  if (NON_US_COUNTRIES.test(text) || NON_US_CITIES.test(text)) {
-    return "NON-US";
-  }
-
+  // 1. Explicit US words (strongest signal; US-biased for mixed strings).
   if (
     /\bunited states\b/i.test(text) ||
     /\busa\b/i.test(text) ||
@@ -270,14 +303,48 @@ export function inferCountryCodeFromLocation(location) {
     return "US";
   }
 
+  // 2. Explicit Canada words.
+  if (CA_EXPLICIT.test(text) || CA_CODE.test(text)) {
+    return "CA";
+  }
+
+  // 3. Other non-US countries — BEFORE state/province codes so "INDIA, IN"
+  //    can't false-match as "City, IN" (Indiana). Canada was removed from this set.
+  if (NON_US_COUNTRIES.test(text)) {
+    return "NON-US";
+  }
+
+  // 4. Canada province codes (comma-anchored) — before US codes; the sets are disjoint.
+  if (CA_CITY_PROVINCE_CODE_PATTERN.test(text)) {
+    return "CA";
+  }
+
+  // 5. US city+state-code / state-name. Ordered after CA province codes; this is
+  //    what makes "Vancouver, WA" resolve US (fixes a prior NON-US false positive)
+  //    and "Ontario, CA" resolve US (California).
   if (US_CITY_STATE_CODE_PATTERN.test(text) || US_STATE_NAME_PATTERN.test(text)) {
     return "US";
+  }
+
+  // 6. Canada province full names.
+  if (CA_PROVINCE_NAME_PATTERN.test(text)) {
+    return "CA";
+  }
+
+  // 7. Canada city names (bare).
+  if (CA_CITIES.test(text)) {
+    return "CA";
+  }
+
+  // 8. Remaining non-US cities (Canadian entries removed from this set).
+  if (NON_US_CITIES.test(text)) {
+    return "NON-US";
   }
 
   return "";
 }
 
-const NON_US_COUNTRIES = /\b(Netherlands|Germany|United Kingdom|UK|England|Scotland|Wales|Canada|India|Japan|China|France|Australia|Singapore|Ireland|Israel|South Korea|Brazil|Mexico|Sweden|Switzerland|Spain|Italy|Poland|Belgium|Austria|Denmark|Norway|Finland|Czech Republic|Czechia|Portugal|Romania|Taiwan|Philippines|Malaysia|Indonesia|Vietnam|Thailand|Colombia|Argentina|Chile|Costa Rica|Egypt|Nigeria|Kenya|South Africa|Saudi Arabia|UAE|United Arab Emirates|Hong Kong|Luxembourg|Hungary|Greece|Croatia|Serbia|Estonia|Latvia|Lithuania|Ukraine|Belarus|Russia|Turkey|Pakistan|Bangladesh|Sri Lanka|New Zealand|INDIA|CANADA|JAPAN|CHINA|FRANCE|GERMANY|AUSTRALIA|SINGAPORE)\b/;
+const NON_US_COUNTRIES = /\b(Netherlands|Germany|United Kingdom|UK|England|Scotland|Wales|India|Japan|China|France|Australia|Singapore|Ireland|Israel|South Korea|Brazil|Mexico|Sweden|Switzerland|Spain|Italy|Poland|Belgium|Austria|Denmark|Norway|Finland|Czech Republic|Czechia|Portugal|Romania|Taiwan|Philippines|Malaysia|Indonesia|Vietnam|Thailand|Colombia|Argentina|Chile|Costa Rica|Egypt|Nigeria|Kenya|South Africa|Saudi Arabia|UAE|United Arab Emirates|Hong Kong|Luxembourg|Hungary|Greece|Croatia|Serbia|Estonia|Latvia|Lithuania|Ukraine|Belarus|Russia|Turkey|Pakistan|Bangladesh|Sri Lanka|New Zealand|INDIA|JAPAN|CHINA|FRANCE|GERMANY|AUSTRALIA|SINGAPORE)\b/;
 
 export function looksExplicitlyNonUsLocation(location) {
   const text = normalizeWhitespace(location);
@@ -310,20 +377,28 @@ export function looksExplicitlyNonUsLocation(location) {
   return /,|\|/.test(text);
 }
 
-export function jobMatchesCountryFilter(job, countryFilter) {
-  const filter = normalizeCountryCode(countryFilter);
+export function parseCountryFilter(countryFilter) {
+  const parts = String(countryFilter ?? "")
+    .split(",")
+    .map((p) => normalizeCountryCode(p))
+    .filter(Boolean);
+  return new Set(parts);
+}
 
-  if (!filter || filter === "ALL") {
+export function jobMatchesCountryFilter(job, countryFilter) {
+  const filters = parseCountryFilter(countryFilter);
+
+  // Empty filter or "ALL" anywhere → pass everything.
+  if (filters.size === 0 || filters.has("ALL")) {
     return true;
   }
 
   const jobCountry = normalizeCountryCode(job.countryCode) || inferCountryCodeFromLocation(job.location);
 
-  // Whitelist approach: job MUST be confirmed US to pass through.
-  // If country is unknown (empty), reject it — "guilty until proven innocent."
-  // This prevents non-US jobs with ambiguous locations from leaking through.
-  // The only exception: jobs with no location at all (empty string) — these are
-  // typically remote roles where the API didn't specify a location.
+  // Whitelist approach: a job with a known country MUST be in the allowed set.
+  // If country is unknown (empty), keep the existing grace rules: jobs with no
+  // location at all (likely remote) and bare remote/hybrid/multiple pass; any
+  // other location text is rejected ("guilty until proven innocent").
   if (!jobCountry) {
     const loc = normalizeWhitespace(job.location);
     // No location at all — let it through (might be remote US)
@@ -334,7 +409,7 @@ export function jobMatchesCountryFilter(job, countryFilter) {
     return false;
   }
 
-  return jobCountry === filter;
+  return filters.has(jobCountry);
 }
 
 function getUtcDateStamp(dateLike) {
