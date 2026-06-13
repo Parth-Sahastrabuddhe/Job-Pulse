@@ -10,7 +10,7 @@ export function getCompanies() {
 }
 
 const COMPANY_GROUPS = {
-  "Big Tech": ["microsoft", "amazon", "google", "meta", "apple", "linkedin"],
+  "Big Tech": ["microsoft", "amazon", "google", "meta", "apple", "linkedin", "netflix"],
   "AI & ML": ["anthropic", "openai", "deepmind", "xai", "mistral", "cohere", "perplexity", "scaleai", "glean", "sambanova", "baseten", "modal", "lambdalabs", "elevenlabs", "runway", "harvey", "writer", "deepgram", "sierra", "roboflow", "cursor", "polyai", "palantir"],
   "Finance & Banking": ["goldmansachs", "jpmorgan", "citi", "capitalone", "wellsfargo", "bankofamerica", "usbank", "fidelity", "robinhood", "coinbase", "morganstanley", "bloomberg", "visa"],
   "Fintech & Payments": ["paypal", "block", "plaid", "ramp", "brex", "adyen", "affirm", "sofi", "chime", "upstart", "carta", "marqeta", "intuit", "creditkarma", "creditgenie", "addepar", "floqast", "deel"],
@@ -21,7 +21,7 @@ const COMPANY_GROUPS = {
   "Data & Analytics": ["snowflake", "clickhouse", "fivetran", "dbtlabs", "singlestore", "neo4j", "cockroachlabs", "redpanda", "amplitude", "mixpanel"],
   "Security & Identity": ["okta", "vanta", "wiz", "verkada", "checkr", "sift", "rubrik", "onepassword", "jumpcloud"],
   "B2B & SaaS": ["hubspot", "asana", "braze", "klaviyo", "sixsense", "attentive", "highspot", "zoominfo", "squarespace", "gusto", "airtable", "notion", "veeva", "hackerrank", "hudl", "samsara", "flexport"],
-  "Consumer & Media": ["netflix", "disney", "spotify", "pinterest", "reddit", "snap", "discord", "roblox", "airbnb", "doordash", "instacart", "lyft", "uber", "nextdoor", "faire", "duolingo", "thumbtack", "quora", "gopuff", "fanduel", "comcast"],
+  "Consumer & Media": ["disney", "spotify", "pinterest", "reddit", "snap", "discord", "roblox", "airbnb", "doordash", "instacart", "lyft", "uber", "nextdoor", "faire", "duolingo", "thumbtack", "quora", "gopuff", "fanduel", "comcast"],
   "Auto, Robotics & Industrial": ["ford", "mercedesbenz", "boeing", "bosch", "waymo", "zoox", "aurora", "motional", "nuro", "figureai", "threeM"],
   "Retail & Healthcare": ["walmartglobaltech", "target", "nike", "mcdonalds", "amgen", "sanofi"],
 };
