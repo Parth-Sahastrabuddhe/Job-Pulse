@@ -10,7 +10,7 @@
  * so this module stays I/O-free and easily testable.
  */
 
-import { detectRoleCategories, detectSeniority } from "./sources/shared.js";
+import { detectRoleCategories, detectSeniority, parseUserCountries } from "./sources/shared.js";
 
 /**
  * @param {object} job - must have sourceKey, title, countryCode
@@ -60,17 +60,18 @@ export function filterJobForUser(job, profile, options = {}) {
     return { pass: false, reason: "seniority_mismatch" };
   }
 
-  // 5. Country
-  const userCountry = (profile.country || "US").toUpperCase();
-  if (userCountry !== "ALL") {
-    const jobCountry = (job.countryCode || "").toUpperCase();
-    if (jobCountry && jobCountry !== userCountry) {
+  // 5. Country — user preference is a list (JSON array, legacy scalar, or empty).
+  const userCountries = parseUserCountries(profile.country);
+  const jobCountry = (job.countryCode || "").toUpperCase();
+  if (!userCountries.includes("ALL")) {
+    if (jobCountry && !userCountries.includes(jobCountry)) {
       return { pass: false, reason: "country_mismatch" };
     }
   }
 
-  // 6. Sponsorship
-  if (profile.requires_sponsorship) {
+  // 6. Sponsorship — the H1B-sponsor list is US-specific. Apply it only to US or
+  //    unknown-country jobs; confirmed non-US jobs (e.g. CA) skip it.
+  if (profile.requires_sponsorship && (jobCountry === "" || jobCountry === "US")) {
     const { sponsorLookup } = options;
     if (sponsorLookup && !sponsorLookup(job.sourceKey)) {
       return { pass: false, reason: "non_sponsor_company" };

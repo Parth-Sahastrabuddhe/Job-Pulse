@@ -14,7 +14,7 @@ export const PERSONAL_PROFILE = {
   role_categories: JSON.stringify(["software_engineer"]),
   seniority_levels: JSON.stringify(["entry", "mid"]),
   company_selections: JSON.stringify(["all"]),
-  country: "US",
+  country: JSON.stringify(["US", "CA"]),
   requires_sponsorship: 1,
   education_level: "masters",
 };

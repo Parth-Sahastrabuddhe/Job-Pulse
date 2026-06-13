@@ -114,6 +114,30 @@ describe("filterJobForUser — failing cases", () => {
     const result = filterJobForUser(makeJob({ countryCode: "NON-US" }), makeProfile({ country: "ALL" }));
     expect(result.pass).toBe(true);
   });
+
+  it("matches a CA job for a US+CA list profile", () => {
+    const profile = makeProfile({ country: JSON.stringify(["US", "CA"]) });
+    expect(filterJobForUser(makeJob({ countryCode: "CA", location: "Toronto, ON" }), profile).pass).toBe(true);
+  });
+
+  it("drops a CA job for a US-only list profile", () => {
+    const profile = makeProfile({ country: JSON.stringify(["US"]) });
+    const r = filterJobForUser(makeJob({ countryCode: "CA", location: "Toronto, ON" }), profile);
+    expect(r.pass).toBe(false);
+    expect(r.reason).toBe("country_mismatch");
+  });
+
+  it("legacy scalar 'US' still drops a non-US job", () => {
+    const r = filterJobForUser(makeJob({ countryCode: "NON-US" }), makeProfile({ country: "US" }));
+    expect(r.pass).toBe(false);
+    expect(r.reason).toBe("country_mismatch");
+  });
+
+  it("garbage country falls back to US-only", () => {
+    const r = filterJobForUser(makeJob({ countryCode: "CA", location: "Toronto, ON" }), makeProfile({ country: "{bad" }));
+    expect(r.pass).toBe(false);
+    expect(r.reason).toBe("country_mismatch");
+  });
 });
 
 describe("filterJobForUser — sponsorship", () => {
@@ -137,6 +161,26 @@ describe("filterJobForUser — sponsorship", () => {
   it("skips sponsorship check when sponsorLookup not provided (assumes eligible)", () => {
     const profile = makeProfile({ requires_sponsorship: 1 });
     expect(filterJobForUser(makeJob(), profile).pass).toBe(true);
+  });
+
+  it("applies the H1B gate to US jobs", () => {
+    const profile = makeProfile({ requires_sponsorship: 1, country: JSON.stringify(["US", "CA"]) });
+    const r = filterJobForUser(makeJob({ countryCode: "US" }), profile, { sponsorLookup: () => false });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toBe("non_sponsor_company");
+  });
+
+  it("skips the H1B gate for confirmed CA jobs", () => {
+    const profile = makeProfile({ requires_sponsorship: 1, country: JSON.stringify(["US", "CA"]) });
+    const r = filterJobForUser(makeJob({ countryCode: "CA", location: "Toronto, ON" }), profile, { sponsorLookup: () => false });
+    expect(r.pass).toBe(true);
+  });
+
+  it("still applies the H1B gate to unknown-country jobs", () => {
+    const profile = makeProfile({ requires_sponsorship: 1, country: JSON.stringify(["US", "CA"]) });
+    const r = filterJobForUser(makeJob({ countryCode: "", location: "" }), profile, { sponsorLookup: () => false });
+    expect(r.pass).toBe(false);
+    expect(r.reason).toBe("non_sponsor_company");
   });
 });
 
