@@ -10,7 +10,7 @@ function parseSmartRecruitersJob(raw, companyConfig) {
   const location = loc.fullLocation ?? locationParts.join(", ");
   // SmartRecruiters API returns 2-letter ISO codes (e.g. "us", "in", "br"), not full names
   const rawCountry = (loc.country || loc.countryCode || "").toLowerCase();
-  const countryCode = rawCountry === "us" ? "US" : rawCountry ? "NON-US" : "";
+  const countryCode = rawCountry === "us" ? "US" : rawCountry === "ca" ? "CA" : rawCountry ? "NON-US" : "";
 
   const url = `https://jobs.smartrecruiters.com/${companyConfig.companySlug}/${raw.id}`;
 

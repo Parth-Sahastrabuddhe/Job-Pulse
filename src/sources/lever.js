@@ -8,8 +8,9 @@ function parseLeverJob(raw, companyConfig) {
   const location = raw.categories?.location || "";
   const countryCode = inferCountryCodeFromLocation(location);
 
-  // Only include jobs with confirmed US location
-  if (countryCode !== "US") {
+  // Drop only confirmed non-US-non-CA jobs. US, CA, and unknown all flow through;
+  // the global country gate is the safety net for unknowns.
+  if (countryCode === "NON-US") {
     return null;
   }
 

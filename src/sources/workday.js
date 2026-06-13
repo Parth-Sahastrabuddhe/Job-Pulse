@@ -46,19 +46,19 @@ function parseRelativeDate(postedOn) {
   return { postedText: text, postedAt: "", postedPrecision: "" };
 }
 
-function parseWorkdayJob(raw, companyConfig, usFacetApplied) {
+function parseWorkdayJob(raw, companyConfig, countryTag) {
   const title = raw.title?.trim();
   const titleFilter = TITLE_FILTERS[companyConfig.sourceKey] || isTargetRole;
   if (!title || !titleFilter(title)) return null;
 
   const id = raw.bulletFields?.[0] || "";
   const location = raw.locationsText || raw.bulletFields?.[1] || "";
-  // When the US facet was applied, Workday has already server-side-restricted the
-  // corpus to the US, so multi-location postings ("4 Locations") whose country can't
-  // be inferred from the text are still US. Without this they're dropped by the
-  // central country filter. If facet discovery failed, leave it empty so the filter
-  // falls back to inferring the country from the location string.
-  const countryCode = usFacetApplied ? "US" : "";
+  // When a country facet was applied, Workday has already server-side-restricted
+  // the corpus to that country, so multi-location postings ("4 Locations") whose
+  // country can't be inferred from the text are still that country. Without this
+  // they're dropped by the central country filter. If facet discovery failed,
+  // leave it empty so the filter falls back to inferring from the location string.
+  const countryCode = countryTag || "";
   const posted = parseRelativeDate(raw.postedOn);
   const url = `${companyConfig.baseUrl}${raw.externalPath}`;
 
@@ -84,8 +84,8 @@ function parseWorkdayJob(raw, companyConfig, usFacetApplied) {
 const WORKDAY_PAGE_SIZE = 20;
 const WORKDAY_PAGE_CONCURRENCY = 5;
 const WORKDAY_MAX_RESULTS = 1500;
-// Cache per tenant: { param: "locationHierarchy1" | "locationCountry" | "locations", ids: string[] } | null
-const usFacetCache = new Map();
+// Cache per tenant: { us: Facet|null, ca: Facet|null } where Facet = { param, ids: string[] }
+const facetCache = new Map();
 
 async function fetchWorkdayPage(apiUrl, body) {
   const response = await fetchWithTimeout(apiUrl, {
@@ -101,105 +101,108 @@ async function fetchWorkdayPage(apiUrl, body) {
   return response.json();
 }
 
-// Tenants vary: some expose a `locationHierarchy1` or `locationCountry` facet
-// with a single "United States" value, others only expose a city-level
-// `locations` facet whose descriptors start with "US, ..." — we collect all
-// matching IDs and apply them together via Workday's multi-value facet support.
-async function discoverUsFacet(apiUrl) {
-  const data = await fetchWorkdayPage(apiUrl, { appliedFacets: {}, limit: 1, offset: 0, searchText: "" });
-  const facets = data.facets || [];
+// Find the facet (param + value ids) matching a country, from an already-fetched
+// facets payload. Tenants vary: some expose a `locationHierarchy1`/`locationCountry`
+// facet with a single country value, some expose `Location_Country` at the top
+// level (e.g. Morgan Stanley), others only expose a city-level `locations` facet
+// whose descriptors carry the country as a comma-delimited segment.
+function findCountryFacet(facets, descriptorRe, citySegRe) {
   const main = facets.find((f) => f.facetParameter === "locationMainGroup");
   const children = main?.values || [];
 
-  // Country-level: single ID covering all US postings
   for (const param of ["locationHierarchy1", "locationCountry"]) {
     const child = children.find((v) => v.facetParameter === param);
-    const us = (child?.values || []).find((v) => /^united states/i.test(v.descriptor || ""));
-    if (us?.id) return { param, ids: [us.id] };
+    const hit = (child?.values || []).find((v) => descriptorRe.test(v.descriptor || ""));
+    if (hit?.id) return { param, ids: [hit.id] };
   }
-
-  // Some tenants (e.g. Morgan Stanley) expose Location_Country at the top level
-  // instead of nesting it under locationMainGroup.
   for (const param of ["Location_Country", "locationCountry"]) {
     const top = facets.find((f) => f.facetParameter === param);
-    const us = (top?.values || []).find((v) => /^united states/i.test(v.descriptor || ""));
-    if (us?.id) return { param, ids: [us.id] };
+    const hit = (top?.values || []).find((v) => descriptorRe.test(v.descriptor || ""));
+    if (hit?.id) return { param, ids: [hit.id] };
   }
-
-  // City-level: collect every descriptor where "US" or "United States" appears
-  // as a comma-delimited segment — matches "US, California, ..." (Intel-style)
-  // and "Allen, Texas, US" (Cisco-style) without false-matching "United Arab
-  // Emirates" or arbitrary substrings.
   const cities = children.find((v) => v.facetParameter === "locations");
   if (cities) {
-    const usSegment = /(?:^|,\s*)(?:US|United States)(?:\s*,|\s*$)/i;
     const ids = (cities.values || [])
-      .filter((v) => usSegment.test(v.descriptor || ""))
+      .filter((v) => citySegRe.test(v.descriptor || ""))
       .map((v) => v.id)
       .filter(Boolean);
     if (ids.length > 0) return { param: "locations", ids };
   }
-
   return null;
+}
+
+// Discover US and CA facets in one facets call. The CA city segment uses
+// CAN/Canada (not bare "CA") to avoid pulling in California city facets like
+// "Mountain View, CA, US".
+async function discoverFacets(apiUrl) {
+  const data = await fetchWorkdayPage(apiUrl, { appliedFacets: {}, limit: 1, offset: 0, searchText: "" });
+  const facets = data.facets || [];
+  return {
+    us: findCountryFacet(facets, /^united states/i, /(?:^|,\s*)(?:US|United States)(?:\s*,|\s*$)/i),
+    ca: findCountryFacet(facets, /^canada/i, /(?:^|,\s*)(?:CAN|Canada)(?:\s*,|\s*$)/i),
+  };
 }
 
 export async function collectWorkdayJobs(_unused, config, log, companyKey) {
   const companyConfig = config[companyKey];
   if (!companyConfig) return [];
 
-  try {
-    const searchText = companyConfig.searchText || "software engineer";
+  const searchText = companyConfig.searchText || "software engineer";
 
-    if (!usFacetCache.has(companyKey)) {
-      try {
-        const facet = await discoverUsFacet(companyConfig.apiUrl);
-        usFacetCache.set(companyKey, facet);
-        if (!facet) log(`${companyConfig.sourceLabel}: US facet not found, falling back to unfiltered search`);
-        else log(`${companyConfig.sourceLabel}: US facet = ${facet.param} (${facet.ids.length} ids)`);
-      } catch (e) {
-        usFacetCache.set(companyKey, null);
-        log(`${companyConfig.sourceLabel}: facet discovery failed (${e.message}), falling back`);
-      }
-    }
-    const facet = usFacetCache.get(companyKey);
+  // Fetch + paginate one country's faceted corpus, tagging every job with `tag`.
+  // facet null → unfiltered pass (used only when no facet was discovered).
+  async function fetchCountry(facet, tag) {
     const appliedFacets = facet ? { [facet.param]: facet.ids } : {};
-
     const firstPage = await fetchWorkdayPage(companyConfig.apiUrl, {
-      appliedFacets,
-      limit: WORKDAY_PAGE_SIZE,
-      offset: 0,
-      searchText
+      appliedFacets, limit: WORKDAY_PAGE_SIZE, offset: 0, searchText
     });
     const total = Math.min(firstPage.total ?? 0, WORKDAY_MAX_RESULTS);
-    let rawJobs = [...(firstPage.jobPostings ?? [])];
-
+    const rawJobs = [...(firstPage.jobPostings ?? [])];
     if (total > WORKDAY_PAGE_SIZE) {
       const offsets = [];
       for (let o = WORKDAY_PAGE_SIZE; o < total; o += WORKDAY_PAGE_SIZE) offsets.push(o);
-
       for (let i = 0; i < offsets.length; i += WORKDAY_PAGE_CONCURRENCY) {
         const batch = offsets.slice(i, i + WORKDAY_PAGE_CONCURRENCY);
         const pages = await Promise.all(
           batch.map((o) =>
             fetchWorkdayPage(companyConfig.apiUrl, {
-              appliedFacets,
-              limit: WORKDAY_PAGE_SIZE,
-              offset: o,
-              searchText
+              appliedFacets, limit: WORKDAY_PAGE_SIZE, offset: o, searchText
             }).catch(() => ({ jobPostings: [] }))
           )
         );
         for (const p of pages) rawJobs.push(...(p.jobPostings ?? []));
       }
     }
+    return rawJobs.map((raw) => parseWorkdayJob(raw, companyConfig, tag)).filter(Boolean);
+  }
 
-    const jobs = rawJobs.map((raw) => parseWorkdayJob(raw, companyConfig, !!facet)).filter(Boolean);
+  try {
+    if (!facetCache.has(companyKey)) {
+      try {
+        const facets = await discoverFacets(companyConfig.apiUrl);
+        facetCache.set(companyKey, facets);
+        log(`${companyConfig.sourceLabel}: facets US=${facets.us ? facets.us.ids.length : 0} CA=${facets.ca ? facets.ca.ids.length : 0}`);
+      } catch (e) {
+        facetCache.set(companyKey, { us: null, ca: null });
+        log(`${companyConfig.sourceLabel}: facet discovery failed (${e.message}), falling back to unfiltered`);
+      }
+    }
+    const { us, ca } = facetCache.get(companyKey);
+
+    let jobs;
+    if (!us && !ca) {
+      // No facets discovered — single unfiltered pass, tag by inference (tag "").
+      jobs = await fetchCountry(null, "");
+    } else {
+      const [usJobs, caJobs] = await Promise.all([fetchCountry(us, "US"), fetchCountry(ca, "CA")]);
+      jobs = [...usJobs, ...caJobs];
+    }
 
     // Server-side ordering is relevance, not date. Sort by postedAt DESC so the
     // maxJobsPerSource cap preserves the freshest postings.
     jobs.sort((a, b) => (Date.parse(b.postedAt) || 0) - (Date.parse(a.postedAt) || 0));
 
-    log(`${companyConfig.sourceLabel} API returned ${rawJobs.length} results (of ${firstPage.total ?? "?"}), ${jobs.length} matched filters.`);
+    log(`${companyConfig.sourceLabel}: ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`${companyConfig.sourceLabel} API error: ${error.message}`);
