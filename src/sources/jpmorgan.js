@@ -6,7 +6,8 @@ function parseJPMorganJob(raw) {
 
   const id = String(raw.Id || "");
   const location = raw.PrimaryLocation || "";
-  const countryCode = raw.PrimaryLocationCountry === "US" ? "US" : "";
+  const cc = raw.PrimaryLocationCountry;
+  const countryCode = cc === "US" ? "US" : cc === "CA" ? "CA" : "";
 
   const url = `https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/${id}`;
 
@@ -31,35 +32,41 @@ function parseJPMorganJob(raw) {
   });
 }
 
-export async function collectJPMorganJobs(_unused, config, log) {
-  // locationId 300000000289738 = United States
-  const apiUrl = "https://jpmc.fa.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions" +
+// JPMorgan's careers API locks results to a location facet id. The US id is known
+// (300000000289738). To enable Canada, discover this tenant's Canada LOCATIONS
+// facet id on EC2 (see docs plan Task 13) and set CA_LOCATION_ID. Empty = US-only.
+const JPMC_US_LOCATION_ID = "300000000289738";
+const JPMC_CA_LOCATION_ID = "";
+
+function buildJPMorganUrl(locationId) {
+  return "https://jpmc.fa.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions" +
     "?onlyData=true" +
     "&expand=requisitionList.secondaryLocations" +
     "&finder=findReqs;siteNumber=CX_1001" +
     ",facetsList=LOCATIONS" +
     ",limit=25" +
     ",keyword=software+engineer" +
-    ",locationId=300000000289738" +
-    ",selectedLocationsFacet=300000000289738" +
+    `,locationId=${locationId}` +
+    `,selectedLocationsFacet=${locationId}` +
     ",sortBy=POSTING_DATES_DESC";
+}
+
+export async function collectJPMorganJobs(_unused, config, log) {
+  const locationIds = JPMC_CA_LOCATION_ID
+    ? [JPMC_US_LOCATION_ID, JPMC_CA_LOCATION_ID]
+    : [JPMC_US_LOCATION_ID];
 
   try {
-    const response = await fetchWithTimeout(apiUrl, {
-      headers: {
-        "accept": "application/json",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      }
-    });
+    const responses = await Promise.all(locationIds.map((locId) =>
+      fetchWithTimeout(buildJPMorganUrl(locId), {
+        headers: {
+          "accept": "application/json",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+      }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    ));
 
-    if (!response.ok) {
-      log(`JPMorgan Chase API returned status ${response.status}`);
-      return [];
-    }
-
-    const data = await response.json();
-    const rawJobs = data?.items?.[0]?.requisitionList || [];
-
+    const rawJobs = responses.flatMap((data) => data?.items?.[0]?.requisitionList || []);
     const jobs = rawJobs
       .map((raw) => parseJPMorganJob(raw))
       .filter(Boolean);
