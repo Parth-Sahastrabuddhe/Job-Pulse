@@ -10,12 +10,20 @@ export function getCompanies() {
 }
 
 const COMPANY_GROUPS = {
-  "Big Tech": ["microsoft", "amazon", "google", "meta", "apple"],
-  "Finance & Banking": ["goldmansachs", "jpmorgan", "citi", "capitalone", "wellsfargo", "bankofamerica", "usbank", "fidelity", "robinhood", "coinbase"],
-  "Enterprise & Cloud": ["cisco", "salesforce", "oracle", "intel", "nvidia", "adobe", "broadcom", "dell", "servicenow"],
-  "Consumer & Media": ["netflix", "disney", "spotify", "pinterest", "reddit", "snap", "discord", "roblox", "airbnb", "doordash", "instacart", "lyft", "uber"],
-  "Developer Tools & Infra": ["stripe", "cloudflare", "datadog", "mongodb", "confluent", "databricks", "figma", "hashicorp"],
-  "AI & ML": ["anthropic", "openai"],
+  "Big Tech": ["microsoft", "amazon", "google", "meta", "apple", "linkedin"],
+  "AI & ML": ["anthropic", "openai", "deepmind", "xai", "mistral", "cohere", "perplexity", "scaleai", "glean", "sambanova", "baseten", "modal", "lambdalabs", "elevenlabs", "runway", "harvey", "writer", "deepgram", "sierra", "roboflow", "cursor", "polyai", "palantir"],
+  "Finance & Banking": ["goldmansachs", "jpmorgan", "citi", "capitalone", "wellsfargo", "bankofamerica", "usbank", "fidelity", "robinhood", "coinbase", "morganstanley", "bloomberg", "visa"],
+  "Fintech & Payments": ["paypal", "block", "plaid", "ramp", "brex", "adyen", "affirm", "sofi", "chime", "upstart", "carta", "marqeta", "intuit", "creditkarma", "creditgenie", "addepar", "floqast", "deel"],
+  "Crypto & Web3": ["gemini", "kraken", "binance", "anchorage", "ripple"],
+  "Trading & Market Making": ["drw", "imc", "towerresearch", "jumptrading", "akuna"],
+  "Enterprise & Cloud": ["cisco", "salesforce", "oracle", "intel", "nvidia", "adobe", "broadcom", "dell", "servicenow", "accenture", "samsung", "qualcomm", "aristanetworks", "dynatrace", "hexaware", "verisign", "purestorage", "appliedmaterials", "experian", "dropbox"],
+  "Developer Tools & Infra": ["stripe", "cloudflare", "datadog", "mongodb", "confluent", "databricks", "figma", "twilio", "docker", "zapier", "sentry", "mapbox", "supabase", "replit", "gitlab", "grafana", "temporal", "launchdarkly", "linear", "render", "warp", "posthog", "newrelic", "elastic"],
+  "Data & Analytics": ["snowflake", "clickhouse", "fivetran", "dbtlabs", "singlestore", "neo4j", "cockroachlabs", "redpanda", "amplitude", "mixpanel"],
+  "Security & Identity": ["okta", "vanta", "wiz", "verkada", "checkr", "sift", "rubrik", "onepassword", "jumpcloud"],
+  "B2B & SaaS": ["hubspot", "asana", "braze", "klaviyo", "sixsense", "attentive", "highspot", "zoominfo", "squarespace", "gusto", "airtable", "notion", "veeva", "hackerrank", "hudl", "samsara", "flexport"],
+  "Consumer & Media": ["netflix", "disney", "spotify", "pinterest", "reddit", "snap", "discord", "roblox", "airbnb", "doordash", "instacart", "lyft", "uber", "nextdoor", "faire", "duolingo", "thumbtack", "quora", "gopuff", "fanduel", "comcast"],
+  "Auto, Robotics & Industrial": ["ford", "mercedesbenz", "boeing", "bosch", "waymo", "zoox", "aurora", "motional", "nuro", "figureai", "threeM"],
+  "Retail & Healthcare": ["walmartglobaltech", "target", "nike", "mcdonalds", "amgen", "sanofi"],
 };
 
 export function getGroupedCompanies() {
