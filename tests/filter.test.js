@@ -133,8 +133,8 @@ describe("filterJobForUser — failing cases", () => {
     expect(r.reason).toBe("country_mismatch");
   });
 
-  it("garbage country falls back to US-only", () => {
-    const r = filterJobForUser(makeJob({ countryCode: "CA", location: "Toronto, ON" }), makeProfile({ country: "{bad" }));
+  it("malformed array country falls back to US-only", () => {
+    const r = filterJobForUser(makeJob({ countryCode: "CA", location: "Toronto, ON" }), makeProfile({ country: "[bad" }));
     expect(r.pass).toBe(false);
     expect(r.reason).toBe("country_mismatch");
   });
