@@ -6,9 +6,10 @@ function parseFordJob(raw) {
 
   const id = String(raw.Id || "");
   const location = raw.PrimaryLocation || "";
-  const countryCode = raw.PrimaryLocationCountry === "US" ? "US" : "";
+  const rawCountry = raw.PrimaryLocationCountry;
+  const countryCode = rawCountry === "US" ? "US" : rawCountry === "CA" ? "CA" : "NON-US";
 
-  if (countryCode !== "US") return null;
+  if (countryCode === "NON-US") return null;
 
   const url = `https://efds.fa.em5.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/${id}`;
 

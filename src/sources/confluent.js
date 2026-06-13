@@ -59,7 +59,7 @@ export async function collectConfluentJobs(_unused, config, log) {
     const jobs = rawJobs
       .filter((raw) => isTargetRole(raw.title))
       .map((raw) => {
-        const countryCode = /United States|US Remote/i.test(raw.location) ? "US" : "";
+        const countryCode = /United States|US Remote/i.test(raw.location) ? "US" : /Canada/i.test(raw.location) ? "CA" : "";
         return finalizeJob({
           sourceKey: "confluent",
           sourceLabel: "Confluent",

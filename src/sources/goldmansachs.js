@@ -35,11 +35,13 @@ function parseGSJob(raw) {
 
   const locations = Array.isArray(raw.locations) ? raw.locations : [];
   const usLocations = locations.filter((l) => l.country === "United States");
+  const caLocations = locations.filter((l) => l.country === "Canada");
 
-  // Skip jobs with no US locations
-  if (usLocations.length === 0) return null;
+  // Skip jobs with no US and no CA locations.
+  if (usLocations.length === 0 && caLocations.length === 0) return null;
 
-  const locationNames = usLocations.map((l) => [l.city, l.state].filter(Boolean).join(", "));
+  const picked = usLocations.length > 0 ? usLocations : caLocations;
+  const locationNames = picked.map((l) => [l.city, l.state].filter(Boolean).join(", "));
   const location = locationNames.join(" | ");
 
   const url = `https://higher.gs.com/roles/${id}`;
@@ -61,7 +63,7 @@ function parseGSJob(raw) {
     postedAt,
     postedPrecision,
     url,
-    countryCode: "US"
+    countryCode: usLocations.length > 0 ? "US" : "CA"
   });
 }
 

@@ -6,7 +6,9 @@ function parseDynatraceJob(result) {
   if (!title || !isTargetRole(title)) return null;
 
   const countries = raw.country || [];
-  if (!countries.includes("United States")) return null;
+  const isUS = countries.includes("United States");
+  const isCA = countries.includes("Canada");
+  if (!isUS && !isCA) return null;
 
   const id = String(raw.job_id || "");
   const locations = raw.office_locations || [];
@@ -23,7 +25,7 @@ function parseDynatraceJob(result) {
     title,
     location,
     url,
-    countryCode: "US"
+    countryCode: isUS ? "US" : "CA"
   });
 }
 

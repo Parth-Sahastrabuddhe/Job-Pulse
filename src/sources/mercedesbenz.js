@@ -9,9 +9,10 @@ function parseMercedesBenzJob(raw) {
 
   const id = String(desc.ID || "");
   const loc = desc.PositionLocation?.[0] || {};
-  const countryCode = loc.CountryCode === "US" ? "US" : "";
+  const rawCc = loc.CountryCode;
+  const countryCode = rawCc === "US" ? "US" : rawCc === "CA" ? "CA" : "NON-US";
 
-  if (countryCode !== "US") return null;
+  if (countryCode === "NON-US") return null;
 
   const city = loc.CityName || "";
   const state = loc.CountrySubDivisionName || "";

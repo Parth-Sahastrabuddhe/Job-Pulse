@@ -38,10 +38,8 @@ function parseMicrosoftJob(raw, config) {
   const stdLocs = Array.isArray(raw.standardizedLocations) ? raw.standardizedLocations : [];
   let countryCode = "";
   for (const loc of stdLocs) {
-    if (/\bUS\b/.test(loc)) {
-      countryCode = "US";
-      break;
-    }
+    if (/\bUS\b/.test(loc)) { countryCode = "US"; break; }   // US wins if present
+    if (/\bCA\b/.test(loc)) { countryCode = "CA"; }          // country segment "..., CA"
   }
 
   return finalizeJob({

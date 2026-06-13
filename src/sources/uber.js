@@ -8,11 +8,12 @@ function parseUberJob(raw) {
 
   const id = String(raw.id || "");
   const allLocations = raw.allLocations || [];
-  const location = allLocations
-    .filter((l) => /United States|USA/i.test(l.country || ""))
-    .map((l) => [l.city, l.state].filter(Boolean).join(", "))
-    .join(" | ");
-  const countryCode = "US";
+  const usLocs = allLocations.filter((l) => /United States|USA/i.test(l.country || ""));
+  const caLocs = allLocations.filter((l) => /Canada/i.test(l.country || ""));
+  if (usLocs.length === 0 && caLocs.length === 0) return null;
+  const picked = usLocs.length > 0 ? usLocs : caLocs;
+  const location = picked.map((l) => [l.city, l.state].filter(Boolean).join(", ")).join(" | ");
+  const countryCode = usLocs.length > 0 ? "US" : "CA";
 
   const url = `https://www.uber.com/us/en/careers/list/${id}/`;
 

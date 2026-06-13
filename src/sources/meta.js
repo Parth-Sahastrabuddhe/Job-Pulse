@@ -41,16 +41,18 @@ function parseMetaJob(raw, config) {
   const locations = Array.isArray(raw.locations) ? [...raw.locations].sort() : [];
   const location = locations.join(" | ");
 
-  // Check if any location is in the US — match "City, STATE" pattern (2-letter US state code)
+  // City, STATE (US) vs City, PROVINCE (CA) detection.
   const US_STATES = /\b(AL|AK|AZ|AR|CA|CO|CT|DC|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY)\b/;
+  const CA_PROVINCES = /\b(ON|BC|QC|AB|MB|SK|NS|NB|NL|PE|YT|NT|NU)\b/;
   const hasUsLocation = locations.some((l) =>
-    /\bUnited States\b/i.test(l) ||
-    /\bRemote, US\b/i.test(l) ||
-    US_STATES.test(l)
+    /\bUnited States\b/i.test(l) || /\bRemote, US\b/i.test(l) || US_STATES.test(l)
+  );
+  const hasCaLocation = locations.some((l) =>
+    /\bCanada\b/i.test(l) || CA_PROVINCES.test(l)
   );
 
-  // Only include jobs with at least one confirmed US location
-  if (!hasUsLocation) {
+  // Drop jobs with neither a US nor a CA location.
+  if (!hasUsLocation && !hasCaLocation) {
     return null;
   }
 
@@ -66,7 +68,7 @@ function parseMetaJob(raw, config) {
     postedAt: "",
     postedPrecision: "",
     url,
-    countryCode: "US"
+    countryCode: hasUsLocation ? "US" : "CA"
   });
 }
 
