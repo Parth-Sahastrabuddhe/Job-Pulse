@@ -3,6 +3,33 @@ import { getSession } from "@/lib/session";
 import { getUserProfile, updateUserProfile, setPasswordHash } from "@/lib/db";
 import { requireSameOrigin } from "@/lib/security";
 
+const ALLOWED_COUNTRIES = new Set(["US", "CA", "GB", "DE", "IN", "ALL"]);
+
+// Stored country is a JSON array string ('["US","CA"]') for new saves, or a
+// legacy scalar ("US", "ALL"). Always return an array to the client.
+function parseStoredCountry(value) {
+  if (typeof value === "string" && value.trim().startsWith("[")) {
+    try {
+      const arr = JSON.parse(value);
+      if (Array.isArray(arr) && arr.length) return arr.map(String);
+    } catch {}
+  }
+  return value ? [String(value)] : ["US"];
+}
+
+// Validate + normalize an incoming country selection (array or scalar) into a
+// JSON array string for storage. Returns { value } or { error }.
+function normalizeCountryForStorage(input) {
+  const arr = Array.isArray(input) ? input : [input];
+  const up = [...new Set(arr.map((c) => String(c).toUpperCase()).filter(Boolean))];
+  if (up.length === 0) return { error: "Select at least one country" };
+  for (const c of up) {
+    if (!ALLOWED_COUNTRIES.has(c)) return { error: `Invalid country: ${c}` };
+  }
+  if (up.includes("ALL")) return { value: JSON.stringify(["ALL"]) };
+  return { value: JSON.stringify(up) };
+}
+
 export async function GET() {
   const session = await getSession();
   if (!session) {
@@ -18,7 +45,7 @@ export async function GET() {
     roleCategories: profile.role_categories ? JSON.parse(profile.role_categories) : [],
     seniorityLevels: profile.seniority_levels ? JSON.parse(profile.seniority_levels) : [],
     companySelections: profile.company_selections ? JSON.parse(profile.company_selections) : [],
-    country: profile.country || "US",
+    country: parseStoredCountry(profile.country),
     requiresSponsorship: profile.requires_sponsorship === 1,
     notificationMode: profile.notification_mode || "realtime",
     quietHoursStart: profile.quiet_hours_start || "",
@@ -50,7 +77,11 @@ export async function PUT(request) {
   if (body.roleCategories !== undefined) fields.role_categories = JSON.stringify(body.roleCategories);
   if (body.seniorityLevels !== undefined) fields.seniority_levels = JSON.stringify(body.seniorityLevels);
   if (body.companySelections !== undefined) fields.company_selections = JSON.stringify(body.companySelections);
-  if (body.country !== undefined) fields.country = body.country;
+  if (body.country !== undefined) {
+    const result = normalizeCountryForStorage(body.country);
+    if (result.error) return Response.json({ error: result.error }, { status: 400 });
+    fields.country = result.value;
+  }
   if (body.requiresSponsorship !== undefined) fields.requires_sponsorship = body.requiresSponsorship ? 1 : 0;
   if (body.notificationMode !== undefined) fields.notification_mode = body.notificationMode;
   if (body.quietHoursStart !== undefined) fields.quiet_hours_start = body.quietHoursStart;

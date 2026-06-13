@@ -43,6 +43,13 @@ const TIMEZONES = [
   "Europe/London", "Europe/Berlin", "Asia/Tokyo", "Asia/Kolkata",
 ];
 
+const COUNTRY_OPTIONS = [
+  { value: "US", label: "United States" },
+  { value: "CA", label: "Canada" },
+  { value: "ALL", label: "All countries" },
+];
+const LEGACY_COUNTRY_LABELS = { GB: "United Kingdom", DE: "Germany", IN: "India" };
+
 export default function ProfilePage() {
   const router = useRouter();
   const [profile, setProfile] = useState(null);
@@ -97,6 +104,12 @@ export default function ProfilePage() {
   async function handleSave(e) {
     e.preventDefault();
     setSaving(true); setError(""); setSuccess(false);
+    const sel = Array.isArray(profile.country) ? profile.country : [profile.country].filter(Boolean);
+    if (sel.length === 0) {
+      setError("Select at least one country.");
+      setSaving(false);
+      return;
+    }
     try {
       const res = await fetch("/api/profile", {
         method: "PUT", headers: { "Content-Type": "application/json" },
@@ -217,15 +230,35 @@ export default function ProfilePage() {
             <section className="bg-surface rounded-xl border border-line p-5 space-y-3">
               <h2 className="text-sm font-semibold text-foreground font-display uppercase tracking-wider">Location & Visa</h2>
               <div>
-                <label className="block text-sm font-medium text-foreground/80 mb-1">Country</label>
-                <select value={profile.country} onChange={(e) => setProfile((p) => ({ ...p, country: e.target.value }))} className={inputClass}>
-                  <option value="US">United States</option>
-                  <option value="CA">Canada</option>
-                  <option value="GB">United Kingdom</option>
-                  <option value="DE">Germany</option>
-                  <option value="IN">India</option>
-                  <option value="ALL">All Countries</option>
-                </select>
+                <label className="block text-sm font-medium text-foreground/80 mb-1">Countries</label>
+                <div className="space-y-2">
+                  {COUNTRY_OPTIONS.map((c) => {
+                    const selected = Array.isArray(profile.country) ? profile.country : [profile.country].filter(Boolean);
+                    const isAll = selected.includes("ALL");
+                    const checked = c.value === "ALL" ? isAll : selected.includes(c.value);
+                    const disabled = c.value !== "ALL" && isAll;
+                    return (
+                      <label key={c.value} className={`flex items-center gap-2 text-sm cursor-pointer transition-colors ${disabled ? "opacity-40 cursor-not-allowed" : "text-muted hover:text-foreground"}`}>
+                        <input type="checkbox" checked={checked} disabled={disabled}
+                          onChange={() => setProfile((p) => {
+                            const cur = Array.isArray(p.country) ? p.country : [p.country].filter(Boolean);
+                            if (c.value === "ALL") return { ...p, country: checked ? [] : ["ALL"] };
+                            return { ...p, country: toggleArrayValue(cur.filter((v) => v !== "ALL"), c.value) };
+                          })}
+                          className="w-4 h-4 rounded border-line bg-background accent-pulse" />
+                        {c.label}
+                      </label>
+                    );
+                  })}
+                  {(Array.isArray(profile.country) ? profile.country : []).filter((v) => !["US", "CA", "ALL"].includes(v)).map((legacy) => (
+                    <label key={legacy} className="flex items-center gap-2 text-sm text-muted cursor-pointer hover:text-foreground transition-colors">
+                      <input type="checkbox" checked
+                        onChange={() => setProfile((p) => ({ ...p, country: (Array.isArray(p.country) ? p.country : []).filter((v) => v !== legacy) }))}
+                        className="w-4 h-4 rounded border-line bg-background accent-pulse" />
+                      {LEGACY_COUNTRY_LABELS[legacy] || legacy}
+                    </label>
+                  ))}
+                </div>
               </div>
               <label className="flex items-center gap-2 text-sm text-muted cursor-pointer hover:text-foreground transition-colors">
                 <input type="checkbox" checked={profile.requiresSponsorship}
