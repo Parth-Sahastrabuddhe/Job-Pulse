@@ -25,6 +25,7 @@ export const COMPANIES = [
   { key: "citi", label: "Citi", ats: "solo", lane: "normal", banking: true, urlPattern: /jobs\.citi\.com\/job\/[^/]+\/[^/]+\/287\/(\d+)/i },
   { key: "mercedesbenz", label: "Mercedes-Benz", ats: "solo", lane: "normal", urlPattern: /jobs\.mercedes-benz\.com\/.*?(?:\?ac=jobad&id=|---)(\d+)/i },
   { key: "hexaware", label: "Hexaware", ats: "solo", lane: "normal", urlPattern: /fa-etqo-saasfaprod1\.fa\.ocs\.oraclecloud\.com\/.*?job\/(\d+)/i },
+  { key: "exl", label: "EXL", ats: "solo", lane: "normal", urlPattern: /fa-ewjt-saasfaprod1\.fa\.ocs\.oraclecloud\.com\/.*?job\/(\d+)/i },
   { key: "dynatrace", label: "Dynatrace", ats: "solo", lane: "normal", urlPattern: /dynatrace\.com\/careers\/jobs\/(\d+)/i },
 
   // === Slow lane — Playwright/HTML scrapers ===

@@ -94,10 +94,10 @@ Email      AWS SES (OTP verification)
 | Lever | 16 &mdash; Palantir, Plaid, Spotify, Mistral AI, and more | REST API |
 | SmartRecruiters | 7 &mdash; ServiceNow, Visa, Experian, and more | REST API |
 | PCSX (Phenom) | 1 &mdash; Qualcomm | REST API |
-| Custom APIs | 12 &mdash; Microsoft, Amazon, Google, Meta, Goldman Sachs, Oracle, JPMorgan, and more | Reverse-engineered APIs |
+| Custom APIs | 13 &mdash; Microsoft, Amazon, Google, Meta, Goldman Sachs, Oracle, JPMorgan, EXL, and more | Reverse-engineered APIs |
 | Custom scrapers | 6 &mdash; Apple, Uber, LinkedIn, Bloomberg, Intuit, Confluent | HTML + Playwright |
 
-**Total: 188 companies.**
+**Total: 189 companies.**
 
 ---
 

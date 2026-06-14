@@ -33,6 +33,7 @@ import { collectFordJobs } from "./sources/ford.js";
 import { collectCitiJobs } from "./sources/citi.js";
 import { collectMercedesBenzJobs } from "./sources/mercedesbenz.js";
 import { collectHexawareJobs } from "./sources/hexaware.js";
+import { collectExlJobs } from "./sources/exl.js";
 import { collectDynatraceJobs } from "./sources/dynatrace.js";
 import {
   initDb, closeDb, migrateFromJson,
@@ -97,6 +98,7 @@ function buildRegistry(config) {
   solo("citi", collectCitiJobs, "normal");
   solo("mercedesbenz", collectMercedesBenzJobs, "normal");
   solo("hexaware", collectHexawareJobs, "normal");
+  solo("exl", collectExlJobs, "normal");
   solo("dynatrace", collectDynatraceJobs, "normal");
 
   // Slow lane — Playwright/HTML scrapers (run sequentially, less frequently)

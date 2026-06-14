@@ -791,6 +791,12 @@ export function getConfig() {
       apiUrl: "https://fa-etqo-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions",
       jobUrlBase: "https://fa-etqo-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/"
     },
+    exl: {
+      sourceKey: "exl",
+      sourceLabel: "EXL",
+      apiUrl: "https://fa-ewjt-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions",
+      jobUrlBase: "https://fa-ewjt-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_2/job/"
+    },
     dynatrace: {
       sourceKey: "dynatrace",
       sourceLabel: "Dynatrace",

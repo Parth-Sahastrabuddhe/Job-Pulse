@@ -636,8 +636,8 @@ export async function fetchJobDescription(job, rawJobData, options = {}) {
     description = await fetchUberDescription(job);
   }
 
-  // JPMorgan / Ford (Oracle HCM - same approach)
-  if (!description && allowPlaywright && (job.sourceKey === "jpmorgan" || job.sourceKey === "ford")) {
+  // JPMorgan / Ford / EXL (Oracle HCM - same approach)
+  if (!description && allowPlaywright && (job.sourceKey === "jpmorgan" || job.sourceKey === "ford" || job.sourceKey === "exl")) {
     description = await fetchOracleHCMDescription(job);
   }
 
