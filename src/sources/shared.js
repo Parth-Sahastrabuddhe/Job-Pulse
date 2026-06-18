@@ -270,7 +270,7 @@ export function splitLines(value) {
     .filter(Boolean);
 }
 
-const NON_US_CITIES = /\b(Bengaluru|Bangalore|Hyderabad|Mumbai|Pune|Chennai|Delhi|Gurgaon|Gurugram|Noida|Kolkata|Ahmedabad|Jaipur|Lucknow|Chandigarh|Thiruvananthapuram|Kochi|Coimbatore|Indore|Nagpur|Visakhapatnam|Bhubaneswar|Mangalore|Mysore|Vadodara|Surat|Amsterdam|London|Berlin|Munich|Frankfurt|Paris|Dublin|Tokyo|Singapore|Sydney|Melbourne|Shanghai|Beijing|Shenzhen|Seoul|Zurich|Stockholm|Warsaw|Prague|Lisbon|Madrid|Milan|Rome|Barcelona|Brussels|Vienna|Copenhagen|Oslo|Helsinki|Bucharest|Budapest|Krakow|Tel Aviv|Sao Paulo|Mexico City|Bogota|Manila|Kuala Lumpur|Jakarta|Bangkok|Ho Chi Minh|Cairo|Lagos|Nairobi|Johannesburg|Cape Town|Dubai|Riyadh|Hong Kong|Luxembourg|Zagreb|Belgrade|Tallinn|Riga|Vilnius|Kyiv|Minsk|Moscow|Istanbul|Karachi|Lahore|Dhaka|Colombo|Auckland|Wellington|Oxford|Cambridge|Edinburgh|Manchester|Birmingham UK|Bristol|Leeds|Glasgow|Hamburg|Cologne|Stuttgart|Lyon|Marseille|Toulouse|Osaka|Nagoya|Taipei|Hsinchu|Brisbane|Perth|Adelaide|Belfast|Cork|Limerick|Gothenburg|Malmo|Rotterdam|The Hague|Eindhoven|Shinjuku|Minato|Chiyoda|Chuo|Shibuya)\b/i;
+const NON_US_CITIES = /\b(Bengaluru|Bangalore|Hyderabad|Mumbai|Pune|Chennai|Delhi|Gurgaon|Gurugram|Noida|Kolkata|Ahmedabad|Jaipur|Lucknow|Chandigarh|Thiruvananthapuram|Kochi|Coimbatore|Indore|Nagpur|Visakhapatnam|Bhubaneswar|Mangalore|Mysore|Vadodara|Surat|Amsterdam|London|Berlin|Munich|Frankfurt|Paris|Dublin|Tokyo|Singapore|Sydney|Melbourne|Shanghai|Beijing|Shenzhen|Seoul|Zurich|Stockholm|Warsaw|Prague|Lisbon|Madrid|Milan|Rome|Barcelona|Brussels|Vienna|Copenhagen|Oslo|Helsinki|Bucharest|Budapest|Krakow|Tel Aviv|Sao Paulo|Mexico City|Bogota|Manila|Kuala Lumpur|Jakarta|Bangkok|Ho Chi Minh|Cairo|Lagos|Nairobi|Johannesburg|Cape Town|Dubai|Riyadh|Hong Kong|Luxembourg|Zagreb|Belgrade|Tallinn|Riga|Vilnius|Kyiv|Minsk|Moscow|Istanbul|Karachi|Lahore|Dhaka|Colombo|Auckland|Wellington|Oxford|Cambridge|Edinburgh|Manchester|Birmingham UK|Bristol|Leeds|Glasgow|Hamburg|Cologne|Stuttgart|Lyon|Marseille|Toulouse|Osaka|Nagoya|Taipei|Hsinchu|Brisbane|Perth|Adelaide|Belfast|Cork|Limerick|Gothenburg|Malmo|Rotterdam|The Hague|Eindhoven|Shinjuku|Minato|Chiyoda|Chuo|Shibuya|Dusseldorf|Dortmund|Leipzig|Nantes|Lille|Bordeaux|Grenoble|Wroclaw|Gdansk|Poznan|Galway|Sao Jose dos Campos|Campinas)\b/i;
 
 // Canada province two-letter codes (comma-anchored, mirrors US_CITY_STATE_CODE_PATTERN).
 // Deliberately excludes "CA" so "San Francisco, CA" stays US (CA = California).
@@ -286,7 +286,11 @@ const CA_EXPLICIT = /\bCanada\b/i;
 const CA_CODE = /\bCAN\b/; // case-sensitive 3-letter ISO; avoids matching "can"
 
 export function inferCountryCodeFromLocation(location) {
-  const text = normalizeWhitespace(location);
+  // Fold diacritics so accented forms ("São Paulo", "Düsseldorf", "Bogotá",
+  // "Kraków", "Zürich") match the ASCII city/country allowlists below. The CA
+  // province/city patterns keep their accented alternatives, which still match
+  // post-fold (e.g. "Québec" → "Quebec" matches "Qu[eé]bec").
+  const text = normalizeWhitespace(location).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
   if (!text) {
     return "";
@@ -308,9 +312,11 @@ export function inferCountryCodeFromLocation(location) {
     return "CA";
   }
 
-  // 3. Other non-US countries — BEFORE state/province codes so "INDIA, IN"
-  //    can't false-match as "City, IN" (Indiana). Canada was removed from this set.
-  if (NON_US_COUNTRIES.test(text)) {
+  // 3. Other non-US countries (and macro-region labels) — BEFORE state/province
+  //    codes so "INDIA, IN" can't false-match as "City, IN" (Indiana). Canada was
+  //    removed from this set. Region labels ("Asia", "Europe") run here too, after
+  //    the US/Canada signals above so a US-inclusive string still resolves US.
+  if (NON_US_COUNTRIES.test(text) || NON_US_REGIONS.test(text)) {
     return "NON-US";
   }
 
@@ -344,7 +350,13 @@ export function inferCountryCodeFromLocation(location) {
   return "";
 }
 
-const NON_US_COUNTRIES = /\b(Netherlands|Germany|United Kingdom|UK|England|Scotland|Wales|India|Japan|China|France|Australia|Singapore|Ireland|Israel|South Korea|Brazil|Mexico|Sweden|Switzerland|Spain|Italy|Poland|Belgium|Austria|Denmark|Norway|Finland|Czech Republic|Czechia|Portugal|Romania|Taiwan|Philippines|Malaysia|Indonesia|Vietnam|Thailand|Colombia|Argentina|Chile|Costa Rica|Egypt|Nigeria|Kenya|South Africa|Saudi Arabia|UAE|United Arab Emirates|Hong Kong|Luxembourg|Hungary|Greece|Croatia|Serbia|Estonia|Latvia|Lithuania|Ukraine|Belarus|Russia|Turkey|Pakistan|Bangladesh|Sri Lanka|New Zealand|INDIA|JAPAN|CHINA|FRANCE|GERMANY|AUSTRALIA|SINGAPORE)\b/;
+const NON_US_COUNTRIES = /\b(Netherlands|Germany|United Kingdom|UK|Great Britain|Britain|England|Scotland|Wales|India|Japan|China|France|Australia|Singapore|Ireland|Israel|South Korea|Brazil|Mexico|Sweden|Switzerland|Spain|Italy|Poland|Belgium|Austria|Denmark|Norway|Finland|Czech Republic|Czechia|Portugal|Romania|Taiwan|Philippines|Malaysia|Indonesia|Vietnam|Thailand|Colombia|Argentina|Chile|Costa Rica|Egypt|Nigeria|Kenya|South Africa|Saudi Arabia|UAE|United Arab Emirates|Hong Kong|Luxembourg|Hungary|Greece|Croatia|Serbia|Estonia|Latvia|Lithuania|Ukraine|Belarus|Russia|Turkey|Pakistan|Bangladesh|Sri Lanka|New Zealand|INDIA|JAPAN|CHINA|FRANCE|GERMANY|AUSTRALIA|SINGAPORE)\b/;
+
+// Continent / macro-region labels some boards use as the only location string
+// (e.g. Binance "Asia", "Europe"). All are unambiguously outside the US.
+// "Global", "Worldwide", "Remote" are intentionally excluded — they can include
+// the US, and the US/Canada signals in inferCountryCodeFromLocation run first.
+const NON_US_REGIONS = /\b(Asia(?:[\s-]?Pacific)?|APAC|EMEA|Europe|Africa|Middle East|Latin America|LATAM|Oceania|Southeast Asia)\b/i;
 
 export function looksExplicitlyNonUsLocation(location) {
   const text = normalizeWhitespace(location);

@@ -72,6 +72,52 @@ describe("inferCountryCodeFromLocation — NON-US and unknown unchanged", () => 
   });
 });
 
+describe("inferCountryCodeFromLocation — diacritics fold (accented foreign cities)", () => {
+  it("folds accents so accented cities hit the ASCII allowlist", () => {
+    expect(inferCountryCodeFromLocation("São Paulo")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("Bogotá")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("Düsseldorf")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("Kraków")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("Zürich")).toBe("NON-US");
+  });
+
+  it("keeps accented Canadian names resolving CA after fold", () => {
+    expect(inferCountryCodeFromLocation("Montréal, Québec")).toBe("CA");
+  });
+});
+
+describe("inferCountryCodeFromLocation — macro-region labels", () => {
+  it("tags continent/region-only locations as NON-US", () => {
+    expect(inferCountryCodeFromLocation("Asia")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("Europe")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("EMEA")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("APAC")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("Latin America")).toBe("NON-US");
+  });
+
+  it("leaves US-inclusive / genuinely-global labels alone (US signal wins, globals unknown)", () => {
+    expect(inferCountryCodeFromLocation("Remote - US, Europe")).toBe("US");
+    expect(inferCountryCodeFromLocation("Global")).toBe("");
+    expect(inferCountryCodeFromLocation("Worldwide")).toBe("");
+    expect(inferCountryCodeFromLocation("Americas")).toBe("");
+  });
+});
+
+describe("inferCountryCodeFromLocation — Great Britain + added cities", () => {
+  it("recognizes Great Britain / Britain", () => {
+    expect(inferCountryCodeFromLocation("Great Britain")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("Britain")).toBe("NON-US");
+  });
+
+  it("recognizes newly-added non-US cities", () => {
+    expect(inferCountryCodeFromLocation("Galway")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("Nantes")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("Wroclaw")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("Gdansk")).toBe("NON-US");
+    expect(inferCountryCodeFromLocation("Sao Jose dos Campos")).toBe("NON-US");
+  });
+});
+
 describe("parseUserCountries", () => {
   it("parses JSON arrays, uppercasing", () => {
     expect(parseUserCountries('["US","CA"]')).toEqual(["US", "CA"]);

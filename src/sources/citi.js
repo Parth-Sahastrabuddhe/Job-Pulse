@@ -14,8 +14,11 @@ function parseCitiJobs(html) {
 
     if (!isTargetRole(title)) continue;
 
-    // Find location near this job ID
-    const locPattern = new RegExp(`job-${id}"[\\s\\S]{0,500}?sr-job-item__location[^>]*>([^<]+)`, 'i');
+    // Find location near this job ID. The live markup uses class `sr-job-location`
+    // (not `sr-job-item__location`); the wrong class silently blanked every Citi
+    // location, which then country-inferred to "" and passed the no-location grace
+    // rule — leaking Citi Canada jobs past a US-only filter and hiding the location.
+    const locPattern = new RegExp(`job-${id}"[\\s\\S]{0,500}?sr-job-location[^>]*>([^<]+)`, 'i');
     const locMatch = html.match(locPattern);
     const location = locMatch ? locMatch[1].trim() : "";
 

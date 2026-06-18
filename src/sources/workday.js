@@ -152,6 +152,14 @@ export async function collectWorkdayJobs(_unused, config, log, companyKey) {
   // Fetch + paginate one country's faceted corpus, tagging every job with `tag`.
   // facet null → unfiltered pass (used only when no facet was discovered).
   async function fetchCountry(facet, tag) {
+    if (!facet && tag) {
+      // Defense-in-depth: an unfiltered (null-facet) fetch must NEVER wear a
+      // country tag. Doing so stamps the entire global corpus with that country
+      // (Nike → every India job tagged "US"; Salesforce → Europe tagged "CA").
+      // Only the explicit no-facet inference pass (tag "") may run unfiltered.
+      log(`${companyConfig.sourceLabel}: refusing tagged "${tag}" unfiltered fetch (facet missing)`);
+      return [];
+    }
     const appliedFacets = facet ? { [facet.param]: facet.ids } : {};
     const firstPage = await fetchWorkdayPage(companyConfig.apiUrl, {
       appliedFacets, limit: WORKDAY_PAGE_SIZE, offset: 0, searchText
@@ -194,8 +202,22 @@ export async function collectWorkdayJobs(_unused, config, log, companyKey) {
       // No facets discovered — single unfiltered pass, tag by inference (tag "").
       jobs = await fetchCountry(null, "");
     } else {
-      const [usJobs, caJobs] = await Promise.all([fetchCountry(us, "US"), fetchCountry(ca, "CA")]);
-      jobs = [...usJobs, ...caJobs];
+      // A facet-tagged pass is only valid for a facet that was ACTUALLY discovered;
+      // tagging an unfiltered fetch mislabels the whole global corpus (the
+      // asymmetric-facet leak — Nike: us=null/ca set → India stamped "US";
+      // Salesforce: ca=null/us set → Europe stamped "CA"). So: fetch+tag each
+      // discovered facet, and cover any country whose facet is MISSING via an
+      // unfiltered inference pass (tag "") instead. Drop inferred NON-US from that
+      // pass so foreign jobs are neither mislabeled nor allowed to crowd out US/CA
+      // within the per-source cap (they'd be dropped by the central gate anyway).
+      const passes = await Promise.all([
+        us ? fetchCountry(us, "US") : Promise.resolve([]),
+        ca ? fetchCountry(ca, "CA") : Promise.resolve([]),
+        (!us || !ca)
+          ? fetchCountry(null, "").then((arr) => arr.filter((j) => j.countryCode !== "NON-US"))
+          : Promise.resolve([]),
+      ]);
+      jobs = passes.flat();
     }
 
     // Server-side ordering is relevance, not date. Sort by postedAt DESC so the
