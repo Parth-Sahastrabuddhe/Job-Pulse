@@ -51,7 +51,10 @@ function parseWorkdayJob(raw, companyConfig, countryTag) {
   const titleFilter = TITLE_FILTERS[companyConfig.sourceKey] || isTargetRole;
   if (!title || !titleFilter(title)) return null;
 
-  const id = raw.bulletFields?.[0] || "";
+  // bulletFields[0] is usually the requisition number, but some tenants omit
+  // it. Fall back to the stable req slug in externalPath so the id is never
+  // blank. (bulletFields[0] is kept first to preserve existing dedup keys.)
+  const id = raw.bulletFields?.[0] || raw.externalPath?.split("/").filter(Boolean).pop() || "";
   const location = raw.locationsText || raw.bulletFields?.[1] || "";
   // When a country facet was applied, Workday has already server-side-restricted
   // the corpus to that country, so multi-location postings ("4 Locations") whose
