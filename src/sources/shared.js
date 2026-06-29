@@ -186,7 +186,10 @@ export function detectSeniority(title) {
   // Entry+Mid composite — SWE I / SDE I / Engineer 1 / Roman numeral I (no II/III suffix)
   if (/\b(?:SWE|SDE)\s*I\b/.test(t) && !/\b(?:SWE|SDE)\s*II\b/.test(t)) return "entry_mid";
   if (/\bengineer\s+1\b/i.test(t) && !/\bengineer\s+[23]\b/i.test(t)) return "entry_mid";
-  if (/\bI\b/.test(t) && !/\bII\b/.test(t) && !/\bIII\b/.test(t)) return "entry_mid";
+  // Roman-numeral level I must follow a role noun ("Engineer I", "Developer I"),
+  // not match any stray "I" elsewhere in the title.
+  if (/\b(?:engineer|developer|analyst|scientist|architect|programmer)\s+I\b/i.test(t)
+      && !/\bII\b/.test(t) && !/\bIII\b/.test(t)) return "entry_mid";
 
   // Entry only — new grad, early career, junior
   if (/\b(new\s+grad|early[\s-]?career|entry[\s-]?level|junior|jr\.?)\b/i.test(t)) return "entry";
