@@ -30,7 +30,9 @@ function parsePcsxJob(raw, companyConfig) {
   let countryCode = "";
   for (const loc of stdLocs) {
     if (/\bUS\b/.test(loc)) { countryCode = "US"; break; }   // US wins if present
-    if (/\bCA\b/.test(loc)) { countryCode = "CA"; }          // country segment "..., CA"
+    // Only an explicit "Canada" counts; bare "CA" is the US state California
+    // ("Mountain View, CA"), not the country.
+    if (/\bCanada\b/i.test(loc)) { countryCode = "CA"; }
   }
 
   return finalizeJob({

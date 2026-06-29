@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { dedupeJobs, finalizeJob, isTargetRole, inferCountryCodeFromLocation } from "./shared.js";
 import { launchChromiumWithGuard } from "../playwright-guard.js";
 
 export async function collectConfluentJobs(_unused, config, log) {
@@ -59,7 +59,11 @@ export async function collectConfluentJobs(_unused, config, log) {
     const jobs = rawJobs
       .filter((raw) => isTargetRole(raw.title))
       .map((raw) => {
-        const countryCode = /United States|US Remote/i.test(raw.location) ? "US" : /Canada/i.test(raw.location) ? "CA" : "";
+        // Drop only confirmed non-US-non-CA jobs; US, CA, and unknown flow
+        // through, mirroring lever.js. The global country gate is the safety
+        // net for unknowns, but a confirmed foreign location must not leak.
+        const countryCode = inferCountryCodeFromLocation(raw.location);
+        if (countryCode === "NON-US") return null;
         return finalizeJob({
           sourceKey: "confluent",
           sourceLabel: "Confluent",
@@ -72,7 +76,8 @@ export async function collectConfluentJobs(_unused, config, log) {
           url: `https://careers.confluent.io/jobs/job/${raw.id}`,
           countryCode
         });
-      });
+      })
+      .filter(Boolean);
 
     log(`Confluent returned ${rawJobs.length} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
