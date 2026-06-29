@@ -395,6 +395,12 @@ async function handleConfirmApply(interaction, hash) {
   const message = interaction.message;
   const details = extractJobInfoFromMessage(message);
   if (!details.company || !details.role || !details.url) {
+    // handleApplied already swapped the buttons to the Yes/Cancel confirm row;
+    // restore the normal job buttons so the message isn't left stuck.
+    const jobUrl = getJobUrlFromMessage(message);
+    if (jobUrl) {
+      await message.edit({ components: buildButtonRows(hash, jobUrl, "pending", true) });
+    }
     await interaction.followUp({ content: "Could not extract job details.", ephemeral: true });
     return;
   }
@@ -493,17 +499,27 @@ async function handleShowQueue(interaction) {
 async function handleSkip(interaction, hash) {
   await interaction.deferUpdate();
 
+  // Don't flip the button to "Skipped" unless the status was actually persisted,
+  // otherwise the UI claims a write that silently no-op'd.
+  const skipKey = findJobKeyByMessageId(interaction.message.id);
+  if (!skipKey) {
+    await interaction.followUp({ content: "Could not find this job to mark as skipped.", ephemeral: true });
+    return;
+  }
+
   try {
-    const skipKey = findJobKeyByMessageId(interaction.message.id);
     updateJobPostStatus(skipKey, "skipped");
-  } catch (e) { console.error(`[skip] Error updating status: ${e.message}`); }
+  } catch (e) {
+    console.error(`[skip] Error updating status: ${e.message}`);
+    await interaction.followUp({ content: "Failed to mark this job as skipped.", ephemeral: true });
+    return;
+  }
 
   const jobUrl = getJobUrlFromMessage(interaction.message);
   if (jobUrl) {
     const updatedRows = buildButtonRows(hash, jobUrl, "skipped", true);
     await interaction.message.edit({ components: updatedRows });
   }
-
 }
 
 const SAVED_PAGE_SIZE = 4;
