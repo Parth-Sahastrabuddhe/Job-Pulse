@@ -5,6 +5,17 @@ import { requireSameOrigin } from "@/lib/security";
 
 const ALLOWED_COUNTRIES = new Set(["US", "CA", "GB", "DE", "IN", "ALL"]);
 
+const HHMM_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
+
+function isValidTimezone(tz) {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Stored country is a JSON array string ('["US","CA"]') for new saves, or a
 // legacy scalar ("US", "ALL"). Always return an array to the client.
 function parseStoredCountry(value) {
@@ -84,9 +95,29 @@ export async function PUT(request) {
   }
   if (body.requiresSponsorship !== undefined) fields.requires_sponsorship = body.requiresSponsorship ? 1 : 0;
   if (body.notificationMode !== undefined) fields.notification_mode = body.notificationMode;
-  if (body.quietHoursStart !== undefined) fields.quiet_hours_start = body.quietHoursStart;
-  if (body.quietHoursEnd !== undefined) fields.quiet_hours_end = body.quietHoursEnd;
-  if (body.quietHoursTz !== undefined) fields.quiet_hours_tz = body.quietHoursTz;
+  if (body.quietHoursStart !== undefined || body.quietHoursEnd !== undefined) {
+    const start = body.quietHoursStart ?? "";
+    const end = body.quietHoursEnd ?? "";
+    // Both-or-neither, HH:MM format, and start !== end (equal bounds would
+    // read as a 24/7 quiet window and permanently silence realtime delivery).
+    if ((start && !end) || (!start && end)) {
+      return Response.json({ error: "Set both quiet-hours times, or clear both" }, { status: 400 });
+    }
+    if (start && (!HHMM_RE.test(start) || !HHMM_RE.test(end))) {
+      return Response.json({ error: "Quiet hours must be in HH:MM format" }, { status: 400 });
+    }
+    if (start && start === end) {
+      return Response.json({ error: "Quiet hours start and end cannot be the same time" }, { status: 400 });
+    }
+    fields.quiet_hours_start = start || null;
+    fields.quiet_hours_end = end || null;
+  }
+  if (body.quietHoursTz !== undefined) {
+    if (body.quietHoursTz && !isValidTimezone(body.quietHoursTz)) {
+      return Response.json({ error: "Invalid timezone" }, { status: 400 });
+    }
+    fields.quiet_hours_tz = body.quietHoursTz;
+  }
   if (body.isActive !== undefined) fields.is_active = body.isActive ? 1 : 0;
   if (body.educationLevel !== undefined) fields.education_level = body.educationLevel;
 

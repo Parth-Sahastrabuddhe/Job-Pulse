@@ -15,7 +15,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { fetchJobDescription, saveJobData, jobDirId } from "./job-description.js";
+import { fetchJobDescription, saveJobData, jobDirId, getJobDir } from "./job-description.js";
 import { fitCheckResume } from "./tailor.js";
 import { upsertJobPost, updateJobPostStatus, bridgeToTracker, getDb, addToCompanyQueue, getPendingCompanies, getJobPost, getFunnelStats, updateJobFitScore } from "./state.js";
 
@@ -33,6 +33,11 @@ function jobButtonId(job) {
 
 const ADMIN_DISCORD_ID = process.env.ADMIN_DISCORD_ID;
 
+// Fit Check is dormant (future scope). Re-enable by setting FIT_CHECK_ENABLED=1.
+// While dormant: no Fit Check button on new posts, and clicks on old messages
+// get a polite "disabled" reply instead of running the LLM pipeline.
+const FIT_CHECK_ENABLED = process.env.FIT_CHECK_ENABLED === "1";
+
 function buildButtonRows(hash, jobUrl, status, isAdmin = false) {
   // status: "pending" | "fitchecked" | "applied" | "skipped" | "saved"
   const isApplied = status === "applied";
@@ -43,11 +48,13 @@ function buildButtonRows(hash, jobUrl, status, isAdmin = false) {
       .setLabel("View Job")
       .setStyle(ButtonStyle.Link)
       .setURL(jobUrl),
-    new ButtonBuilder()
-      .setCustomId(`fitcheck:${hash}`)
-      .setLabel(status === "fitchecked" ? "\u2714 Fit Check" : "Fit Check")
-      .setStyle(status === "fitchecked" ? ButtonStyle.Success : ButtonStyle.Primary)
-      .setDisabled(isApplied),
+    ...(FIT_CHECK_ENABLED ? [
+      new ButtonBuilder()
+        .setCustomId(`fitcheck:${hash}`)
+        .setLabel(status === "fitchecked" ? "\u2714 Fit Check" : "Fit Check")
+        .setStyle(status === "fitchecked" ? ButtonStyle.Success : ButtonStyle.Primary)
+        .setDisabled(isApplied),
+    ] : []),
     new ButtonBuilder()
       .setCustomId(`applied:${hash}`)
       .setLabel(status === "applied" ? "\u2705 Applied" : "Applied")
@@ -110,16 +117,32 @@ export async function startDiscordBot(config) {
   });
 
   client.on("interactionCreate", async (interaction) => {
-    // Handle slash commands
+    // Handle slash commands. This dispatch MUST be try/caught: discord.js does
+    // not catch listener promise rejections, and the process-level
+    // unhandledRejection handler exits the whole bot (collectors included).
     if (interaction.isChatInputCommand()) {
-      if (interaction.commandName === "add") {
-        await handleAddCompany(interaction);
-      } else if (interaction.commandName === "queue") {
-        await handleShowQueue(interaction);
-      } else if (interaction.commandName === "saved") {
-        await handleSavedCommand(interaction);
-      } else if (interaction.commandName === "stats") {
-        await handleStatsCommand(interaction);
+      try {
+        if (interaction.commandName === "add") {
+          await handleAddCompany(interaction);
+        } else if (interaction.commandName === "queue") {
+          await handleShowQueue(interaction);
+        } else if (interaction.commandName === "saved") {
+          await handleSavedCommand(interaction);
+        } else if (interaction.commandName === "stats") {
+          await handleStatsCommand(interaction);
+        }
+      } catch (error) {
+        console.error(`[interaction] Error handling /${interaction.commandName}: ${error.message}`);
+        try {
+          const msg = { content: "Something went wrong running that command. Try again in a moment.", ephemeral: true };
+          if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply(msg);
+          } else if (interaction.deferred && !interaction.replied) {
+            await interaction.editReply(msg);
+          } else {
+            await interaction.followUp(msg);
+          }
+        } catch (e) { console.error(`[interaction] Failed to send error reply: ${e.message}`); }
       }
       return;
     }
@@ -154,17 +177,19 @@ export async function startDiscordBot(config) {
     } catch (error) {
       console.error(`[interaction] Error handling ${action}: ${error.message}`);
       try {
+        const msg = { content: "Something went wrong handling that action. Try again in a moment.", ephemeral: true };
         if (!interaction.replied && !interaction.deferred) {
-          await interaction.reply({ content: `Error: ${error.message.slice(0, 200)}`, ephemeral: true });
+          await interaction.reply(msg);
         } else if (interaction.deferred) {
-          await interaction.followUp({ content: `Error: ${error.message.slice(0, 200)}`, ephemeral: true });
+          await interaction.followUp(msg);
         }
       } catch (e) { console.error(`[interaction] Failed to send error reply: ${e.message}`); }
     }
   });
 
-  await client.login(token);
-
+  // Register error handlers BEFORE login: an "error" event emitted during the
+  // login window would otherwise have no listener, throw, and hit the
+  // process-level uncaughtException handler (which exits the whole bot).
   client.on("error", (error) => {
     console.error(`[discord-bot] Client error: ${error.message}`);
   });
@@ -172,6 +197,8 @@ export async function startDiscordBot(config) {
   client.on("disconnect", () => {
     console.log("[discord-bot] Disconnected. Attempting reconnect...");
   });
+
+  await client.login(token);
 
   // Register slash commands after login (need client.user.id)
   try {
@@ -246,6 +273,11 @@ function extractJobFromMessage(urlOrText) {
 }
 
 async function handleFitCheck(interaction, hash) {
+  if (!FIT_CHECK_ENABLED) {
+    // Dormant: old messages may still carry the button.
+    await interaction.reply({ content: "Fit Check is currently disabled.", ephemeral: true });
+    return;
+  }
   if (activeFitChecks.has(hash)) {
     await interaction.reply({ content: "Fit check already in progress for this job.", ephemeral: true });
     return;
@@ -291,12 +323,15 @@ async function handleFitCheck(interaction, hash) {
   const dirId = `${sourceKey}-${jobId}`.replace(/[^a-zA-Z0-9_-]/g, "_");
   await interaction.editReply("Running fit check... This may take 20-40 seconds.");
 
+  let assessmentDelivered = false;
   try {
-    // Try to fetch job description if we don't have one
+    // Try to fetch job description if we don't have one. Use the absolute
+    // project path (getJobDir), not a cwd-relative one — pm2 may start the
+    // process with a different cwd, which made this cache check always miss.
     let hasDescription = false;
+    const descPath = path.join(getJobDir({ sourceKey, id: jobId }), "description.txt");
     try {
-      await fs.access(`data/jobs/${dirId}/description.txt`);
-      const stat = await fs.stat(`data/jobs/${dirId}/description.txt`);
+      const stat = await fs.stat(descPath);
       hasDescription = stat.size > 50; // Must have meaningful content
     } catch {}
 
@@ -348,6 +383,7 @@ async function handleFitCheck(interaction, hash) {
       assessmentMsg += `\n\`\`\`\n${trimmed}\n\`\`\``;
     }
     await interaction.editReply(assessmentMsg);
+    assessmentDelivered = true;
 
     // Update buttons to show fit check was done
     if (jobUrl) {
@@ -356,7 +392,11 @@ async function handleFitCheck(interaction, hash) {
     }
   } catch (error) {
     console.error(`[fit-check] Error for ${sourceKey}-${jobId}: ${error.message}`);
-    await interaction.editReply(`Could not complete fit check for **${jobCompany} — ${jobTitle}**.\nUse the View Job button to check the listing directly.`);
+    // Don't overwrite an assessment the user already received (e.g. the
+    // post-assessment button refresh failed because the message was deleted).
+    if (!assessmentDelivered) {
+      await interaction.editReply(`Could not complete fit check for **${jobCompany} — ${jobTitle}**.\nUse the View Job button to check the listing directly.`);
+    }
   }
   } finally {
     activeFitChecks.delete(hash);
@@ -406,11 +446,21 @@ async function handleConfirmApply(interaction, hash) {
   }
 
   try {
+    // Don't flip the buttons to "Applied" or write the sheet unless the status
+    // was actually persisted — same guard as Skip (commit 2adbaab). Otherwise
+    // the UI claims a write that silently no-op'd and /stats undercounts.
     const applyKey = findJobKeyByMessageId(message.id);
-    if (applyKey) {
-      updateJobPostStatus(applyKey, "applied");
-      bridgeToTracker(applyKey, "applied");
+    if (!applyKey) {
+      const jobUrl = getJobUrlFromMessage(message);
+      if (jobUrl) {
+        await message.edit({ components: buildButtonRows(hash, jobUrl, "pending", true) });
+      }
+      await interaction.followUp({ content: "Could not find this job in the tracker, so it was NOT marked as applied.", ephemeral: true });
+      return;
     }
+
+    updateJobPostStatus(applyKey, "applied");
+    bridgeToTracker(applyKey, "applied");
 
     // Restore buttons with applied state
     const jobUrl = getJobUrlFromMessage(message);
@@ -430,7 +480,9 @@ async function handleConfirmApply(interaction, hash) {
     }
   } catch (error) {
     console.error(`[applied] Error: ${error.message}`);
-    await interaction.followUp({ content: `Failed to update tracker: ${error.message.slice(0, 300)}`, ephemeral: true });
+    try {
+      await interaction.followUp({ content: "Failed to update the tracker. Try again in a moment.", ephemeral: true });
+    } catch {}
   }
 }
 
@@ -446,10 +498,13 @@ async function handleCancelApply(interaction, hash) {
 }
 
 async function handleAddCompany(interaction) {
+  // Ack first: the DB write below is synchronous and can block up to
+  // busy_timeout (2s) with four writers on jobs.db, eating into the 3s window.
+  await interaction.deferReply();
   const companyName = interaction.options.getString("company");
   try {
     addToCompanyQueue(companyName);
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [
         new EmbedBuilder()
           .setColor(0x5865F2)
@@ -458,22 +513,23 @@ async function handleAddCompany(interaction) {
       ]
     });
   } catch (error) {
-    await interaction.reply({ content: `Failed to queue: ${error.message}`, ephemeral: true });
+    console.error(`[add] Failed to queue ${companyName}: ${error.message}`);
+    await interaction.editReply({ content: "Couldn't queue that company right now. Try again in a moment." });
   }
 }
 
 async function handleShowQueue(interaction) {
+  await interaction.deferReply({ ephemeral: true });
   try {
     const pending = getPendingCompanies();
     if (pending.length === 0) {
-      await interaction.reply({
+      await interaction.editReply({
         embeds: [
           new EmbedBuilder()
             .setColor(0x57F287)
             .setTitle("Integration Queue")
             .setDescription("No companies in the queue. Use `/add <company>` to add one.")
-        ],
-        ephemeral: true
+        ]
       });
       return;
     }
@@ -482,17 +538,17 @@ async function handleShowQueue(interaction) {
       `${i + 1}. **${c.company_name}** — queued ${new Date(c.requested_at).toLocaleDateString()}`
     );
 
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [
         new EmbedBuilder()
           .setColor(0xFFA500)
           .setTitle(`Integration Queue (${pending.length} pending)`)
           .setDescription(lines.join("\n"))
-      ],
-      ephemeral: true
+      ]
     });
   } catch (error) {
-    await interaction.reply({ content: `Failed to load queue: ${error.message}`, ephemeral: true });
+    console.error(`[queue] Failed to load queue: ${error.message}`);
+    await interaction.editReply({ content: "Couldn't load the queue right now. Try again in a moment." });
   }
 }
 
@@ -673,20 +729,28 @@ async function handleSave(interaction, hash) {
 
   try {
     const saveKey = findJobKeyByMessageId(interaction.message.id);
-    if (saveKey) {
-      const post = getJobPost(saveKey);
-      const newStatus = post?.status === "saved" ? "pending" : "saved";
-      updateJobPostStatus(saveKey, newStatus);
-      bridgeToTracker(saveKey, newStatus === "pending" ? "notified" : newStatus);
+    if (!saveKey) {
+      // deferUpdate already ack'd the click, so without this the button
+      // silently stays "Save" and the user believes the job was bookmarked.
+      await interaction.followUp({ content: "Could not find this job to save.", ephemeral: true });
+      return;
+    }
 
-      const jobUrl = getJobUrlFromMessage(interaction.message);
-      if (jobUrl) {
-        const updatedRows = buildButtonRows(hash, jobUrl, newStatus, true);
-        await interaction.message.edit({ components: updatedRows });
-      }
+    const post = getJobPost(saveKey);
+    const newStatus = post?.status === "saved" ? "pending" : "saved";
+    updateJobPostStatus(saveKey, newStatus);
+    bridgeToTracker(saveKey, newStatus === "pending" ? "notified" : newStatus);
+
+    const jobUrl = getJobUrlFromMessage(interaction.message);
+    if (jobUrl) {
+      const updatedRows = buildButtonRows(hash, jobUrl, newStatus, true);
+      await interaction.message.edit({ components: updatedRows });
     }
   } catch (error) {
     console.error(`[save] Error: ${error.message}`);
+    try {
+      await interaction.followUp({ content: "Failed to save this job. Try again in a moment.", ephemeral: true });
+    } catch {}
   }
 }
 

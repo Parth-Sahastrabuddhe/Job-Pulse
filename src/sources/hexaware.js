@@ -36,10 +36,15 @@ function parseHexawareJob(raw) {
 
 export async function collectHexawareJobs(_unused, config, log) {
   try {
+    // keyword narrows the corpus server-side (same param as ford.js on this
+    // API). Without it this fetched the latest 25 reqs company-wide across all
+    // roles and countries — Hexaware's volume is India-dominated, so a US SWE
+    // req often never appeared in the response at all.
     const apiUrl = "https://fa-etqo-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions" +
       "?onlyData=true" +
       "&expand=requisitionList.secondaryLocations" +
       "&finder=findReqs;siteNumber=CX_1" +
+      ",keyword=software+engineer" +
       ",limit=25" +
       ",sortBy=POSTING_DATES_DESC";
 

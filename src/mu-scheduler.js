@@ -19,6 +19,25 @@ function parseMinutes(hhmm) {
   return h * 60 + m;
 }
 
+// The web profile API historically stored quiet_hours_tz unvalidated, and
+// Intl.DateTimeFormat throws RangeError on a bad IANA string — which aborted
+// the user's whole delivery path every cycle. Resolve to a known-good tz once
+// per distinct string (memoized; bounded by distinct user tz values).
+const _validTzCache = new Map();
+function resolveTz(tz) {
+  const candidate = tz || "America/New_York";
+  if (_validTzCache.has(candidate)) return _validTzCache.get(candidate);
+  let resolved;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: candidate });
+    resolved = candidate;
+  } catch {
+    resolved = "America/New_York";
+  }
+  _validTzCache.set(candidate, resolved);
+  return resolved;
+}
+
 /**
  * Get the current hour and minute in the given IANA timezone using Intl.
  * @param {string} tz  IANA timezone string, e.g. "America/New_York"
@@ -27,7 +46,7 @@ function parseMinutes(hhmm) {
  */
 function getLocalTime(tz, now) {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
+    timeZone: resolveTz(tz),
     hour: "numeric",
     minute: "numeric",
     hour12: false,
@@ -52,7 +71,7 @@ function getLocalTime(tz, now) {
  */
 function getLocalDayOfWeek(tz, now) {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
+    timeZone: resolveTz(tz),
     weekday: "short",
   }).formatToParts(now);
 
@@ -69,7 +88,7 @@ function getLocalDayOfWeek(tz, now) {
  */
 function getLocalDateString(tz, now) {
   return new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
+    timeZone: resolveTz(tz),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -96,6 +115,16 @@ export function isInQuietHours(start, end, tz, now) {
   const currentMinutes = hour * 60 + minute;
   const startMinutes = parseMinutes(start);
   const endMinutes = parseMinutes(end);
+
+  // Malformed times parse to NaN — treat as "no quiet window" rather than
+  // letting NaN comparisons pick an arbitrary branch.
+  if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes)) return false;
+
+  // Equal start/end means "no quiet window", NOT 24/7 quiet: the overnight
+  // branch below (cur >= s || cur < s) is a tautology when they're equal,
+  // which permanently queued realtime users' jobs (the flush path only runs
+  // outside quiet hours, i.e. never).
+  if (startMinutes === endMinutes) return false;
 
   if (startMinutes < endMinutes) {
     // Same-day range, e.g. 13:00–17:00

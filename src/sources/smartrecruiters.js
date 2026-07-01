@@ -12,6 +12,11 @@ function parseSmartRecruitersJob(raw, companyConfig) {
   const rawCountry = (loc.country || loc.countryCode || "").toLowerCase();
   const countryCode = rawCountry === "us" ? "US" : rawCountry === "ca" ? "CA" : rawCountry ? "NON-US" : "";
 
+  // Drop confirmed-foreign rows at the source (match ford/hexaware): these
+  // boards are global (Bosch/Sanofi/Experian), and keeping NON-US rows let
+  // them crowd fresh US/CA jobs out of the maxJobsPerSource cap.
+  if (countryCode === "NON-US") return null;
+
   const url = `https://jobs.smartrecruiters.com/${companyConfig.companySlug}/${raw.id}`;
 
   let postedAt = "";
@@ -60,6 +65,10 @@ export async function collectSmartRecruitersJobs(_unused, config, log, companyKe
     const jobs = rawJobs
       .map((raw) => parseSmartRecruitersJob(raw, companyConfig))
       .filter(Boolean);
+
+    // API ordering is not date-based. Sort by postedAt DESC so the
+    // maxJobsPerSource cap keeps the freshest postings (same as lever.js).
+    jobs.sort((a, b) => (Date.parse(b.postedAt) || 0) - (Date.parse(a.postedAt) || 0));
 
     log(`${companyConfig.sourceLabel} API returned ${rawJobs.length} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);

@@ -28,7 +28,11 @@ function parseMicrosoftJob(raw, config) {
   if (raw.postedTs && Number.isFinite(raw.postedTs)) {
     const ms = raw.postedTs > 1_000_000_000_000 ? raw.postedTs : raw.postedTs * 1000;
     postedAt = new Date(ms).toISOString();
-    postedPrecision = "exact";
+    // Eightfold/PCSX postedTs is the start-of-day UTC timestamp, not an exact
+    // post time (same API family as pcsx.js). "exact" made every Microsoft job
+    // look stale outside 00:00–03:00 UTC; "date" routes it through the
+    // day-granular freshness path (maxDateOnlyAgeDays).
+    postedPrecision = "date";
   }
 
   const locations = Array.isArray(raw.locations) ? raw.locations : [];

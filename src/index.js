@@ -38,7 +38,7 @@ import { collectDynatraceJobs } from "./sources/dynatrace.js";
 import {
   initDb, closeDb, migrateFromJson,
   getNewJobs, getUnnotifiedJobs, upsertJobs, pruneState, hasSeenJobs, expireSavedJobPosts,
-  updateJobLegitimacy, upsertJobPost
+  updateJobLegitimacy, recordExternalDelivery
 } from "./state.js";
 import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } from "./jd-filter.js";
 import { checkLegitimacy } from "./legitimacy.js";
@@ -167,19 +167,33 @@ async function sendNotifications(config, jobs, filteredResults, options = {}) {
   }
 
   // Webhook fallback, used when the bot path is unavailable or failed.
+  // Each notifier is individually try/caught: a deterministic notifier throw
+  // (e.g. deleted webhook → 404) used to propagate up and freeze the batch
+  // rotation on the same batch every cycle.
   if (!botDelivered && config.notifications.discordWebhookUrl) {
-    await sendDiscordNotification(config.notifications.discordWebhookUrl, jobs, options);
-    notified = true;
+    try {
+      await sendDiscordNotification(config.notifications.discordWebhookUrl, jobs, options);
+      notified = true;
+    } catch (error) {
+      log(`[notify] Webhook send failed: ${error.message}`);
+    }
   }
 
-  if (config.notifications.telegramBotToken && config.notifications.telegramChatId) {
-    await sendTelegramNotification(
-      config.notifications.telegramBotToken,
-      config.notifications.telegramChatId,
-      jobs,
-      options
-    );
-    notified = true;
+  // Telegram is dormant (not required). Code kept for future re-enable:
+  // set TELEGRAM_ENABLED=1 plus the token/chat env vars to turn it back on.
+  const telegramEnabled = process.env.TELEGRAM_ENABLED === "1";
+  if (telegramEnabled && config.notifications.telegramBotToken && config.notifications.telegramChatId) {
+    try {
+      await sendTelegramNotification(
+        config.notifications.telegramBotToken,
+        config.notifications.telegramChatId,
+        jobs,
+        options
+      );
+      notified = true;
+    } catch (error) {
+      log(`[notify] Telegram send failed: ${error.message}`);
+    }
   }
 
   // Dedupe ledger: the Discord-bot path records job_posts per successful send (with
@@ -189,7 +203,7 @@ async function sendNotifications(config, jobs, filteredResults, options = {}) {
   if (notified && !botDelivered && !options.dryRun) {
     for (const job of jobs) {
       try {
-        upsertJobPost(job.key, null, null, config.notifications.discordChannelId || null);
+        recordExternalDelivery(job.key, config.notifications.discordChannelId);
       } catch (error) {
         log(`[notify] Ledger write failed for ${job.key}: ${error.message}`);
       }
@@ -316,17 +330,20 @@ async function collectBatch(config, entries) {
   let errorCount = 0;
   const results = await Promise.all(
     entries.map(async (entry) => {
+      let timer;
       try {
         return await Promise.race([
           entry.collect(config),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Collector timed out after 30s')), COLLECTOR_TIMEOUT_MS)
-          ),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('Collector timed out after 30s')), COLLECTOR_TIMEOUT_MS);
+          }),
         ]);
       } catch (error) {
         errorCount += 1;
         log(`[${entry.key}] Collection error: ${error.message}`);
         return [];
+      } finally {
+        clearTimeout(timer);
       }
     })
   );
@@ -458,9 +475,17 @@ async function runBatchLoop(config, flags, registry) {
             await finishRotation();
           }
         } catch (batchError) {
-          if (!isSqliteBusy(batchError)) throw batchError;
+          // Advance rotation on EVERY error. Previously only SQLITE_BUSY
+          // advanced; any other persistent per-batch failure kept batchIndex
+          // frozen, silently starving all later batches while the heartbeat
+          // stayed green on the fast lane.
           advanceBatchIndex();
-          await backoffAfterDbBusy(config, batchLabel, batchError);
+          if (isSqliteBusy(batchError)) {
+            await backoffAfterDbBusy(config, batchLabel, batchError);
+          } else {
+            log(`[${batchLabel}] Error: ${batchError.message}`);
+            void pingFail(config.heartbeat.micro, `${batchLabel}: ${batchError.message}`);
+          }
         }
       }
 
@@ -484,16 +509,21 @@ async function runBatchLoop(config, flags, registry) {
             lastPlaywrightSourceRuns.set(entry.key, Date.now());
           }
 
+          let slowTimer;
           try {
             const entryConfig = entry.usesPlaywright
               ? { ...config, maxPostAgeMinutes: config.nightlyPlaywrightMaxPostAgeMinutes }
               : config;
             const jobs = await Promise.race([
               entry.collect(entryConfig),
-              new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout after 60s")), 60000))
+              new Promise((_, reject) => {
+                slowTimer = setTimeout(() => reject(new Error("Timeout after 60s")), 60000);
+              })
             ]);
+            clearTimeout(slowTimer);
             await processBatchResults(entryConfig, flags, jobs, `slow:${entry.key}`);
           } catch (error) {
+            clearTimeout(slowTimer);
             if (isSqliteBusy(error)) {
               await backoffAfterDbBusy(config, `slow:${entry.key}`, error);
             } else {

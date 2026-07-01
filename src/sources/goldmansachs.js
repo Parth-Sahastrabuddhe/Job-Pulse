@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { dedupeJobs, detectSeniority, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 const GS_GRAPHQL_URL = "https://api-higher.gs.com/gateway/api/v1/graphql";
 
@@ -26,9 +26,27 @@ const GET_ROLES_QUERY = `query GetRoles($searchQueryInput: RoleSearchQueryInput!
   }
 }`;
 
+// Seniority levels that must be surfaced in the title. GS carries the level in
+// corporateTitle ("Vice President", "Executive Director"), which is often
+// absent from jobTitle — and filter.js re-derives seniority from the title
+// string alone, so a VP role titled just "Software Engineer" was classified
+// entry_mid and delivered to entry/mid users.
+const ELEVATED_LEVELS = new Set(["senior", "staff", "director"]);
+
 function parseGSJob(raw) {
-  const title = raw.jobTitle?.trim();
+  let title = raw.jobTitle?.trim();
   if (!title || !isTargetRole(title)) return null;
+
+  // Fold an ELEVATING corporate title into the job title so downstream
+  // seniority detection sees it. Non-elevating corp titles (Analyst,
+  // Associate) are left off — appending them would re-key existing rows for
+  // no signal gain. Note: this re-keys elevated GS jobs once (dedup identity
+  // includes the title), which is acceptable since they were misclassified.
+  const corpTitle = raw.corporateTitle?.trim() || "";
+  if (corpTitle && ELEVATED_LEVELS.has(detectSeniority(corpTitle))
+      && !ELEVATED_LEVELS.has(detectSeniority(title))) {
+    title = `${title} - ${corpTitle}`;
+  }
 
   const roleId = raw.externalSource?.sourceId || raw.roleId?.replace(/_.*/, "") || "";
   const id = String(roleId);

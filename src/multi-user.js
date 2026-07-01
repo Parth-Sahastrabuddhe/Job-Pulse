@@ -42,6 +42,7 @@ import {
   getUserProfile,
   searchUserJobs,
   safeLogError,
+  flushDmLog,
   flushDmLogSync,
 } from "./multi-user-state.js";
 import { filterJobForUser } from "./filter.js";
@@ -851,7 +852,9 @@ function enrichFromDescription(description, user) {
 
     const rawWarnings = checkJobDescription(description);
     warnings = rawWarnings.filter((w) => {
-      if (w.text.startsWith("No sponsorship")) {
+      // Sponsorship-related warnings (hard blocks AND ambiguous work-auth
+      // language) only matter to users who need sponsorship.
+      if (w.text.startsWith("No sponsorship") || w.text.startsWith("Work-auth")) {
         return Boolean(user.requires_sponsorship);
       }
       if (/^\d+\+ years required/.test(w.text)) {
@@ -941,9 +944,36 @@ async function pollLoop() {
 // getMuDeliveredJobKeys dedups already-delivered jobs (and a failed send gets a
 // free retry while it is still inside the window).
 const MU_CURSOR_SAFETY_MARGIN_MS = Number(process.env.MU_CURSOR_SAFETY_MARGIN_MS) || 60_000;
+// A transient DM failure used to get retries only while inside the 60s margin,
+// after which the cursor moved past the job and it was PERMANENTLY dropped for
+// that user (any Discord outage >60s lost that window's jobs for everyone).
+// Now the cursor holds just before the oldest transient failure — bounded by
+// MU_CURSOR_MAX_HOLD_MS so a stuck recipient can't freeze delivery forever —
+// and retries are spaced by MU_TRANSIENT_RETRY_SPACING_MS to avoid hammering.
+const MU_CURSOR_MAX_HOLD_MS = Number(process.env.MU_CURSOR_MAX_HOLD_MS) || 24 * 60 * 60 * 1000;
+const TRANSIENT_RETRY_SPACING_MS = Number(process.env.MU_TRANSIENT_RETRY_SPACING_MS) || 10 * 60 * 1000;
+const transientRetryAt = new Map(); // `${userId}:${jobKey}` -> last failed-attempt ms
 
-function advanceMuCursor(db, nowIso) {
-  const trailed = new Date(Date.parse(nowIso) - MU_CURSOR_SAFETY_MARGIN_MS).toISOString();
+function advanceMuCursor(db, nowIso, holdAtMs = null) {
+  // Persist buffered dm_log entries BEFORE the cursor: a hard kill between
+  // cursor persist and buffer flush would otherwise re-deliver the whole
+  // window's DMs on restart (cursor says "done", ledger says "never sent").
+  try {
+    flushDmLog();
+  } catch (err) {
+    console.error(`[multi-user] dm_log flush before cursor persist failed: ${err.message}`);
+  }
+
+  const nowMs = Date.parse(nowIso);
+  let targetMs = nowMs - MU_CURSOR_SAFETY_MARGIN_MS;
+  if (holdAtMs !== null) {
+    targetMs = Math.max(Math.min(targetMs, holdAtMs - 1), nowMs - MU_CURSOR_MAX_HOLD_MS);
+  }
+  // Never move the cursor backwards.
+  const currentMs = Date.parse(lastPollAt);
+  if (Number.isFinite(currentMs) && targetMs < currentMs) targetMs = currentMs;
+
+  const trailed = new Date(targetMs).toISOString();
   lastPollAt = trailed;
   try {
     db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(trailed);
@@ -1043,6 +1073,22 @@ async function runPollCycle() {
   const livenessCache = new Map(); // url -> boolean
   const jdCache = new Map();       // job.key -> description|null
 
+  // Oldest first_seen_at among transiently-failed sends this cycle; the cursor
+  // holds just before it so those jobs stay in the window and get retried.
+  let oldestTransientFailureMs = null;
+  const holdCursorAt = (job) => {
+    const firstSeenMs = Date.parse(job.first_seen_at ?? "");
+    if (!Number.isFinite(firstSeenMs)) return;
+    if (oldestTransientFailureMs === null || firstSeenMs < oldestTransientFailureMs) {
+      oldestTransientFailureMs = firstSeenMs;
+    }
+  };
+  // Drop retry-spacing entries older than the max cursor hold — those jobs have
+  // aged out of the window, so the entries would otherwise accumulate forever.
+  for (const [key, ts] of transientRetryAt) {
+    if (Date.now() - ts > MU_CURSOR_MAX_HOLD_MS) transientRetryAt.delete(key);
+  }
+
   for (const user of users) {
     // ── Setup phase (per-user) ──────────────────────────────────────────────
     let seenKeys, profileInvalid, matchedJobs, userTz;
@@ -1076,6 +1122,15 @@ async function runPollCycle() {
     for (const job of matchedJobs) {
       try {
         const liveKey = `${user.id}:${job.key}`;
+
+        // Still inside the retry-spacing window after a transient send failure:
+        // keep the job in the poll window (hold the cursor) but skip the
+        // liveness/JD work — otherwise a stuck send re-fetches the JD every 10s.
+        const lastFailedAttempt = transientRetryAt.get(liveKey) || 0;
+        if (Date.now() - lastFailedAttempt < TRANSIENT_RETRY_SPACING_MS) {
+          holdCursorAt(job);
+          continue;
+        }
 
         // Check if job URL is still live, skip ghost listings. Memoized per URL
         // for this cycle so a job matching many users is checked only once.
@@ -1125,9 +1180,23 @@ async function runPollCycle() {
 
         if (action === "send") {
           const result = await sendJobDm(client, user.discord_id, job, user.first_name, dmOptions);
-          recordJobDelivery(user.id, job.key, result ? "sent" : "failed");
-          if (!result) {
-            console.error(`[multi-user] DM to ${user.discord_id} (user ${user.id}) returned null for ${job.title}`);
+          if (result.ok) {
+            recordJobDelivery(user.id, job.key, "sent");
+            transientRetryAt.delete(liveKey);
+          } else if (result.permanent) {
+            // DMs closed / bot blocked / unknown user — retrying cannot help.
+            // dm_closed dedups permanently so the job stops looping.
+            recordJobDelivery(user.id, job.key, "dm_closed");
+            transientRetryAt.delete(liveKey);
+            safeLogError("dm-closed", `user=${user.id} discord=${user.discord_id} job=${job.title} (${job.sourceLabel})`);
+          } else {
+            // Transient failure: record it, space out retries, and hold the
+            // cursor so the job stays in the poll window instead of being
+            // dropped forever once the 60s margin passes.
+            recordJobDelivery(user.id, job.key, "failed");
+            transientRetryAt.set(liveKey, Date.now());
+            holdCursorAt(job);
+            console.error(`[multi-user] DM to ${user.discord_id} (user ${user.id}) failed transiently for ${job.title}`);
             safeLogError("dm-failed", `user=${user.id} discord=${user.discord_id} job=${job.title} (${job.sourceLabel})`);
           }
         } else {
@@ -1143,7 +1212,7 @@ async function runPollCycle() {
     }
   }
 
-  advanceMuCursor(db, nowIso);
+  advanceMuCursor(db, nowIso, oldestTransientFailureMs);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1171,6 +1240,15 @@ async function digestLoop() {
   }
 }
 
+// Backoff for failed digest/flush sends. Each digest attempt re-runs the full
+// JD-enrichment loop over every queued job, so a user with DMs closed used to
+// burn N JD fetches per minute from 08:00 local for the rest of the day.
+const DIGEST_RETRY_SPACING_MS = 30 * 60 * 1000;
+const DIGEST_MAX_ATTEMPTS_PER_DAY = 3;
+const digestAttempts = new Map(); // userId -> { count, lastAt, day }
+const FLUSH_RETRY_SPACING_MS = 5 * 60 * 1000;
+const flushRetryAt = new Map(); // userId -> last failed flush-attempt ms
+
 async function runDigestCycle() {
   const db   = getDb();
   const now  = new Date();
@@ -1192,6 +1270,15 @@ async function runDigestCycle() {
         const lastDeliveredAt = lastDeliveryRow?.sent_at ?? null;
 
         if (shouldDeliverDigest(mode, tz, lastDeliveredAt, now)) {
+          // Failed-digest backoff: 30 min between attempts, max 3 per day.
+          const dayKey = now.toISOString().slice(0, 10);
+          const attempt = digestAttempts.get(user.id);
+          if (attempt && attempt.day === dayKey &&
+              (attempt.count >= DIGEST_MAX_ATTEMPTS_PER_DAY ||
+               (Date.now() - attempt.lastAt) < DIGEST_RETRY_SPACING_MS)) {
+            continue;
+          }
+
           const queuedRows = db
             .prepare(
               "SELECT job_key FROM dm_log WHERE user_id = ? AND status = 'queued'"
@@ -1243,17 +1330,24 @@ async function runDigestCycle() {
           // overflow (>20) queued for the next digest. Refresh sent_at so the
           // daily/weekly cadence check reads the real delivery time, not the
           // original enqueue time (which would let the digest fire twice a day).
-          if (digestResult.ok && digestResult.deliveredKeys.length > 0) {
-            const sentAt = new Date().toISOString();
-            const ph = digestResult.deliveredKeys.map(() => "?").join(",");
-            withBusyRetry(() =>
-              db
-                .prepare(
-                  `UPDATE dm_log SET status = 'sent', sent_at = ?
-                   WHERE user_id = ? AND status = 'queued' AND job_key IN (${ph})`
-                )
-                .run(sentAt, user.id, ...digestResult.deliveredKeys)
-            );
+          if (digestResult.ok) {
+            digestAttempts.delete(user.id);
+            if (digestResult.deliveredKeys.length > 0) {
+              const sentAt = new Date().toISOString();
+              const ph = digestResult.deliveredKeys.map(() => "?").join(",");
+              withBusyRetry(() =>
+                db
+                  .prepare(
+                    `UPDATE dm_log SET status = 'sent', sent_at = ?
+                     WHERE user_id = ? AND status = 'queued' AND job_key IN (${ph})`
+                  )
+                  .run(sentAt, user.id, ...digestResult.deliveredKeys)
+              );
+            }
+          } else {
+            const prevCount = attempt && attempt.day === dayKey ? attempt.count : 0;
+            digestAttempts.set(user.id, { count: prevCount + 1, lastAt: Date.now(), day: dayKey });
+            console.log(`[multi-user] Digest send failed for user ${user.id}; attempt ${prevCount + 1}/${DIGEST_MAX_ATTEMPTS_PER_DAY} today.`);
           }
         }
         continue;
@@ -1269,6 +1363,12 @@ async function runDigestCycle() {
         );
 
         if (!inQuiet) {
+          // Failed-flush backoff: without this a user with DMs closed re-runs
+          // JD enrichment for the head of their queue every 60 seconds.
+          if (Date.now() - (flushRetryAt.get(user.id) || 0) < FLUSH_RETRY_SPACING_MS) {
+            continue;
+          }
+
           // Deliver any individually queued messages
           const queuedRows = db
             .prepare(
@@ -1297,7 +1397,8 @@ async function runDigestCycle() {
               flushOpts.notificationChannelId = flushChannelOverride;
             }
             const result = await sendJobDm(client, user.discord_id, job, user.first_name, flushOpts);
-            if (result) {
+            if (result.ok) {
+              flushRetryAt.delete(user.id);
               // Busy-retry the post-send write: a SQLITE_BUSY here after a
               // successful DM would otherwise leave the row 'queued' and re-deliver
               // it next cycle.
@@ -1308,6 +1409,23 @@ async function runDigestCycle() {
                   )
                   .run(new Date().toISOString(), user.id, row.job_key)
               );
+            } else if (result.permanent) {
+              // Retrying can't help this recipient (DMs closed / blocked).
+              // Mark the row so it stops looping and skip the rest of the
+              // user's queue for now.
+              withBusyRetry(() =>
+                db
+                  .prepare(
+                    "UPDATE dm_log SET status = 'dm_closed' WHERE user_id = ? AND job_key = ? AND status = 'queued'"
+                  )
+                  .run(user.id, row.job_key)
+              );
+              flushRetryAt.set(user.id, Date.now());
+              break;
+            } else {
+              // Transient failure: leave the row queued, back off this user.
+              flushRetryAt.set(user.id, Date.now());
+              break;
             }
 
             await new Promise((resolve) => setTimeout(resolve, 300));
@@ -1350,12 +1468,24 @@ client.once("ready", async () => {
     console.error(`[multi-user] Failed to register slash commands: ${err.message}`);
   }
 
-  // Auto-seed h1b_sponsors for any companies missing from the table
-  seedMissingH1bSponsors();
+  // Auto-seed h1b_sponsors for any companies missing from the table. Guarded:
+  // this ready handler is async, so an unguarded SQLITE_BUSY here (micro-bot
+  // mid write-burst during a deploy) became an unhandledRejection →
+  // process.exit(1) → pm2 restart loop before the delivery loops ever started.
+  try {
+    seedMissingH1bSponsors();
+  } catch (err) {
+    console.error(`[multi-user] H1B sponsor seeding failed (continuing; reruns next restart): ${err.message}`);
+  }
 
   // Restore lastPollAt from DB so restarts don't lose pending jobs
-  const saved = getDb().prepare("SELECT value FROM meta WHERE key = 'mu_lastPollAt'").get();
-  lastPollAt = saved?.value || new Date().toISOString();
+  try {
+    const saved = getDb().prepare("SELECT value FROM meta WHERE key = 'mu_lastPollAt'").get();
+    lastPollAt = saved?.value || new Date().toISOString();
+  } catch (err) {
+    lastPollAt = new Date().toISOString();
+    console.error(`[multi-user] Failed to restore poll cursor (starting from now): ${err.message}`);
+  }
   console.log(`[multi-user] Resuming poll from ${lastPollAt}`);
 
   // Start loops

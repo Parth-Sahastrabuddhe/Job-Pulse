@@ -61,17 +61,22 @@ export function filterJobForUser(job, profile, options = {}) {
   }
 
   // 5. Country — user preference is a list (JSON array, legacy scalar, or empty).
+  //    A blank job country means "unknown"; the upstream gate only admits
+  //    blank-country jobs that look like remote/no-location postings, which in
+  //    practice are US-market. Treat them as US here instead of fail-open, so
+  //    they stop reaching users who did NOT select US (e.g. CA-only).
   const userCountries = parseUserCountries(profile.country);
-  const jobCountry = (job.countryCode || "").toUpperCase();
+  const jobCountry = (job.countryCode || "").toUpperCase() || "US";
   if (!userCountries.includes("ALL")) {
-    if (jobCountry && !userCountries.includes(jobCountry)) {
+    if (!userCountries.includes(jobCountry)) {
       return { pass: false, reason: "country_mismatch" };
     }
   }
 
-  // 6. Sponsorship — the H1B-sponsor list is US-specific. Apply it only to US or
-  //    unknown-country jobs; confirmed non-US jobs (e.g. CA) skip it.
-  if (profile.requires_sponsorship && (jobCountry === "" || jobCountry === "US")) {
+  // 6. Sponsorship — the H1B-sponsor list is US-specific. Apply it only to US
+  //    jobs (unknown-country jobs default to US above); confirmed non-US jobs
+  //    (e.g. CA) skip it.
+  if (profile.requires_sponsorship && jobCountry === "US") {
     const { sponsorLookup } = options;
     if (sponsorLookup && !sponsorLookup(job.sourceKey)) {
       return { pass: false, reason: "non_sponsor_company" };

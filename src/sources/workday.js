@@ -87,8 +87,13 @@ function parseWorkdayJob(raw, companyConfig, countryTag) {
 const WORKDAY_PAGE_SIZE = 20;
 const WORKDAY_PAGE_CONCURRENCY = 5;
 const WORKDAY_MAX_RESULTS = 1500;
-// Cache per tenant: { us: Facet|null, ca: Facet|null } where Facet = { param, ids: string[] }
+// Cache per tenant: { us: Facet|null, ca: Facet|null, failedAt?: number } where
+// Facet = { param, ids: string[] }. failedAt marks a DISCOVERY FAILURE entry:
+// retried after FACET_RETRY_MS instead of being cached forever — one transient
+// 503 at boot used to degrade the tenant to the unfiltered inference pass for
+// the whole process lifetime.
 const facetCache = new Map();
+const FACET_RETRY_MS = 60 * 60 * 1000;
 
 async function fetchWorkdayPage(apiUrl, body) {
   const response = await fetchWithTimeout(apiUrl, {
@@ -188,14 +193,17 @@ export async function collectWorkdayJobs(_unused, config, log, companyKey) {
   }
 
   try {
-    if (!facetCache.has(companyKey)) {
+    const cachedFacets = facetCache.get(companyKey);
+    const retryFailedDiscovery =
+      cachedFacets?.failedAt && (Date.now() - cachedFacets.failedAt) >= FACET_RETRY_MS;
+    if (!cachedFacets || retryFailedDiscovery) {
       try {
         const facets = await discoverFacets(companyConfig.apiUrl);
         facetCache.set(companyKey, facets);
         log(`${companyConfig.sourceLabel}: facets US=${facets.us ? facets.us.ids.length : 0} CA=${facets.ca ? facets.ca.ids.length : 0}`);
       } catch (e) {
-        facetCache.set(companyKey, { us: null, ca: null });
-        log(`${companyConfig.sourceLabel}: facet discovery failed (${e.message}), falling back to unfiltered`);
+        facetCache.set(companyKey, { us: null, ca: null, failedAt: Date.now() });
+        log(`${companyConfig.sourceLabel}: facet discovery failed (${e.message}), falling back to unfiltered (retry in ${FACET_RETRY_MS / 60000}m)`);
       }
     }
     const { us, ca } = facetCache.get(companyKey);

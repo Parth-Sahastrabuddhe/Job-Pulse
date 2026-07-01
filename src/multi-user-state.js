@@ -178,7 +178,7 @@ export function getMuDeliveredJobKeys(userId) {
   const db = getDb();
   // Jobs the mu bot delivered (or filtered)
   const dmRows = db
-    .prepare("SELECT DISTINCT job_key FROM dm_log WHERE user_id = ? AND status IN ('sent','queued','dead_link')")
+    .prepare("SELECT DISTINCT job_key FROM dm_log WHERE user_id = ? AND status IN ('sent','queued','dead_link','dm_closed')")
     .all(userId);
   // Jobs the user acted on (should not re-notify regardless of source)
   const actionRows = db
@@ -415,7 +415,9 @@ function dmLogFlushMaxSize() {
   const v = Number.parseInt(process.env.DM_LOG_FLUSH_MAX_SIZE ?? "", 10);
   return Number.isFinite(v) && v > 0 ? v : 100;
 }
-const _DM_LOG_DEDUP_STATUSES = new Set(["sent", "queued", "dead_link"]);
+// 'dm_closed' = permanent recipient failure (DMs closed / bot blocked / unknown
+// user): retrying cannot help, so it dedups like a delivery instead of looping.
+const _DM_LOG_DEDUP_STATUSES = new Set(["sent", "queued", "dead_link", "dm_closed"]);
 
 const _dmLogBuffer = [];
 const _bufferedKeysByUser = new Map(); // userId -> Set<jobKey>
@@ -459,7 +461,12 @@ function _doFlush(useRetry) {
   );
   const tx = db.transaction(() => {
     for (const e of toFlush) {
-      insertUserJob.run(e.userId, e.jobKey, e.timestamp);
+      // Only deliveries and queued-for-digest entries create a user-visible
+      // "notified" row; failed/dead_link/dm_closed are delivery bookkeeping
+      // for jobs the user never saw (they polluted /search and the tracker).
+      if (e.status === "sent" || e.status === "queued") {
+        insertUserJob.run(e.userId, e.jobKey, e.timestamp);
+      }
       insertDm.run(e.userId, e.jobKey, e.status, e.timestamp);
     }
   });

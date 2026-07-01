@@ -22,9 +22,17 @@ function parseBloombergJobs(html) {
     const locationMatch = section.match(/list-item-location[^>]*>([^<]+)/);
     const location = locationMatch ? locationMatch[1].trim() : "";
 
+    // Fail closed on a blank location: this search is GLOBAL (no country scope
+    // in the URL), so a blank location would ride the country gate's
+    // "no location = probably remote US" grace straight to users — the same
+    // blanked-location class that leaked Citi Canada jobs. If Avature renames
+    // the location markup this drops everything (visible in the log counts)
+    // instead of leaking London/Tokyo/Pune postings.
+    if (!location) continue;
+
     const url = `https://bloomberg.avature.net/careers/JobDetail/${slug}/${id}`;
 
-    jobs.push(finalizeJob({
+    const job = finalizeJob({
       sourceKey: "bloomberg",
       sourceLabel: "Bloomberg",
       id,
@@ -35,7 +43,13 @@ function parseBloombergJobs(html) {
       postedPrecision: "",
       url,
       countryCode: ""
-    }));
+    });
+
+    // Drop confirmed-foreign rows at the source so they can't crowd US/CA
+    // jobs out of the per-source cap (the gate would reject them anyway).
+    if (job.countryCode === "NON-US") continue;
+
+    jobs.push(job);
   }
 
   // Dedupe by ID (page has duplicate links per card)

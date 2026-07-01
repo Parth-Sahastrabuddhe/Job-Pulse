@@ -38,6 +38,10 @@ export function getJobDir(job) {
 }
 
 async function fetchMicrosoftDescription(job) {
+  // Guarded like every other fetcher: a network error/abort here must return
+  // null (so the fallback chain and saveJobData still run), not throw out of
+  // fetchJobDescription.
+  try {
   const url = `https://apply.careers.microsoft.com/api/pcsx/position_details?position_id=${job.id}&domain=microsoft.com`;
   const resp = await fetchWithTimeout(url, {
     headers: {
@@ -66,6 +70,10 @@ async function fetchMicrosoftDescription(job) {
   if (pos.preferredQualifications) parts.push(`\nPreferred Qualifications:\n${stripHtml(pos.preferredQualifications)}`);
 
   return parts.join("\n");
+  } catch (e) {
+    console.error(`[jd] Microsoft fetch failed: ${e.message}`);
+    return null;
+  }
 }
 
 async function fetchAmazonDescription(job, rawJobData) {
@@ -185,6 +193,9 @@ async function fetchGoogleDescription(job, rawJobData) {
 }
 
 async function fetchMetaDescription(job) {
+  // Guarded like every other fetcher: a metacareers.com timeout must return
+  // null (fallback chain + saveJobData still run), not throw.
+  try {
   const resp = await fetchWithTimeout(`https://www.metacareers.com/jobs/${job.id}`, {
     headers: { "user-agent": "Mozilla/5.0" }
   }, 20000);
@@ -194,7 +205,6 @@ async function fetchMetaDescription(job) {
   const ldMatch = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/i);
   if (!ldMatch) return null;
 
-  try {
     const ld = JSON.parse(ldMatch[1]);
     const parts = [];
     if (ld.title) parts.push(`Title: ${ld.title}`);
@@ -636,8 +646,11 @@ export async function fetchJobDescription(job, rawJobData, options = {}) {
     description = await fetchUberDescription(job);
   }
 
-  // JPMorgan / Ford / EXL (Oracle HCM - same approach)
-  if (!description && allowPlaywright && (job.sourceKey === "jpmorgan" || job.sourceKey === "ford" || job.sourceKey === "exl")) {
+  // JPMorgan / Ford / EXL / Hexaware (Oracle HCM - same approach). Hexaware
+  // serves the same CandidateExperience SPA (fa-etqo-saasfaprod1...), so plain
+  // HTTP gets an empty shell; without this route its descriptions were always blank.
+  const ORACLE_HCM_SOURCES = new Set(["jpmorgan", "ford", "exl", "hexaware"]);
+  if (!description && allowPlaywright && ORACLE_HCM_SOURCES.has(job.sourceKey)) {
     description = await fetchOracleHCMDescription(job);
   }
 

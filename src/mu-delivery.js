@@ -157,7 +157,9 @@ export function buildJobEmbed(job, { timezone, experienceYears, warnings = [] } 
  * @param {object}  [options]
  * @param {string}  [options.timezone]        IANA timezone for date formatting
  * @param {number}  [options.experienceYears] max experience years from JD
- * @returns {Promise<{ messageId: string }|null>}
+ * @returns {Promise<{ ok: true, messageId: string }|{ ok: false, permanent: boolean }>}
+ *          permanent=true means retrying cannot help (DMs closed / blocked /
+ *          unknown user); permanent=false is a transient failure worth retrying.
  */
 export async function sendJobDm(client, discordId, job, firstName, options = {}) {
   try {
@@ -185,10 +187,13 @@ export async function sendJobDm(client, discordId, job, firstName, options = {})
       message = await user.send(payload);
     }
 
-    return { messageId: message.id };
+    return { ok: true, messageId: message.id };
   } catch (err) {
-    console.error(`[mu-delivery] Failed to send notification for ${discordId}: ${err.message}`);
-    return null;
+    // 50007 = Cannot send messages to this user (DMs closed / bot blocked),
+    // 10013 = Unknown user. Both are permanent for this recipient.
+    const permanent = err?.code === 50007 || err?.code === 10013;
+    console.error(`[mu-delivery] Failed to send notification for ${discordId}${permanent ? " (permanent: DMs closed/blocked)" : ""}: ${err.message}`);
+    return { ok: false, permanent };
   }
 }
 

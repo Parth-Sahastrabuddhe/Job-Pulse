@@ -89,7 +89,7 @@ export function parseUserCountries(value) {
 
 // --- Role category patterns (one per supported category) ---
 const ROLE_CATEGORY_PATTERNS = {
-  software_engineer: /(?:(?:software|backend|back[\s-]?end|full[\s-]?stack|systems|cloud)\s+(?:engineer|develop)|application\s+(?:software\s+)?develop|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i,
+  software_engineer: /(?:(?:software|backend|back[\s-]?end|full[\s-]?stack|systems|cloud)\s+(?:engineer|develop)|\bSW\s+(?:engineer|develop)|applications?\s+(?:software\s+)?develop|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i,
   data_engineer: /(?:data\s+(?:engineer|platform|infrastructure)|analytics\s+engineer|\bETL\b)/i,
   data_analyst: /(?:data\s+analyst|business\s+(?:intelligence\s+)?analyst|\bBI\s+analyst\b|analytics\s+analyst|product\s+analyst)/i,
   data_scientist: /(?:data\s+scientist|applied\s+scientist|research\s+scientist)/i,
@@ -273,7 +273,7 @@ export function splitLines(value) {
     .filter(Boolean);
 }
 
-const NON_US_CITIES = /\b(Bengaluru|Bangalore|Hyderabad|Mumbai|Pune|Chennai|Delhi|Gurgaon|Gurugram|Noida|Kolkata|Ahmedabad|Jaipur|Lucknow|Chandigarh|Thiruvananthapuram|Kochi|Coimbatore|Indore|Nagpur|Visakhapatnam|Bhubaneswar|Mangalore|Mysore|Vadodara|Surat|Amsterdam|London|Berlin|Munich|Frankfurt|Paris|Dublin|Tokyo|Singapore|Sydney|Melbourne|Shanghai|Beijing|Shenzhen|Seoul|Zurich|Stockholm|Warsaw|Prague|Lisbon|Madrid|Milan|Rome|Barcelona|Brussels|Vienna|Copenhagen|Oslo|Helsinki|Bucharest|Budapest|Krakow|Tel Aviv|Sao Paulo|Mexico City|Bogota|Manila|Kuala Lumpur|Jakarta|Bangkok|Ho Chi Minh|Cairo|Lagos|Nairobi|Johannesburg|Cape Town|Dubai|Riyadh|Hong Kong|Luxembourg|Zagreb|Belgrade|Tallinn|Riga|Vilnius|Kyiv|Minsk|Moscow|Istanbul|Karachi|Lahore|Dhaka|Colombo|Auckland|Wellington|Oxford|Cambridge|Edinburgh|Manchester|Birmingham UK|Bristol|Leeds|Glasgow|Hamburg|Cologne|Stuttgart|Lyon|Marseille|Toulouse|Osaka|Nagoya|Taipei|Hsinchu|Brisbane|Perth|Adelaide|Belfast|Cork|Limerick|Gothenburg|Malmo|Rotterdam|The Hague|Eindhoven|Shinjuku|Minato|Chiyoda|Chuo|Shibuya|Dusseldorf|Dortmund|Leipzig|Nantes|Lille|Bordeaux|Grenoble|Wroclaw|Gdansk|Poznan|Galway|Sao Jose dos Campos|Campinas)\b/i;
+const NON_US_CITIES = /\b(Bengaluru|Bangalore|Hyderabad|Mumbai|Pune|Chennai|Delhi|Gurgaon|Gurugram|Noida|Kolkata|Ahmedabad|Jaipur|Lucknow|Chandigarh|Thiruvananthapuram|Kochi|Coimbatore|Indore|Nagpur|Visakhapatnam|Bhubaneswar|Mangalore|Mysore|Vadodara|Surat|Amsterdam|London|Berlin|Munich|Frankfurt|Paris|Dublin|Tokyo|Singapore|Sydney|Melbourne|Shanghai|Beijing|Shenzhen|Seoul|Zurich|Stockholm|Warsaw|Prague|Lisbon|Madrid|Milan|Rome|Barcelona|Brussels|Vienna|Copenhagen|Oslo|Helsinki|Bucharest|Budapest|Krakow|Tel Aviv|Sao Paulo|Mexico City|Bogota|Manila|Kuala Lumpur|Jakarta|Bangkok|Ho Chi Minh|Cairo|Lagos|Nairobi|Johannesburg|Cape Town|Dubai|Riyadh|Hong Kong|Luxembourg|Zagreb|Belgrade|Tallinn|Riga|Vilnius|Kyiv|Minsk|Moscow|Istanbul|Tbilisi|Batumi|Karachi|Lahore|Dhaka|Colombo|Auckland|Wellington|Oxford|Cambridge|Edinburgh|Manchester|Birmingham UK|Bristol|Leeds|Glasgow|Hamburg|Cologne|Stuttgart|Lyon|Marseille|Toulouse|Osaka|Nagoya|Taipei|Hsinchu|Brisbane|Perth|Adelaide|Belfast|Cork|Limerick|Gothenburg|Malmo|Rotterdam|The Hague|Eindhoven|Shinjuku|Minato|Chiyoda|Chuo|Shibuya|Dusseldorf|Dortmund|Leipzig|Nantes|Lille|Bordeaux|Grenoble|Wroclaw|Gdansk|Poznan|Galway|Sao Jose dos Campos|Campinas)\b/i;
 
 // Canada province two-letter codes (comma-anchored, mirrors US_CITY_STATE_CODE_PATTERN).
 // Deliberately excludes "CA" so "San Francisco, CA" stays US (CA = California).
@@ -288,6 +288,23 @@ const CA_CITIES = /\b(Toronto|Vancouver|Montreal|Montr[eé]al|Mississauga|Ottawa
 const CA_EXPLICIT = /\bCanada\b/i;
 const CA_CODE = /\bCAN\b/; // case-sensitive 3-letter ISO; avoids matching "can"
 
+// US state codes collide with ISO2 country codes (IN=India/Indiana,
+// DE=Germany/Delaware, IL=Israel/Illinois) and "Georgia" is both a US state and
+// a country, so "Pune, IN" / "Berlin, DE" / "Tbilisi, Georgia" would hit the US
+// patterns below and be stamped US — a live leak, since the downstream gate
+// trusts the tag. A foreign city name alone must NOT flip the result (Berlin NH,
+// Warsaw IN, Cambridge MA are real US towns), so each check requires the city
+// AND its country's code/name to appear together. Codes are case-sensitive
+// uppercase to avoid matching prose ("...in the region").
+const FOREIGN_CITY_COUNTRY_PAIRS = [
+  { city: /\b(?:Bengaluru|Bangalore|Hyderabad|Mumbai|Pune|Chennai|Delhi|Gurgaon|Gurugram|Noida|Kolkata|Ahmedabad|Jaipur|Lucknow|Chandigarh|Thiruvananthapuram|Kochi|Coimbatore|Indore|Nagpur|Visakhapatnam|Bhubaneswar|Mangalore|Mysore|Vadodara|Surat)\b/i, country: /,\s*IN\b/ },
+  { city: /\b(?:Berlin|Munich|Frankfurt|Hamburg|Cologne|Stuttgart|Dusseldorf|Dortmund|Leipzig)\b/i, country: /,\s*DE\b/ },
+  { city: /\b(?:Tel Aviv|Haifa|Jerusalem|Herzliya)\b/i, country: /,\s*IL\b/ },
+  { city: /\bJakarta\b/i, country: /,\s*ID\b/ },
+  { city: /\bBogota\b/i, country: /,\s*CO\b/ },
+  { city: /\b(?:Tbilisi|Batumi)\b/i, country: /\bGeorgia\b|,\s*GE\b/i },
+];
+
 export function inferCountryCodeFromLocation(location) {
   // Fold diacritics so accented forms ("São Paulo", "Düsseldorf", "Bogotá",
   // "Kraków", "Zürich") match the ASCII city/country allowlists below. The CA
@@ -300,10 +317,12 @@ export function inferCountryCodeFromLocation(location) {
   }
 
   // 1. Explicit US words (strongest signal; US-biased for mixed strings).
+  //    The dotted form uses (?![a-z]) instead of a trailing \b because \b after
+  //    a period never matches end-of-string, which made plain "U.S." dead.
   if (
     /\bunited states\b/i.test(text) ||
     /\busa\b/i.test(text) ||
-    /\bu\.s\.a?\b/i.test(text) ||
+    /\bu\.s\.(?:a\.?)?(?![a-z])/i.test(text) ||
     /\bus only\b/i.test(text) ||
     /\bUS\b/.test(text)
   ) {
@@ -313,6 +332,16 @@ export function inferCountryCodeFromLocation(location) {
   // 2. Explicit Canada words.
   if (CA_EXPLICIT.test(text) || CA_CODE.test(text)) {
     return "CA";
+  }
+
+  // 2.5. Paired foreign city + country code/name — must run BEFORE the US
+  //      state-code/name patterns (step 5) to close the ISO2/state-code
+  //      collision leak. See FOREIGN_CITY_COUNTRY_PAIRS for why pairing is
+  //      required rather than city names alone.
+  for (const pair of FOREIGN_CITY_COUNTRY_PAIRS) {
+    if (pair.city.test(text) && pair.country.test(text)) {
+      return "NON-US";
+    }
   }
 
   // 3. Other non-US countries (and macro-region labels) — BEFORE state/province

@@ -4,8 +4,11 @@
  * Returns an array of warning strings (empty = no issues found).
  */
 
+// HARD negatives: explicit refusal to sponsor, citizenship/green-card gates,
+// "must not require sponsorship now or in the future", export-control "U.S.
+// persons" language. These genuinely block an F1-OPT candidate.
 const NO_SPONSORSHIP_PATTERNS = [
-  /\bno\s+(?:visa\s+)?sponsorship\b/i,
+  /\bno\s+(?:(?:visa|h-?1b|immigration|employment|work)\s+)*sponsorship\b/i,
   /\bnot\s+(?:able\s+to\s+)?(?:(?:provide|offer)\s+(?:(?:visa|immigration|employment)\s+)?)?sponsor/i,
   /\bunable\s+to\s+(?:(?:provide|offer)\s+(?:(?:visa|immigration|employment)\s+)?)?sponsor/i,
   /\bwithout\s+(?:visa\s+)?sponsorship\b(?!\s+for\s+an?\s+export)/i,
@@ -18,11 +21,8 @@ const NO_SPONSORSHIP_PATTERNS = [
   /\bsponsorship\s+(?:is\s+)?not\s+(?:available|offered|provided)/i,
   /\bno\s+immigration\s+sponsorship/i,
   /\bmust\s+be\s+(?:a\s+)?(?:US|U\.S\.)?\s*citizen/i,
-  /\bmust\s+(?:already\s+)?(?:be|have)\s+(?:legally\s+)?authorized\s+to\s+work/i,
-  /\brequire[sd]?\s+(?:to\s+be\s+)?(?:legally\s+)?authorized\s+to\s+work/i,
   /\bpermanent\s+resident\s+(?:status\s+)?required/i,
   /\bgreen\s+card\s+(?:holder\s+)?required/i,
-  /\bUS\s+(?:work\s+)?authorization\s+required/i,
   /\bdo(?:es)?\s+not\s+(?:offer\s+|provide\s+)?visa\s+(?:support|assistance)/i,
   /\bno\s+visa\s+(?:support|assistance)\b/i,
   /\bvisa\s+(?:support|assistance)\s+(?:is\s+)?not\s+(?:available|offered|provided)/i,
@@ -31,7 +31,6 @@ const NO_SPONSORSHIP_PATTERNS = [
   /\bUS\s+citizen(?:s|ship)?\s+(?:only|required)\b/i,
   /\b(?:US|U\.S\.)\s+person(?:s)?\b(?:\s+only)?\b/i,
   /\brequire[sd]?\s+(?:that\s+)?(?:the\s+)?(?:candidate|applicant)s?\s+(?:\w+\s+)*?be\s+(?:a\s+)?(?:US|U\.S\.)\s+citizen/i,
-  /\bmust\s+(?:currently\s+)?(?:hold|have|possess)\s+(?:valid\s+)?(?:US|U\.S\.)\s+(?:work\s+)?authorization/i,
   /\bwithout\s+(?:the\s+)?(?:need\s+for|requiring)\s+(?:visa\s+)?sponsorship/i,
   /\bwork\s+authorization\s+(?:that\s+)?does\s+not\s+(?:now\s+or\s+in\s+the\s+future\s+)?require\s+sponsorship/i,
   /\bnow\s+or\s+in\s+the\s+future\s+require\s+sponsorship/i,
@@ -40,6 +39,65 @@ const NO_SPONSORSHIP_PATTERNS = [
   /\bnot\s+eligible\s+for\s+(?:(?:visa|employment|immigration|work)\s+)*sponsorship/i,
   /\bwill\s+not\s+(?:be\s+)?(?:(?:provide|offer)\w*\s+)?(?:(?:visa|immigration|employment)\s+)?sponsor/i,
 ];
+
+// AMBIGUOUS work-auth boilerplate. An F1-OPT candidate IS "authorized to work
+// in the US", and plenty of JDs carry this line while still sponsoring — these
+// used to be HARD false-blocks. Soft-flagged, and suppressed entirely when a
+// positive sponsorship signal is present in the same JD.
+const AMBIGUOUS_WORKAUTH_PATTERNS = [
+  /\bmust\s+(?:already\s+)?(?:be|have)\s+(?:legally\s+)?authorized\s+to\s+work/i,
+  /\brequire[sd]?\s+(?:to\s+be\s+)?(?:legally\s+)?authorized\s+to\s+work/i,
+  /\bUS\s+(?:work\s+)?authorization\s+required/i,
+  /\bmust\s+(?:currently\s+)?(?:hold|have|possess)\s+(?:valid\s+)?(?:US|U\.S\.)\s+(?:work\s+)?authorization/i,
+];
+
+// POSITIVE sponsorship signals. Never override a HARD negative ("no H-1B
+// sponsorship" matches both and stays blocked); they only suppress the
+// ambiguous boilerplate above. \bOPT\b is case-sensitive so prose "opt out"
+// can't match.
+const POSITIVE_SPONSORSHIP_PATTERNS = [
+  /\b(?:will|can|do(?:es)?|happy\s+to)\s+(?:provide\s+|offer\s+)?sponsor/i,
+  /\bsponsorship\s+(?:is\s+)?(?:available|offered|provided|possible)\b/i,
+  /\b(?:visa|h-?1b|immigration)\s+sponsorship\s+(?:is\s+)?(?:available|offered|provided|possible)\b/i,
+  /\bwe\s+(?:do\s+)?sponsor\b/i,
+  /\bsponsors?\s+(?:work\s+)?visas?\b/i,
+  /\bH-?1B\s+(?:visa\s+)?(?:sponsorship|transfer)s?\b/i,
+  /\b(?:STEM\s+)?OPT\b/,
+  /\bCPT\b/,
+];
+
+/**
+ * Non-LLM sponsorship read of a job description.
+ * @returns {{ status: "blocked"|"ambiguous"|"likely"|"unknown", evidence: string|null }}
+ *   blocked   — explicit hard negative (refusal / citizenship gate)
+ *   likely    — positive signal, no hard negative
+ *   ambiguous — work-auth boilerplate only (F1-OPT may still qualify)
+ *   unknown   — JD silent on the topic
+ */
+export function assessSponsorship(description) {
+  if (!description) return { status: "unknown", evidence: null };
+  const normalized = String(description)
+    .replace(/\bsponser/gi, "sponsor")
+    .replace(/\bsponsership/gi, "sponsorship");
+
+  for (const pattern of NO_SPONSORSHIP_PATTERNS) {
+    const match = normalized.match(pattern);
+    if (match) return { status: "blocked", evidence: match[0].trim().slice(0, 90) };
+  }
+
+  const positive = POSITIVE_SPONSORSHIP_PATTERNS.find((p) => p.test(normalized));
+  if (positive) {
+    const match = normalized.match(positive);
+    return { status: "likely", evidence: match ? match[0].trim().slice(0, 90) : null };
+  }
+
+  for (const pattern of AMBIGUOUS_WORKAUTH_PATTERNS) {
+    const match = normalized.match(pattern);
+    if (match) return { status: "ambiguous", evidence: match[0].trim().slice(0, 90) };
+  }
+
+  return { status: "unknown", evidence: null };
+}
 
 const CLEARANCE_PATTERNS = [
   /(?<!\bno\s+)(?<!\bnot\s+)\bsecurity\s+clearance\s+(?:is\s+)?required/i,
@@ -68,15 +126,15 @@ export function checkJobDescription(description) {
 
   if (!description) return warnings;
 
-  // Normalize common misspellings of "sponsor" so patterns match
-  const normalized = description.replace(/\bsponser/gi, "sponsor").replace(/\bsponsership/gi, "sponsorship");
-
-  for (const pattern of NO_SPONSORSHIP_PATTERNS) {
-    const match = normalized.match(pattern);
-    if (match) {
-      warnings.push({ text: `No sponsorship: "${match[0].trim()}"`, severity: "hard" });
-      break;
-    }
+  // Tiered sponsorship read: hard block → hard warning (same "No sponsorship:"
+  // prefix downstream filters key on); work-auth boilerplate alone → soft
+  // warning (F1-OPT candidates ARE work-authorized, so this is not a block);
+  // positive signal → no warning at all (and it suppresses the boilerplate).
+  const sponsorship = assessSponsorship(description);
+  if (sponsorship.status === "blocked") {
+    warnings.push({ text: `No sponsorship: "${sponsorship.evidence}"`, severity: "hard" });
+  } else if (sponsorship.status === "ambiguous") {
+    warnings.push({ text: `Work-auth language (may still sponsor): "${sponsorship.evidence}"`, severity: "soft" });
   }
 
   // Use a negation-aware approach: search with exec() to get index, then check prefix
