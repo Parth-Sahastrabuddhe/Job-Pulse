@@ -57,6 +57,23 @@ export const ROLE_CATEGORY_PATTERNS = {
   // "Project Manager, Infrastructure" stays a PjM, not a people-manager.
   engineering_manager: /(?:\b(?:engineering|software\s+engineering|software\s+development|technology|platform|infrastructure|data\s+engineering|machine\s+learning|ML|security|QA|test)\s+manager\b|(?<!(?:project|program|product)\s)\bmanager\s*,\s*(?:software|engineering|machine\s+learning|data|platform|infrastructure|security)\b|\bdev\s+manager\b)/i,
   project_manager: /(?:\b(?:technical\s+|IT\s+)?project\s+manager\b|\bscrum\s+master\b|\bdelivery\s+manager\b|\bagile\s+coach\b)/i,
+  product_design: /(?:\b(?:product|UX|UI|UX\/UI|interaction|visual|graphic|brand|motion)\s+designer\b|\bdesign\s+(?:lead|technologist)\b)/i,
+  ux_research: /(?:\b(?:UX|user|design)\s+research(?:er)?\b)/i,
+  technical_writing: /(?:\btechnical\s+writer\b|\bdocumentation\s+(?:engineer|specialist|manager)\b|\bcontent\s+designer\b)/i,
+  hardware_asic: /(?:\b(?:ASIC|FPGA|RTL|silicon|SoC)\s+(?:design\s+)?engineer\b|\b(?:design\s+)?verification\s+engineer\b|\bphysical\s+design\s+engineer\b|\bchip\s+(?:design|architect)|\bhardware\s+engineer\b)/i,
+  electrical_engineer: /(?:\b(?:electrical|electronics?|RF|analog|power\s+electronics|signal\s+integrity)\s+engineer\b)/i,
+  mechanical_engineer: /(?:\bmechanical\s+(?:design\s+)?engineer\b|\bthermal\s+engineer\b|\bstructur(?:al|es)\s+engineer\b)/i,
+  manufacturing_industrial: /(?:\b(?:manufacturing|industrial|process|quality)\s+engineer\b|\bsupplier\s+quality\b)/i,
+  it_support: /(?:\b(?:IT|desktop)\s+support\s+(?:specialist|analyst|technician|engineer)\b|\bhelp\s*desk\b|\bIT\s+(?:analyst|specialist|technician)\b)/i,
+  network_sysadmin: /(?:\b(?:network|systems?)\s+administrator\b|\bnetwork\s+engineer\b|\bsysadmin\b)/i,
+  support_engineer: /(?:\b(?:technical\s+|customer\s+)?support\s+engineer\b|\btechnical\s+account\s+manager\b)/i,
+  operations_bizops: /(?:\b(?:business\s+)?operations\s+(?:analyst|manager|associate|specialist|coordinator|lead)\b|\bbiz\s*ops\b|\bstrategy\s*(?:&|and)\s*operations\b)/i,
+  supply_chain: /(?:\bsupply\s+chain\b|\blogistics?\s+(?:analyst|manager|coordinator|specialist)\b|\bprocurement\b|\bsourcing\s+(?:manager|analyst|specialist)\b|\bdemand\s+plann(?:er|ing)\b)/i,
+  consulting_strategy: /(?:\b(?:management|strategy|technology|business)\s+consultant\b|\bconsultant\b|\bcorporate\s+(?:strategy|development)\b|\bstrategy\s+(?:analyst|associate|manager)\b)/i,
+  sales: /(?:\baccount\s+executive\b|\bsales\s+(?:development|manager|representative|rep|associate|specialist)\b|\bbusiness\s+development\s+(?:manager|representative|rep)\b|\bSDR\b|\bBDR\b|\benterprise\s+sales\b)/i,
+  marketing: /(?:\bmarketing\s+(?:manager|analyst|specialist|associate|coordinator|lead)\b|\bgrowth\s+marketing\b|\bproduct\s+marketing\b|\bcontent\s+(?:marketing|strategist|writer)\b|\bSEO\s+(?:manager|specialist|analyst)\b|\bdemand\s+generation\b|\bbrand\s+manager\b)/i,
+  customer_success: /(?:\bcustomer\s+success\b|\bclient\s+success\b|\baccount\s+manager\b|\bcustomer\s+experience\s+(?:manager|specialist)\b)/i,
+  biotech_science: /(?:\b(?:clinical|regulatory)\s+(?:research|affairs|trials?)\b|\bclinical\s+(?:scientist|specialist|data)\b|\bbiostatistician\b|\bbioinformatics?\b|(?<!equity\s)\bresearch\s+associate\b|\blab(?:oratory)?\s+(?:technician|scientist)\b)/i,
   quant: /(?:\bquant(?:itative)?\s+(?:research(?:er)?|analyst|developer|engineer|strategist|trader)\b)/i,
   financial_analyst: /(?:\bfinancial\s+analyst\b|\bfinance\s+(?:analyst|associate|manager|business\s+partner)\b|\bFP&A\b|\bcorporate\s+finance\b|\binvestment\s+banking\s+(?:analyst|associate)\b|\bequity\s+research\s+(?:analyst|associate)\b|\bcredit\s+analyst\b|\btreasury\s+(?:analyst|manager|associate)\b)/i,
   risk: /(?:\b(?:credit|market|operational|enterprise|model|liquidity|counterparty)\s+risk\b|\brisk\s+(?:analyst|manager|management|associate|officer|specialist)\b)/i,
@@ -141,6 +158,53 @@ export const ROLE_SECTIONS = {
       { value: "fpa_accounting", label: "Accounting / FP&A / Audit" },
     ],
   },
+  hardware: {
+    label: "Hardware Engineering",
+    categories: [
+      { value: "hardware_asic", label: "Hardware / ASIC / Silicon" },
+      { value: "electrical_engineer", label: "Electrical / RF" },
+      { value: "mechanical_engineer", label: "Mechanical / Thermal" },
+      { value: "manufacturing_industrial", label: "Manufacturing / Industrial" },
+    ],
+  },
+  design: {
+    label: "Design",
+    categories: [
+      { value: "product_design", label: "Product / UX / UI Design" },
+      { value: "ux_research", label: "UX Research" },
+      { value: "technical_writing", label: "Technical Writing / Docs" },
+    ],
+  },
+  it_operations: {
+    label: "IT & Support",
+    categories: [
+      { value: "it_support", label: "IT Support / Help Desk" },
+      { value: "network_sysadmin", label: "Network / SysAdmin" },
+      { value: "support_engineer", label: "Support Engineer / TAM" },
+    ],
+  },
+  business_ops: {
+    label: "Business Ops & Consulting",
+    categories: [
+      { value: "operations_bizops", label: "Operations / BizOps" },
+      { value: "supply_chain", label: "Supply Chain / Logistics" },
+      { value: "consulting_strategy", label: "Consulting / Strategy" },
+    ],
+  },
+  sales_marketing: {
+    label: "Sales & Marketing",
+    categories: [
+      { value: "sales", label: "Sales / Business Development" },
+      { value: "marketing", label: "Marketing / Growth" },
+      { value: "customer_success", label: "Customer Success" },
+    ],
+  },
+  science_health: {
+    label: "Science & Health",
+    categories: [
+      { value: "biotech_science", label: "Biotech / Clinical / Research" },
+    ],
+  },
 };
 
 export function sectionForCategory(category) {
@@ -173,6 +237,23 @@ export const ARCHETYPE_PRIORITY = [
   ["risk", "Risk"],
   ["financial_analyst", "Finance"],
   ["fpa_accounting", "Accounting"],
+  ["hardware_asic", "Silicon"],
+  ["electrical_engineer", "EE"],
+  ["mechanical_engineer", "MechE"],
+  ["manufacturing_industrial", "Mfg"],
+  ["product_design", "Design"],
+  ["ux_research", "UXR"],
+  ["technical_writing", "Docs"],
+  ["network_sysadmin", "Network"],
+  ["it_support", "IT"],
+  ["support_engineer", "Support"],
+  ["operations_bizops", "Ops"],
+  ["supply_chain", "Supply"],
+  ["consulting_strategy", "Consulting"],
+  ["sales", "Sales"],
+  ["marketing", "Marketing"],
+  ["customer_success", "CS"],
+  ["biotech_science", "BioSci"],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

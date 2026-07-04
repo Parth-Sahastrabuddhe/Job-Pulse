@@ -49,4 +49,51 @@ export const ROLE_SECTIONS = {
       { value: "fpa_accounting", label: "Accounting / FP&A / Audit" },
     ],
   },
+  hardware: {
+    label: "Hardware Engineering",
+    categories: [
+      { value: "hardware_asic", label: "Hardware / ASIC / Silicon" },
+      { value: "electrical_engineer", label: "Electrical / RF" },
+      { value: "mechanical_engineer", label: "Mechanical / Thermal" },
+      { value: "manufacturing_industrial", label: "Manufacturing / Industrial" },
+    ],
+  },
+  design: {
+    label: "Design",
+    categories: [
+      { value: "product_design", label: "Product / UX / UI Design" },
+      { value: "ux_research", label: "UX Research" },
+      { value: "technical_writing", label: "Technical Writing / Docs" },
+    ],
+  },
+  it_operations: {
+    label: "IT & Support",
+    categories: [
+      { value: "it_support", label: "IT Support / Help Desk" },
+      { value: "network_sysadmin", label: "Network / SysAdmin" },
+      { value: "support_engineer", label: "Support Engineer / TAM" },
+    ],
+  },
+  business_ops: {
+    label: "Business Ops & Consulting",
+    categories: [
+      { value: "operations_bizops", label: "Operations / BizOps" },
+      { value: "supply_chain", label: "Supply Chain / Logistics" },
+      { value: "consulting_strategy", label: "Consulting / Strategy" },
+    ],
+  },
+  sales_marketing: {
+    label: "Sales & Marketing",
+    categories: [
+      { value: "sales", label: "Sales / Business Development" },
+      { value: "marketing", label: "Marketing / Growth" },
+      { value: "customer_success", label: "Customer Success" },
+    ],
+  },
+  science_health: {
+    label: "Science & Health",
+    categories: [
+      { value: "biotech_science", label: "Biotech / Clinical / Research" },
+    ],
+  },
 };

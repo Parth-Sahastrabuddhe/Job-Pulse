@@ -25,13 +25,21 @@ describe("isTargetRole (broadened)", () => {
     "Quantitative Researcher", "Financial Analyst", "Investment Banking Analyst",
     "Risk Analyst", "Staff Accountant", "Internal Auditor", "Treasury Analyst",
     "Data Modeler", "Database Administrator",
+    // Full-catalog expansion (2026-07): design, hardware, IT, business, sales
+    "Product Designer", "UX Researcher", "Technical Writer",
+    "Hardware Engineer", "ASIC Design Engineer", "Electrical Engineer",
+    "Mechanical Engineer", "Manufacturing Engineer", "Quality Engineer",
+    "IT Support Specialist", "Network Engineer", "Systems Administrator",
+    "Technical Support Engineer", "Operations Analyst", "Supply Chain Analyst",
+    "Management Consultant", "Strategy Analyst", "Sales Manager",
+    "Account Executive", "Marketing Analyst", "Customer Success Manager",
+    "Graphic Designer", "Content Writer", "Business Development Manager",
+    "Clinical Research Associate", "Biostatistician",
   ];
 
   const shouldNotMatch = [
-    "Recruiter", "Sales Manager", "Marketing Analyst", "HR Business Partner",
-    "Account Executive", "Legal Counsel", "Office Manager",
-    "Customer Success Manager", "Content Writer", "Graphic Designer",
-    "Business Development Manager", "Executive Assistant",
+    "Recruiter", "HR Business Partner", "Legal Counsel", "Office Manager",
+    "Executive Assistant", "Facilities Coordinator", "Paralegal",
     "", null, undefined,
   ];
 
