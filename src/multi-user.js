@@ -73,6 +73,17 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
+
+// Liveness beacon for scripts/healthcheck.sh: under RAM pressure this process
+// can wedge in uninterruptible sleep (D-state) while pm2 still reports
+// "online", so the poll loop proves liveness by touching this file each
+// successful cycle. A beacon write failure must never break delivery.
+const MU_HEARTBEAT_FILE = path.join(PROJECT_ROOT, "data", "mu-heartbeat");
+function touchMuHeartbeat() {
+  try {
+    fs.writeFileSync(MU_HEARTBEAT_FILE, new Date().toISOString());
+  } catch {}
+}
 const ADMIN_DISCORD_ID = process.env.ADMIN_DISCORD_ID;
 
 /** Load .env file the same way config.js does — no dotenv dependency. */
@@ -924,6 +935,7 @@ async function pollLoop() {
     try {
       await runPollCycle();
       void ping(getConfig().heartbeat.mu);
+      touchMuHeartbeat();
     } catch (err) {
       console.error(`[multi-user] Poll cycle error: ${err.message}`);
       safeLogError("multi-user-poll", err.message);
