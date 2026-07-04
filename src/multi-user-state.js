@@ -759,3 +759,62 @@ export function searchUserJobs(userId, { query, company, status, days = 30, limi
 
   return { results, total };
 }
+
+// ---------------------------------------------------------------------------
+// Feature flags + per-user fit check results
+// ---------------------------------------------------------------------------
+
+/**
+ * DB-backed feature toggle, flipped from the /admin dashboard.
+ * FAILS CLOSED: a missing row, a missing table, or any read error counts as
+ * disabled, per the zero-cost hard-guard rule.
+ * @param {string} key
+ * @returns {boolean}
+ */
+export function isFeatureEnabled(key) {
+  try {
+    const row = getDb().prepare("SELECT enabled FROM feature_flags WHERE key = ?").get(key);
+    return row ? row.enabled === 1 : false;
+  } catch (err) {
+    console.error(`[feature-flags] read failed for ${key}: ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * Persist a successful fit check for (user, job). Failures never call this.
+ */
+export function saveFitResult(userId, jobKey, { fitScore, fitVerdict, fitScoresJson, fitAssessment }) {
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      `UPDATE user_seen_jobs
+         SET fit_score = ?, fit_verdict = ?, fit_scores_json = ?, fit_assessment = ?, fit_checked_at = ?, updated_at = ?
+       WHERE user_id = ? AND job_key = ?`
+    )
+    .run(fitScore, fitVerdict, fitScoresJson, String(fitAssessment ?? "").slice(0, 1500), now, now, userId, jobKey);
+}
+
+/**
+ * Cached fit result for (user, job); undefined when never checked.
+ */
+export function getFitResult(userId, jobKey) {
+  return getDb()
+    .prepare(
+      `SELECT fit_score, fit_verdict, fit_scores_json, fit_assessment, fit_checked_at
+         FROM user_seen_jobs
+        WHERE user_id = ? AND job_key = ? AND fit_score IS NOT NULL`
+    )
+    .get(userId, jobKey);
+}
+
+/**
+ * Successful checks since midnight UTC. ISO-8601 strings sort lexicographically
+ * and date('now') is the UTC date, so a plain string compare is correct.
+ */
+export function countFitChecksToday(userId) {
+  const row = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM user_seen_jobs WHERE user_id = ? AND fit_checked_at >= date('now')")
+    .get(userId);
+  return row?.n ?? 0;
+}
