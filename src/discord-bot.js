@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { fetchJobDescription, saveJobData, jobDirId, getJobDir } from "./job-description.js";
 import { fitCheckResume } from "./tailor.js";
-import { upsertJobPost, updateJobPostStatus, bridgeToTracker, getDb, addToCompanyQueue, getPendingCompanies, getJobPost, getFunnelStats, updateJobFitScore } from "./state.js";
+import { upsertJobPost, updateJobPostStatus, bridgeToTracker, getDb, addToCompanyQueue, listCompanyQueue, getJobPost, getFunnelStats, updateJobFitScore } from "./state.js";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -206,7 +206,7 @@ export async function startDiscordBot(config) {
     const commands = [
       new SlashCommandBuilder()
         .setName("add")
-        .setDescription("Queue a company for integration into the job tracker")
+        .setDescription("Queue a company for automated integration (admin only)")
         .addStringOption((opt) =>
           opt.setName("company").setDescription("Company name").setRequired(true)
         ),
@@ -498,18 +498,28 @@ async function handleCancelApply(interaction, hash) {
 }
 
 async function handleAddCompany(interaction) {
+  // Admin-only: the automated integration pipeline pushes code and restarts
+  // prod, so open-ended requests go through the dashboard suggestion flow.
+  if (interaction.user.id !== ADMIN_DISCORD_ID) {
+    await interaction.reply({
+      content: "Only the admin can queue companies right now. You can suggest one at http://3.138.62.29/support and it will be reviewed.",
+      ephemeral: true,
+    });
+    return;
+  }
+
   // Ack first: the DB write below is synchronous and can block up to
   // busy_timeout (2s) with four writers on jobs.db, eating into the 3s window.
   await interaction.deferReply();
   const companyName = interaction.options.getString("company");
   try {
-    addToCompanyQueue(companyName);
+    addToCompanyQueue(companyName, interaction.user.id);
     await interaction.editReply({
       embeds: [
         new EmbedBuilder()
           .setColor(0x5865F2)
           .setTitle("Company Queued")
-          .setDescription(`**${companyName}** has been added to the integration queue.\nIt will be picked up in the next Claude session.`)
+          .setDescription(`**${companyName}** is queued for automated integration.\nThe pipeline picks it up within ~10 minutes and DMs you the outcome. Track it with \`/queue\`.`)
       ]
     });
   } catch (error) {
@@ -518,11 +528,20 @@ async function handleAddCompany(interaction) {
   }
 }
 
+const QUEUE_STATUS_ICONS = {
+  pending: "⏳",       // hourglass
+  in_progress: "🔧", // wrench
+  added: "✅",
+  failed: "❌",
+  duplicate: "♻️",
+  needs_human: "🙋",
+};
+
 async function handleShowQueue(interaction) {
   await interaction.deferReply({ ephemeral: true });
   try {
-    const pending = getPendingCompanies();
-    if (pending.length === 0) {
+    const items = listCompanyQueue(null, 15);
+    if (items.length === 0) {
       await interaction.editReply({
         embeds: [
           new EmbedBuilder()
@@ -534,15 +553,21 @@ async function handleShowQueue(interaction) {
       return;
     }
 
-    const lines = pending.map((c, i) =>
-      `${i + 1}. **${c.company_name}** — queued ${new Date(c.requested_at).toLocaleDateString()}`
-    );
+    const pendingCount = items.filter((c) => c.status === "pending" || c.status === "in_progress").length;
+    const lines = items.map((c) => {
+      const icon = QUEUE_STATUS_ICONS[c.status] ?? "•";
+      const when = new Date(c.requested_at).toLocaleDateString();
+      const note = (c.status === "failed" || c.status === "needs_human") && c.notes
+        ? ` (${String(c.notes).slice(0, 60)})`
+        : "";
+      return `${icon} **${c.company_name}**, ${c.status.replace("_", " ")}, queued ${when}${note}`;
+    });
 
     await interaction.editReply({
       embeds: [
         new EmbedBuilder()
-          .setColor(0xFFA500)
-          .setTitle(`Integration Queue (${pending.length} pending)`)
+          .setColor(pendingCount > 0 ? 0xFFA500 : 0x57F287)
+          .setTitle(`Integration Queue (${pendingCount} open, last ${items.length} shown)`)
           .setDescription(lines.join("\n"))
       ]
     });

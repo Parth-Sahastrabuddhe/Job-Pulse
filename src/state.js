@@ -398,6 +398,24 @@ export function initDb(dbFile) {
     );
   `);
 
+  // --- Automation / enrichment migrations (idempotent) ---
+  const cqCols = db.pragma("table_info(company_queue)").map((c) => c.name);
+  if (!cqCols.includes("requested_by")) {
+    db.exec("ALTER TABLE company_queue ADD COLUMN requested_by TEXT DEFAULT ''");
+  }
+  if (!cqCols.includes("attempts")) {
+    db.exec("ALTER TABLE company_queue ADD COLUMN attempts INTEGER DEFAULT 0");
+  }
+  if (!cqCols.includes("claimed_at")) {
+    db.exec("ALTER TABLE company_queue ADD COLUMN claimed_at TEXT DEFAULT NULL");
+  }
+
+  // Provenance label for the LCA-derived sponsor stats (e.g. "2025").
+  const h1bCols = db.pragma("table_info(h1b_sponsors)").map((c) => c.name);
+  if (!h1bCols.includes("lca_fy")) {
+    db.exec("ALTER TABLE h1b_sponsors ADD COLUMN lca_fy TEXT DEFAULT ''");
+  }
+
   addressBookMigrate(db);
 
   return db;
@@ -840,15 +858,55 @@ export function bridgeToTracker(jobKey, status) {
 }
 
 // company_queue CRUD
-export function addToCompanyQueue(companyName) {
+// Lifecycle: pending → in_progress → added | failed | duplicate | needs_human.
+// The add-company automation claims items via claimNextPendingCompany (atomic:
+// the UPDATE is guarded on status='pending' so two runners can't claim one row).
+export function addToCompanyQueue(companyName, requestedBy = "") {
   db.prepare(`
-    INSERT INTO company_queue (company_name, requested_at)
-    VALUES (?, ?)
-  `).run(companyName, new Date().toISOString());
+    INSERT INTO company_queue (company_name, requested_at, requested_by)
+    VALUES (?, ?, ?)
+  `).run(companyName, new Date().toISOString(), String(requestedBy || ""));
 }
 
 export function getPendingCompanies() {
   return db.prepare("SELECT * FROM company_queue WHERE status = 'pending' ORDER BY requested_at").all();
+}
+
+export function listCompanyQueue(status = null, limit = 50) {
+  return status
+    ? db.prepare("SELECT * FROM company_queue WHERE status = ? ORDER BY id DESC LIMIT ?").all(status, limit)
+    : db.prepare("SELECT * FROM company_queue ORDER BY id DESC LIMIT ?").all(limit);
+}
+
+export function claimNextPendingCompany() {
+  const now = new Date().toISOString();
+  const row = db.prepare(
+    "SELECT * FROM company_queue WHERE status = 'pending' ORDER BY requested_at LIMIT 1"
+  ).get();
+  if (!row) return null;
+  const res = db.prepare(
+    "UPDATE company_queue SET status = 'in_progress', attempts = attempts + 1, claimed_at = ? WHERE id = ? AND status = 'pending'"
+  ).run(now, row.id);
+  if (res.changes !== 1) return null;
+  return { ...row, status: "in_progress", attempts: (row.attempts ?? 0) + 1, claimed_at: now };
+}
+
+export function completeCompanyQueueItem(id, status, notes = "") {
+  return db.prepare("UPDATE company_queue SET status = ?, notes = ? WHERE id = ?")
+    .run(status, String(notes || "").slice(0, 500), id).changes;
+}
+
+// Recover items whose runner died mid-flight: requeue until the attempts cap,
+// then park them as failed so they stop being retried forever.
+export function requeueStaleInProgress(maxAgeMinutes = 120, maxAttempts = 2) {
+  const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
+  const failed = db.prepare(
+    "UPDATE company_queue SET status = 'failed', notes = 'runner stalled; attempts exhausted' WHERE status = 'in_progress' AND claimed_at IS NOT NULL AND claimed_at < ? AND attempts >= ?"
+  ).run(cutoff, maxAttempts).changes;
+  const requeued = db.prepare(
+    "UPDATE company_queue SET status = 'pending' WHERE status = 'in_progress' AND claimed_at IS NOT NULL AND claimed_at < ? AND attempts < ?"
+  ).run(cutoff, maxAttempts).changes;
+  return { requeued, failed };
 }
 
 export function updateCompanyQueueStatus(id, status, notes) {
