@@ -18,16 +18,17 @@ export async function getGeminiApiKey() {
 }
 
 export async function runGemini(prompt, options = {}) {
-  const apiKey = await getGeminiApiKey();
+  const apiKey = options.apiKey || (await getGeminiApiKey());
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY not set in .env");
   }
 
+  const model = options.model || "gemini-2.5-flash";
   const temperature = options.temperature ?? 0.3;
   const maxOutputTokens = options.maxOutputTokens ?? 8192;
 
   const response = await fetchWithTimeout(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
@@ -44,7 +45,9 @@ export async function runGemini(prompt, options = {}) {
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Gemini API error (${response.status}): ${error.slice(0, 300)}`);
+    const err = new Error(`Gemini API error (${response.status}): ${error.slice(0, 300)}`);
+    err.status = response.status;
+    throw err;
   }
 
   const data = await response.json();
