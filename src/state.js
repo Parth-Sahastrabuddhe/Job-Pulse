@@ -275,6 +275,41 @@ export function initDb(dbFile) {
     db.exec("ALTER TABLE user_seen_jobs ADD COLUMN save_reminder_sent BOOLEAN DEFAULT 0");
   }
 
+  // --- Multi-user fit check migrations (idempotent) ---
+  if (userCols.length > 0 && !userCols.includes("resume_text")) {
+    db.exec("ALTER TABLE user_profiles ADD COLUMN resume_text TEXT DEFAULT NULL");
+  }
+  if (userCols.length > 0 && !userCols.includes("experience_years")) {
+    db.exec("ALTER TABLE user_profiles ADD COLUMN experience_years REAL DEFAULT NULL");
+  }
+  if (userCols.length > 0 && !userCols.includes("llm_provider")) {
+    db.exec("ALTER TABLE user_profiles ADD COLUMN llm_provider TEXT DEFAULT 'gemini'");
+  }
+  if (userCols.length > 0 && !userCols.includes("llm_key_enc")) {
+    db.exec("ALTER TABLE user_profiles ADD COLUMN llm_key_enc TEXT DEFAULT NULL");
+  }
+  if (userCols.length > 0 && !userCols.includes("llm_base_url")) {
+    db.exec("ALTER TABLE user_profiles ADD COLUMN llm_base_url TEXT DEFAULT NULL");
+  }
+  if (userCols.length > 0 && !userCols.includes("llm_model")) {
+    db.exec("ALTER TABLE user_profiles ADD COLUMN llm_model TEXT DEFAULT NULL");
+  }
+  if (usjCols.length > 0 && !usjCols.includes("fit_score")) {
+    db.exec("ALTER TABLE user_seen_jobs ADD COLUMN fit_score INTEGER DEFAULT NULL");
+  }
+  if (usjCols.length > 0 && !usjCols.includes("fit_verdict")) {
+    db.exec("ALTER TABLE user_seen_jobs ADD COLUMN fit_verdict TEXT DEFAULT NULL");
+  }
+  if (usjCols.length > 0 && !usjCols.includes("fit_scores_json")) {
+    db.exec("ALTER TABLE user_seen_jobs ADD COLUMN fit_scores_json TEXT DEFAULT NULL");
+  }
+  if (usjCols.length > 0 && !usjCols.includes("fit_assessment")) {
+    db.exec("ALTER TABLE user_seen_jobs ADD COLUMN fit_assessment TEXT DEFAULT NULL");
+  }
+  if (usjCols.length > 0 && !usjCols.includes("fit_checked_at")) {
+    db.exec("ALTER TABLE user_seen_jobs ADD COLUMN fit_checked_at TEXT DEFAULT NULL");
+  }
+
   // --- Multi-user tables ---
   db.exec(`
     CREATE TABLE IF NOT EXISTS user_profiles (
@@ -298,6 +333,12 @@ export function initDb(dbFile) {
       password_hash TEXT DEFAULT NULL,
       education_level TEXT DEFAULT '',
       notification_channel_id TEXT DEFAULT NULL,
+      resume_text TEXT DEFAULT NULL,
+      experience_years REAL DEFAULT NULL,
+      llm_provider TEXT DEFAULT 'gemini',
+      llm_key_enc TEXT DEFAULT NULL,
+      llm_base_url TEXT DEFAULT NULL,
+      llm_model TEXT DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -310,6 +351,11 @@ export function initDb(dbFile) {
       applied_at TEXT,
       saved_at TEXT,
       save_reminder_sent BOOLEAN DEFAULT 0,
+      fit_score INTEGER DEFAULT NULL,
+      fit_verdict TEXT DEFAULT NULL,
+      fit_scores_json TEXT DEFAULT NULL,
+      fit_assessment TEXT DEFAULT NULL,
+      fit_checked_at TEXT DEFAULT NULL,
       updated_at TEXT,
       PRIMARY KEY (user_id, job_key),
       FOREIGN KEY (user_id) REFERENCES user_profiles(id)
@@ -396,7 +442,17 @@ export function initDb(dbFile) {
       research_json TEXT NOT NULL,
       researched_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS feature_flags (
+      key TEXT PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT
+    );
   `);
+
+  // Registered feature flags. INSERT OR IGNORE so a flipped flag survives restarts.
+  db.prepare("INSERT OR IGNORE INTO feature_flags (key, enabled, updated_at) VALUES (?, 0, ?)")
+    .run("mu_fit_check", new Date().toISOString());
 
   // --- Automation / enrichment migrations (idempotent) ---
   const cqCols = db.pragma("table_info(company_queue)").map((c) => c.name);
