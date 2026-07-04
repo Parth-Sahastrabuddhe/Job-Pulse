@@ -3,19 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import CompanySelector from "@/components/CompanySelector";
-
-const ROLE_CATEGORIES = [
-  { value: "software_engineer", label: "Software Engineer" },
-  { value: "data_engineer", label: "Data Engineer" },
-  { value: "data_analyst", label: "Data Analyst" },
-  { value: "data_scientist", label: "Data Scientist" },
-  { value: "ml_engineer", label: "ML / AI Engineer" },
-  { value: "frontend", label: "Frontend" },
-  { value: "backend", label: "Backend" },
-  { value: "devops_sre", label: "DevOps / SRE" },
-  { value: "product_manager", label: "Product Manager" },
-  { value: "mobile", label: "Mobile" },
-];
+import { ROLE_SECTIONS } from "@/lib/role-taxonomy.mjs";
 
 const SENIORITY_LEVELS = [
   { value: "intern", label: "Intern" },
@@ -172,18 +160,41 @@ export default function ProfilePage() {
         <form onSubmit={handleSave} className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {/* ---- Left Column ---- */}
           <div className="space-y-5">
-            {/* Role Categories */}
+            {/* Role Categories, grouped by section */}
             <section className="bg-surface rounded-xl border border-line p-5">
               <h2 className="text-sm font-semibold text-foreground mb-3 font-display uppercase tracking-wider">Role Categories</h2>
-              <div className="grid grid-cols-2 gap-2">
-                {ROLE_CATEGORIES.map((role) => (
-                  <label key={role.value} className="flex items-center gap-2 text-sm text-muted cursor-pointer hover:text-foreground transition-colors">
-                    <input type="checkbox" checked={profile.roleCategories.includes(role.value)}
-                      onChange={() => setProfile((p) => ({ ...p, roleCategories: toggleArrayValue(p.roleCategories, role.value) }))}
-                      className="w-4 h-4 rounded border-line bg-background accent-pulse" />
-                    {role.label}
-                  </label>
-                ))}
+              <div className="space-y-4">
+                {Object.entries(ROLE_SECTIONS).map(([sectionKey, section]) => {
+                  const values = section.categories.map((c) => c.value);
+                  const allSelected = values.every((v) => profile.roleCategories.includes(v));
+                  return (
+                    <div key={sectionKey}>
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-xs font-semibold text-pulse uppercase tracking-wider">{section.label}</h3>
+                        <button type="button"
+                          className="text-xs text-muted hover:text-foreground transition-colors"
+                          onClick={() => setProfile((p) => ({
+                            ...p,
+                            roleCategories: allSelected
+                              ? p.roleCategories.filter((v) => !values.includes(v))
+                              : [...new Set([...p.roleCategories, ...values])],
+                          }))}>
+                          {allSelected ? "Clear all" : "Select all"}
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {section.categories.map((role) => (
+                          <label key={role.value} className="flex items-center gap-2 text-sm text-muted cursor-pointer hover:text-foreground transition-colors">
+                            <input type="checkbox" checked={profile.roleCategories.includes(role.value)}
+                              onChange={() => setProfile((p) => ({ ...p, roleCategories: toggleArrayValue(p.roleCategories, role.value) }))}
+                              className="w-4 h-4 rounded border-line bg-background accent-pulse" />
+                            {role.label}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </section>
 

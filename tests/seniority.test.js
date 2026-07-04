@@ -22,19 +22,25 @@ describe("detectSeniority", () => {
     ["Software Engineer", "entry_mid"],
     ["Associate Software Engineer", "entry_mid"],
 
-    // Mid (default) — explicit II / III / 2 / 3 level markers
+    // Mid — explicit II / 2 markers, defaults, and the PM ladder (the old
+    // blanket "manager -> senior" rule hid every plain PM job from
+    // entry/mid PM users)
     ["Software Engineer II", "mid"],
     ["Data Engineer", "mid"],
     ["Software Engineer 2", "mid"],
-    ["Software Engineer III", "mid"],
-    ["Software Engineer 3", "mid"],
     ["Backend Developer", "mid"],
+    ["Product Manager", "mid"],
+    ["Technical Program Manager", "mid"],
+    ["Scrum Master", "mid"],
+    ["Staff Accountant", "mid"],
 
-    // Senior
+    // Senior — III/3 are the senior rung in the generic numeral convention
+    // (Amazon SDE III = L6; Google's III = L4 is a per-company override)
+    ["Software Engineer III", "senior"],
+    ["Software Engineer 3", "senior"],
     ["Senior Software Engineer", "senior"],
     ["Sr. Data Engineer", "senior"],
     ["Lead Backend Engineer", "senior"],
-    ["Product Manager", "senior"],
     ["Engineering Manager", "senior"],
 
     // Director
@@ -65,5 +71,45 @@ describe("detectSeniority", () => {
     expect(detectSeniority(null)).toBe("mid");
     expect(detectSeniority(undefined)).toBe("mid");
     expect(detectSeniority("")).toBe("mid");
+  });
+});
+
+describe("detectSeniority with company-aware level rules", () => {
+  const cases = [
+    // Bank corporate bands (Analyst -> Associate -> VP IC track)
+    ["Software Engineering, Analyst", "goldmansachs", "entry_mid"],
+    ["Associate, Software Engineering", "goldmansachs", "mid"],
+    ["Senior Associate, Software Engineer", "jpmorgan", "mid"],
+    ["Vice President, Software Engineering", "morganstanley", "senior"],
+    ["AVP, Software Engineer", "citi", "mid"],
+    ["Software Engineer Summer Analyst", "goldmansachs", "intern"],
+    // JPMorgan dual titles: SWE I/II/III sit in the analyst/associate bands
+    ["Software Engineer III - Java, AWS, AI", "jpmorgan", "mid"],
+    ["Software Engineer I", "jpmorgan", "entry"],
+    // Google's titled numerals are L3/L4
+    ["Software Engineer III, Google Cloud", "google", "mid"],
+    ["Software Engineer II, YouTube", "google", "entry"],
+    // Non-bank companies keep the generic convention
+    ["Software Development Engineer III", "amazon", "senior"],
+    ["SDE II", "amazon", "mid"],
+    // Generic AVP outside banks keeps its old meaning
+    ["AVP, Software Engineer", "", "senior"],
+  ];
+
+  for (const [title, sourceKey, expected] of cases) {
+    it(`"${title}" @ ${sourceKey || "(generic)"} → ${expected}`, () => {
+      expect(detectSeniority(title, sourceKey)).toBe(expected);
+    });
+  }
+
+  it("PM ladder levels from modifiers", () => {
+    expect(detectSeniority("Associate Product Manager")).toBe("entry");
+    expect(detectSeniority("Senior Product Manager")).toBe("senior");
+    expect(detectSeniority("Group Product Manager")).toBe("staff");
+  });
+
+  it("new-grad variants classify entry", () => {
+    expect(detectSeniority("Graduate Software Engineer")).toBe("entry");
+    expect(detectSeniority("University Graduate, Software Engineer")).toBe("entry");
   });
 });

@@ -88,124 +88,26 @@ export function parseUserCountries(value) {
 }
 
 // --- Role category patterns (one per supported category) ---
-const ROLE_CATEGORY_PATTERNS = {
-  software_engineer: /(?:(?:software|backend|back[\s-]?end|full[\s-]?stack|systems|cloud)\s+(?:engineer|develop)|\bSW\s+(?:engineer|develop)|applications?\s+(?:software\s+)?develop|\b(?:MTS|AMTS|SDE|SWE)\b|member\s+of\s+technical\s+staff)/i,
-  data_engineer: /(?:data\s+(?:engineer|platform|infrastructure)|analytics\s+engineer|\bETL\b)/i,
-  data_analyst: /(?:data\s+analyst|business\s+(?:intelligence\s+)?analyst|\bBI\s+analyst\b|analytics\s+analyst|product\s+analyst)/i,
-  data_scientist: /(?:data\s+scientist|applied\s+scientist|research\s+scientist)/i,
-  ml_engineer: /(?:machine\s+learning|(?:ML|AI)\s+engineer|deep\s+learning|\bNLP\b|computer\s+vision|\bGenAI\b|generative\s+AI|LLM\s+engineer|prompt\s+engineer|foundation\s+model)/i,
-  frontend: /(?:front[\s-]?end|UI\s+engineer|web\s+develop)/i,
-  backend: /(?:back[\s-]?end|server\s+engineer|API\s+engineer)/i,
-  devops_sre: /(?:\bdevops\b|\bSRE\b|site\s+reliability|(?:infrastructure|cloud)\s+engineer)/i,
-  mobile: /(?:(?:iOS|Android|mobile)\s+(?:engineer|develop)|React\s+Native|Flutter)/i,
-  product_manager: /(?:product\s+manager|program\s+manager|\bTPM\b|technical\s+program)/i,
-};
+// The role taxonomy (category patterns, sections, archetypes, seniority and
+// the cross-company level rules) lives in src/role-taxonomy.js. Re-exported
+// here so collectors, tests, and scripts keep their existing import paths.
+import {
+  isTargetRole,
+  detectRoleCategories,
+  detectSeniority,
+  detectArchetype,
+} from "../role-taxonomy.js";
 
-const BROAD_ROLE_PATTERN = new RegExp(
-  Object.values(ROLE_CATEGORY_PATTERNS).map((r) => r.source).join("|"),
-  "i"
-);
-
-const PLATFORM_ENGINEER_PATTERN = /\bplatform\s+engineer/i;
-
-// Centralized title filter — now matches all tech/PM roles at any seniority
-export function isTargetRole(title) {
-  if (!title) return false;
-  const t = title.trim();
-  return BROAD_ROLE_PATTERN.test(t) || PLATFORM_ENGINEER_PATTERN.test(t);
-}
-
-export function detectRoleCategories(title) {
-  if (!title) return [];
-  const t = title.trim();
-  const categories = [];
-  for (const [category, pattern] of Object.entries(ROLE_CATEGORY_PATTERNS)) {
-    if (pattern.test(t)) {
-      categories.push(category);
-    }
-  }
-  if (PLATFORM_ENGINEER_PATTERN.test(t) && !categories.includes("software_engineer")) {
-    categories.push("software_engineer");
-  }
-  return categories;
-}
-
-// Priority order: most specific archetype wins
-const ARCHETYPE_PRIORITY = [
-  ["data_scientist", "DS"],
-  ["data_analyst", "DA"],
-  ["ml_engineer", "ML/AI"],
-  ["data_engineer", "Data"],
-  ["mobile", "Mobile"],
-  ["devops_sre", "DevOps"],
-  ["frontend", "Frontend"],
-  ["backend", "Backend"],
-  ["product_manager", "PM"],
-];
-
-export function detectArchetype(title) {
-  if (!title) return null;
-  const categories = detectRoleCategories(title);
-  if (categories.length === 0) return null;
-
-  if (PLATFORM_ENGINEER_PATTERN.test(title.trim())) return "Platform";
-
-  for (const [cat, label] of ARCHETYPE_PRIORITY) {
-    if (categories.includes(cat)) return label;
-  }
-
-  // Fallback: generic software_engineer → "Fullstack"
-  if (categories.includes("software_engineer")) return "Fullstack";
-  return null;
-}
-
-export function detectSeniority(title) {
-  if (!title) return "mid";
-  const t = title.trim();
-  if (!t) return "mid";
-
-  // Director / Chief — always blocked (checked first)
-  if (/\b(director|chief)\b/i.test(t)) return "director";
-  if (/\bMD\b/.test(t)) return "director";
-
-  // Staff / Principal (check before senior — most specific)
-  if (/\b((?<!technical\s)staff|princ\w*|distinguished|fellow)\b/i.test(t)) return "staff";
-  if (/\barchitect\b/i.test(t) && !/\bsolution/i.test(t)) return "staff";
-  if (/\bSVP\b/.test(t)) return "staff";
-
-  // Intern
-  if (/\b(intern|internship|co[\s-]?op)\b/i.test(t)) return "intern";
-
-  // Senior
-  if (/\b(senior|sr\.?)\b/i.test(t)) return "senior";
-  if (/\blead\w*\b/i.test(t)) return "senior";
-  if (/\bvice\s+president\b|\bVP\b/i.test(t)) return "senior";
-  if (/\bAVP\b/.test(t)) return "senior";
-  if (/\bmanager\b/i.test(t)) return "senior";
-
-  // Entry+Mid composite — SWE I / SDE I / Engineer 1 / Roman numeral I (no II/III suffix)
-  if (/\b(?:SWE|SDE)\s*I\b/.test(t) && !/\b(?:SWE|SDE)\s*II\b/.test(t)) return "entry_mid";
-  if (/\bengineer\s+1\b/i.test(t) && !/\bengineer\s+[23]\b/i.test(t)) return "entry_mid";
-  // Roman-numeral level I must follow a role noun ("Engineer I", "Developer I"),
-  // not match any stray "I" elsewhere in the title.
-  if (/\b(?:engineer|developer|analyst|scientist|architect|programmer)\s+I\b/i.test(t)
-      && !/\bII\b/.test(t) && !/\bIII\b/.test(t)) return "entry_mid";
-
-  // Entry only — new grad, early career, junior
-  if (/\b(new\s+grad|early[\s-]?career|entry[\s-]?level|junior|jr\.?)\b/i.test(t)) return "entry";
-
-  // Plain Software Engineer / Software Development Engineer / Software Engineering titles
-  // without explicit level markers (II/III, 2/3) → entry_mid so entry-only users also match.
-  // I / 1 is already handled by the entry_mid rules above.
-  if (/\b(software\s+(?:development\s+)?engineer|software\s+engineering)\b/i.test(t)
-      && !/\b(?:II|III)\b/.test(t)
-      && !/\bengineer\s+[23]\b/i.test(t)) {
-    return "entry_mid";
-  }
-
-  // Mid — default (includes SWE II/III, SDE II/III, Engineer 2/3)
-  return "mid";
-}
+export {
+  isTargetRole,
+  detectRoleCategories,
+  detectSeniority,
+  detectArchetype,
+  resolveLevel,
+  formatLevelLine,
+  ROLE_CATEGORY_PATTERNS,
+  ROLE_SECTIONS,
+} from "../role-taxonomy.js";
 
 export function normalizeUrl(baseUrl, rawUrl) {
   if (!rawUrl) {
@@ -246,7 +148,7 @@ export function finalizeJob(job) {
   return {
     ...normalizedJob,
     key: createHash("sha1").update(identity).digest("hex"),
-    seniorityLevel: detectSeniority(normalizedJob.title),
+    seniorityLevel: detectSeniority(normalizedJob.title, normalizedJob.sourceKey),
     roleCategories: detectRoleCategories(normalizedJob.title),
     archetype: detectArchetype(normalizedJob.title)
   };

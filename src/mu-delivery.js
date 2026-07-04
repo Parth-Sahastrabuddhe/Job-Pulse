@@ -18,6 +18,7 @@ import {
   ButtonStyle,
   EmbedBuilder,
 } from "discord.js";
+import { formatLevelLine } from "./role-taxonomy.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -128,6 +129,11 @@ export function buildJobEmbed(job, { timezone, experienceYears, warnings = [], h
   if (experienceYears) {
     descParts.push(`Experience: ${experienceYears}+ years`);
   }
+
+  // Cross-company level equivalence (levels.fyi-style), only when an explicit
+  // convention matched: "Level: Associate (≈ mid, SDE 2 / L4 equivalent)".
+  const levelLine = formatLevelLine(title, job.source_key ?? job.sourceKey ?? "");
+  if (levelLine) descParts.push(levelLine);
 
   const h1bLine = formatH1bLine(h1bStats);
   if (h1bLine) descParts.push(h1bLine);

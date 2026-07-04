@@ -15,12 +15,23 @@ describe("isTargetRole (broadened)", () => {
     "iOS Engineer", "Android Developer", "Mobile Engineer", "React Native Developer",
     "Product Manager", "Technical Program Manager", "Program Manager, Engineering",
     "Member of Technical Staff", "AMTS", "MTS", "Platform Engineer",
+    // Role expansion (2026-07): language/tech-prefixed + new sections
+    "Java Developer", ".NET Developer", "React Developer", "Kotlin Developer",
+    "Go Developer", "Salesforce Developer", "Production Engineer",
+    "Research Engineer", "Security Engineer", "Penetration Tester",
+    "SDET", "QA Automation Engineer", "Firmware Engineer",
+    "Embedded Software Engineer", "Solutions Architect", "Sales Engineer",
+    "Engineering Manager", "Scrum Master", "Project Manager, Infrastructure",
+    "Quantitative Researcher", "Financial Analyst", "Investment Banking Analyst",
+    "Risk Analyst", "Staff Accountant", "Internal Auditor", "Treasury Analyst",
+    "Data Modeler", "Database Administrator",
   ];
 
   const shouldNotMatch = [
     "Recruiter", "Sales Manager", "Marketing Analyst", "HR Business Partner",
-    "Account Executive", "Legal Counsel", "Financial Analyst", "Office Manager",
+    "Account Executive", "Legal Counsel", "Office Manager",
     "Customer Success Manager", "Content Writer", "Graphic Designer",
+    "Business Development Manager", "Executive Assistant",
     "", null, undefined,
   ];
 

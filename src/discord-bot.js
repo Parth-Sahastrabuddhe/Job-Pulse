@@ -20,6 +20,7 @@ import { fitCheckResume } from "./tailor.js";
 import { upsertJobPost, updateJobPostStatus, bridgeToTracker, getDb, addToCompanyQueue, listCompanyQueue, getJobPost, getFunnelStats, updateJobFitScore } from "./state.js";
 import { getH1bSponsorStats } from "./multi-user-state.js";
 import { formatH1bLine } from "./mu-delivery.js";
+import { formatLevelLine } from "./role-taxonomy.js";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -932,6 +933,8 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
         : d.toLocaleString(undefined, tz);
       descParts.push(`Posted: ${postedStr}`);
     }
+    const levelLine = formatLevelLine(job.title, job.sourceKey);
+    if (levelLine) descParts.push(levelLine);
     // Personal bot serves the admin (sponsorship-seeking), so the H-1B
     // history line is always on when data exists.
     try {
