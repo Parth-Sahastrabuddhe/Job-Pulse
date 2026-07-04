@@ -39,6 +39,7 @@ import {
   recordJobDelivery,
   isH1bSponsor,
   upsertH1bSponsor,
+  getH1bSponsorStats,
   getUserProfile,
   searchUserJobs,
   safeLogError,
@@ -1182,6 +1183,11 @@ async function runPollCycle() {
 
         const action = getDeliveryAction(user, new Date());
         const dmOptions = { timezone: userTz, experienceYears, warnings };
+        // H-1B history line only matters to sponsorship-seeking users.
+        if (user.requires_sponsorship) {
+          const h1bStats = getH1bSponsorStats(job.sourceKey ?? job.source_key);
+          if (h1bStats) dmOptions.h1bStats = h1bStats;
+        }
         const channelOverride =
           user.notification_channel_id ||
           (user.discord_id === ADMIN_DISCORD_ID && process.env.PERSONAL_CHANNEL_ID) ||
@@ -1321,6 +1327,7 @@ async function runDigestCycle() {
               ...job,
               _warnings: enrichment.warnings,
               _experienceYears: enrichment.experienceYears,
+              _h1bStats: user.requires_sponsorship ? getH1bSponsorStats(job.source_key) : null,
             });
           }
 
@@ -1401,6 +1408,10 @@ async function runDigestCycle() {
             const { warnings, experienceYears } = await computeJobEnrichment(normalisedJob, user);
 
             const flushOpts = { timezone: tz, experienceYears, warnings };
+            if (user.requires_sponsorship) {
+              const h1bStats = getH1bSponsorStats(job.source_key);
+              if (h1bStats) flushOpts.h1bStats = h1bStats;
+            }
             const flushChannelOverride =
               user.notification_channel_id ||
               (user.discord_id === ADMIN_DISCORD_ID && process.env.PERSONAL_CHANNEL_ID) ||

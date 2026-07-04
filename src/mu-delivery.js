@@ -90,7 +90,20 @@ export function buildDmButtons(hash, jobUrl, status) {
  * @param {number} [options.experienceYears] max years of experience found in JD
  * @returns {EmbedBuilder}
  */
-export function buildJobEmbed(job, { timezone, experienceYears, warnings = [] } = {}) {
+/**
+ * One-line H-1B history hint from h1b_sponsors LCA stats.
+ * Shared by the mu DMs and the personal bot's channel posts.
+ * @param {{lca_count: number, avg_salary?: number, lca_fy?: string}|null} stats
+ * @returns {string|null}
+ */
+export function formatH1bLine(stats) {
+  if (!stats || !(stats.lca_count > 0)) return null;
+  const year = stats.lca_fy ? ` ${stats.lca_fy}` : "";
+  const wage = stats.avg_salary > 0 ? `, median ~$${Math.round(stats.avg_salary / 1000)}k` : "";
+  return `🛂 H-1B${year}: ~${Number(stats.lca_count).toLocaleString("en-US")} LCAs certified${wage}`;
+}
+
+export function buildJobEmbed(job, { timezone, experienceYears, warnings = [], h1bStats = null } = {}) {
   // Normalise field names — prefer snake_case (DB), fall back to camelCase
   const company   = job.source_label    ?? job.sourceLabel    ?? "Unknown Company";
   const title     = job.title           ?? "Untitled";
@@ -115,6 +128,9 @@ export function buildJobEmbed(job, { timezone, experienceYears, warnings = [] } 
   if (experienceYears) {
     descParts.push(`Experience: ${experienceYears}+ years`);
   }
+
+  const h1bLine = formatH1bLine(h1bStats);
+  if (h1bLine) descParts.push(h1bLine);
 
   // Render JD warnings inline (sponsorship, clearance, etc.)
   if (warnings.length > 0) {
@@ -273,6 +289,7 @@ export async function sendDigestDm(client, discordId, jobs, firstName, options =
         timezone: options.timezone,
         experienceYears: job._experienceYears,
         warnings: job._warnings ?? [],
+        h1bStats: job._h1bStats ?? null,
       });
       const buttons = buildDmButtons(hash, jobUrl, "pending");
 

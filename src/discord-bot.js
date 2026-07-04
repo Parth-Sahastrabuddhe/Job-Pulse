@@ -18,6 +18,8 @@ import path from "node:path";
 import { fetchJobDescription, saveJobData, jobDirId, getJobDir } from "./job-description.js";
 import { fitCheckResume } from "./tailor.js";
 import { upsertJobPost, updateJobPostStatus, bridgeToTracker, getDb, addToCompanyQueue, listCompanyQueue, getJobPost, getFunnelStats, updateJobFitScore } from "./state.js";
+import { getH1bSponsorStats } from "./multi-user-state.js";
+import { formatH1bLine } from "./mu-delivery.js";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -930,6 +932,12 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
         : d.toLocaleString(undefined, tz);
       descParts.push(`Posted: ${postedStr}`);
     }
+    // Personal bot serves the admin (sponsorship-seeking), so the H-1B
+    // history line is always on when data exists.
+    try {
+      const h1bLine = formatH1bLine(getH1bSponsorStats(job.sourceKey));
+      if (h1bLine) descParts.push(h1bLine);
+    } catch {}
     if (hasWarnings) {
       const parts = warnings.map((w) =>
         w.severity === "hard" ? `:octagonal_sign: ${w.text}` : `:warning: ${w.text}`

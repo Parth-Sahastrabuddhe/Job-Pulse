@@ -325,18 +325,31 @@ export function isH1bSponsor(companyKey) {
 /**
  * Insert or update an H1B sponsor record.
  */
-export function upsertH1bSponsor({ companyKey, companyName, sponsorsH1b, lcaCount, avgSalary }) {
+export function upsertH1bSponsor({ companyKey, companyName, sponsorsH1b, lcaCount, avgSalary, lcaFy }) {
   getDb()
     .prepare(
-      `INSERT INTO h1b_sponsors (company_key, company_name, sponsors_h1b, lca_count, avg_salary)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO h1b_sponsors (company_key, company_name, sponsors_h1b, lca_count, avg_salary, lca_fy)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(company_key) DO UPDATE SET
          company_name  = excluded.company_name,
          sponsors_h1b  = excluded.sponsors_h1b,
          lca_count     = excluded.lca_count,
-         avg_salary    = excluded.avg_salary`
+         avg_salary    = excluded.avg_salary,
+         lca_fy        = excluded.lca_fy`
     )
-    .run(companyKey, companyName, sponsorsH1b ? 1 : 0, lcaCount ?? 0, avgSalary ?? 0);
+    .run(companyKey, companyName, sponsorsH1b ? 1 : 0, lcaCount ?? 0, avgSalary ?? 0, lcaFy ?? "");
+}
+
+/**
+ * LCA history stats for a company, for the H-1B line in job embeds.
+ * Returns null when there is no real data (lca_count 0 keeps the line off).
+ */
+export function getH1bSponsorStats(companyKey) {
+  if (!companyKey) return null;
+  const row = getDb()
+    .prepare("SELECT lca_count, avg_salary, lca_fy FROM h1b_sponsors WHERE company_key = ? AND lca_count > 0")
+    .get(companyKey);
+  return row ?? null;
 }
 
 // ---------------------------------------------------------------------------
