@@ -40,9 +40,18 @@ function readEnvFile() {
   return out;
 }
 
-const message = process.argv[2];
+// --b64 <base64>: message arrives base64-encoded (the add-company runner uses
+// this to pass arbitrary text through ssh without quoting hazards).
+let message = process.argv[2];
+if (message === "--b64") {
+  try {
+    message = Buffer.from(process.argv[3] || "", "base64").toString("utf8");
+  } catch {
+    message = "";
+  }
+}
 if (!message) {
-  console.error('Usage: node scripts/notify-admin.js "message"');
+  console.error('Usage: node scripts/notify-admin.js "message" | --b64 <base64>');
   process.exit(1);
 }
 

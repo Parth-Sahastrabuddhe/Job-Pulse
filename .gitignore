@@ -27,3 +27,5 @@ scripts/delete_arpit_rows.py
 
 # Superpowers workspace
 .superpowers/
+# Automation result files (written by the add-company unattended session)
+.add-company-result.json
