@@ -45,6 +45,7 @@ import {
   safeLogError,
   flushDmLog,
   flushDmLogSync,
+  isFeatureEnabled,
 } from "./multi-user-state.js";
 import { filterJobForUser } from "./filter.js";
 import { isJobUrlLive } from "./liveness.js";
@@ -633,7 +634,7 @@ client.on("interactionCreate", async (interaction) => {
       const row = db.prepare("SELECT url, source_label, title FROM seen_jobs WHERE key = ?").get(jobKey);
       const jobUrl = row?.url ?? "";
 
-      const updatedButtons = buildDmButtons(hash, jobUrl, "applied");
+      const updatedButtons = buildDmButtons(hash, jobUrl, "applied", { fitCheck: isFeatureEnabled("mu_fit_check") });
       await interaction.editReply({ components: updatedButtons });
 
       // Update Google Sheet in background — only for the sheet owner
@@ -656,7 +657,7 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.deferUpdate();
 
       const jobUrl = interaction.message?.embeds?.[0]?.url ?? "";
-      const restoredButtons = buildDmButtons(payload, jobUrl, "pending");
+      const restoredButtons = buildDmButtons(payload, jobUrl, "pending", { fitCheck: isFeatureEnabled("mu_fit_check") });
       await interaction.message.edit({ components: restoredButtons });
       return;
     }
@@ -684,7 +685,7 @@ client.on("interactionCreate", async (interaction) => {
       const row = db.prepare("SELECT url FROM seen_jobs WHERE key = ?").get(jobKey);
       const jobUrl = row?.url ?? "";
 
-      const updatedButtons = buildDmButtons(hash, jobUrl, "skipped");
+      const updatedButtons = buildDmButtons(hash, jobUrl, "skipped", { fitCheck: isFeatureEnabled("mu_fit_check") });
       await interaction.editReply({ components: updatedButtons });
       return;
     }
@@ -715,7 +716,7 @@ client.on("interactionCreate", async (interaction) => {
       const urlRow = db.prepare("SELECT url FROM seen_jobs WHERE key = ?").get(jobKey);
       const jobUrl = urlRow?.url ?? "";
 
-      const updatedButtons = buildDmButtons(hash, jobUrl, newStatus);
+      const updatedButtons = buildDmButtons(hash, jobUrl, newStatus, { fitCheck: isFeatureEnabled("mu_fit_check") });
       await interaction.editReply({ components: updatedButtons });
       return;
     }
@@ -1102,6 +1103,8 @@ async function runPollCycle() {
     if (Date.now() - ts > MU_CURSOR_MAX_HOLD_MS) transientRetryAt.delete(key);
   }
 
+  const fitCheckOn = isFeatureEnabled("mu_fit_check");
+
   for (const user of users) {
     // ── Setup phase (per-user) ──────────────────────────────────────────────
     let seenKeys, profileInvalid, matchedJobs, userTz;
@@ -1183,6 +1186,7 @@ async function runPollCycle() {
 
         const action = getDeliveryAction(user, new Date());
         const dmOptions = { timezone: userTz, experienceYears, warnings };
+        dmOptions.fitCheckEnabled = fitCheckOn;
         // H-1B history line only matters to sponsorship-seeking users.
         if (user.requires_sponsorship) {
           const h1bStats = getH1bSponsorStats(job.sourceKey ?? job.source_key);
@@ -1332,6 +1336,7 @@ async function runDigestCycle() {
           }
 
           const digestOpts = { timezone: userTz };
+          digestOpts.fitCheckEnabled = isFeatureEnabled("mu_fit_check");
           const digestChannelOverride =
             user.notification_channel_id ||
             (user.discord_id === ADMIN_DISCORD_ID && process.env.PERSONAL_CHANNEL_ID) ||

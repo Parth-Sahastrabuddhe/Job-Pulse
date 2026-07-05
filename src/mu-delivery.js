@@ -47,9 +47,11 @@ function isValidJobUrl(url) {
  * @param {string} hash    16-char button hash (from jobButtonHash)
  * @param {string} jobUrl  direct URL to the job posting
  * @param {"pending"|"notified"|"saved"|"applied"|"skipped"} status
+ * @param {object} [opts]
+ * @param {boolean} [opts.fitCheck] append a 5th "Fit Check" (mu_fitcheck:<hash>) button
  * @returns {ActionRowBuilder[]}
  */
-export function buildDmButtons(hash, jobUrl, status) {
+export function buildDmButtons(hash, jobUrl, status, opts = {}) {
   const isApplied = status === "applied";
   const isSaved = status === "saved";
 
@@ -75,6 +77,17 @@ export function buildDmButtons(hash, jobUrl, status) {
       .setStyle(status === "skipped" ? ButtonStyle.Danger : ButtonStyle.Secondary)
       .setDisabled(isApplied)
   );
+
+  // 5th button fills the row to Discord's 5-per-row cap; a future button
+  // must start a second ActionRow.
+  if (opts.fitCheck) {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`mu_fitcheck:${hash}`)
+        .setLabel("Fit Check")
+        .setStyle(ButtonStyle.Secondary)
+    );
+  }
 
   return [row];
 }
@@ -190,7 +203,7 @@ export async function sendJobDm(client, discordId, job, firstName, options = {})
     const hash   = jobButtonHash(jobKey);
 
     const embed   = buildJobEmbed(job, options);
-    const buttons = buildDmButtons(hash, jobUrl, "pending");
+    const buttons = buildDmButtons(hash, jobUrl, "pending", { fitCheck: !!options.fitCheckEnabled });
 
     const company = job.source_label ?? job.sourceLabel ?? "";
     const title   = job.title ?? "";
@@ -297,7 +310,7 @@ export async function sendDigestDm(client, discordId, jobs, firstName, options =
         warnings: job._warnings ?? [],
         h1bStats: job._h1bStats ?? null,
       });
-      const buttons = buildDmButtons(hash, jobUrl, "pending");
+      const buttons = buildDmButtons(hash, jobUrl, "pending", { fitCheck: !!options.fitCheckEnabled });
 
       await target.send({ embeds: [embed], components: buttons });
     } catch (err) {
