@@ -5,7 +5,7 @@
  *
  * Exports:
  *   jobButtonHash(jobKey)                                        → 16-char SHA1 hex prefix
- *   buildDmButtons(hash, jobUrl, status)                         → ActionRow[]
+ *   buildDmButtons(hash, jobUrl, status, opts)                    → ActionRow[]
  *   buildJobEmbed(job, { timezone?, experienceYears? })           → EmbedBuilder
  *   sendJobDm(client, discordId, job, firstName, { timezone?, experienceYears? })  → { messageId } | null
  *   sendDigestDm(client, discordId, jobs, firstName, { timezone? })  → { ok, deliveredKeys }
@@ -192,6 +192,7 @@ export function buildJobEmbed(job, { timezone, experienceYears, warnings = [], h
  * @param {object}  [options]
  * @param {string}  [options.timezone]        IANA timezone for date formatting
  * @param {number}  [options.experienceYears] max experience years from JD
+ * @param {boolean} [options.fitCheckEnabled] render the Fit Check button (mu_fit_check flag)
  * @returns {Promise<{ ok: true, messageId: string }|{ ok: false, permanent: boolean }>}
  *          permanent=true means retrying cannot help (DMs closed / blocked /
  *          unknown user); permanent=false is a transient failure worth retrying.
@@ -244,6 +245,7 @@ export async function sendJobDm(client, discordId, job, firstName, options = {})
  * @param {string}   firstName
  * @param {object}   [options]
  * @param {string}   [options.timezone]  IANA timezone for date formatting
+ * @param {boolean}  [options.fitCheckEnabled] render the Fit Check button (mu_fit_check flag)
  * @returns {Promise<{ ok: boolean, deliveredKeys: string[] }>}
  *          ok=false if the digest could not be sent (target unresolved or the
  *          summary embed failed); deliveredKeys lists the job keys included in the

@@ -824,6 +824,12 @@ client.on("interactionCreate", async (interaction) => {
           return;
         }
 
+        // Heal a missing user_seen_jobs row: the shared hash cache can resolve
+        // a job this user's row scan never saw (lost delivery write), and
+        // saveFitResult's UPDATE would then no-op. INSERT OR IGNORE keeps any
+        // existing status.
+        markJobNotified(profile.id, jobKey);
+
         const description = await ensureJobDescription(row);
         if (!description) {
           await interaction.editReply(

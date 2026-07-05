@@ -127,7 +127,7 @@ export async function runLLM(prompt, config) {
   if (config.provider === "custom") {
     if (!config.baseUrl) throw new LlmError("blocked_url", "No endpoint configured");
     try {
-      await assertSafeUrl(config.baseUrl); // call-time re-check closes the DNS-rebinding window
+      await assertSafeUrl(config.baseUrl); // call-time re-check narrows the DNS-rebinding window (residual TOCTOU accepted per spec)
     } catch (err) {
       throw new LlmError("blocked_url", err.message);
     }

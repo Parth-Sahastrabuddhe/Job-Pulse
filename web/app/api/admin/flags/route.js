@@ -29,7 +29,7 @@ export async function PUT(request) {
   } catch {
     return Response.json({ error: "Invalid request body" }, { status: 400 });
   }
-  if (typeof body.key !== "string" || typeof body.enabled !== "boolean") {
+  if (!body || typeof body !== "object" || typeof body.key !== "string" || typeof body.enabled !== "boolean") {
     return Response.json({ error: "Expected { key: string, enabled: boolean }" }, { status: 400 });
   }
   try {

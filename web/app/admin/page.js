@@ -580,7 +580,7 @@ function SuggestionsTab() {
 function FeatureFlagsCard() {
   const [flags, setFlags] = useState(null);
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState("");
+  const [saving, setSaving] = useState(() => new Set());
 
   useEffect(() => {
     fetch("/api/admin/flags")
@@ -590,7 +590,7 @@ function FeatureFlagsCard() {
   }, []);
 
   async function toggle(flag) {
-    setSaving(flag.key);
+    setSaving((s) => new Set(s).add(flag.key));
     setError("");
     try {
       const res = await fetch("/api/admin/flags", {
@@ -603,7 +603,11 @@ function FeatureFlagsCard() {
     } catch {
       setError("Failed to update flag.");
     } finally {
-      setSaving("");
+      setSaving((s) => {
+        const next = new Set(s);
+        next.delete(flag.key);
+        return next;
+      });
     }
   }
 
@@ -621,7 +625,7 @@ function FeatureFlagsCard() {
           </div>
           <button
             type="button"
-            disabled={saving === flag.key}
+            disabled={saving.has(flag.key)}
             onClick={() => toggle(flag)}
             className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
               flag.enabled === 1 ? "bg-pulse text-black hover:bg-pulse-hover" : "bg-background border border-line text-muted hover:text-foreground"
