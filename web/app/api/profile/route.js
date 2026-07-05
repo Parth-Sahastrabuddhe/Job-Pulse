@@ -2,6 +2,10 @@ import bcrypt from "bcryptjs";
 import { getSession } from "@/lib/session";
 import { getUserProfile, updateUserProfile, setPasswordHash } from "@/lib/db";
 import { requireSameOrigin } from "@/lib/security";
+import { encryptSecret, decryptSecret } from "../../../../src/crypto-util.js";
+import { PROVIDERS } from "../../../../src/llm-providers.js";
+import { validateProviderConfig } from "@/lib/llm-ping";
+import { setLlmKeyEnc } from "@/lib/db";
 
 const ALLOWED_COUNTRIES = new Set(["US", "CA", "GB", "DE", "IN", "ALL"]);
 
@@ -65,6 +69,12 @@ export async function GET() {
     isActive: profile.is_active === 1,
     educationLevel: profile.education_level || "",
     hasPassword: !!profile.password_hash,
+    resumeText: profile.resume_text || "",
+    experienceYears: profile.experience_years ?? null,
+    llmProvider: profile.llm_provider || "gemini",
+    llmModel: profile.llm_model || "",
+    llmBaseUrl: profile.llm_base_url || "",
+    llmKeyConfigured: !!profile.llm_key_enc,
   });
 }
 
@@ -120,6 +130,72 @@ export async function PUT(request) {
   }
   if (body.isActive !== undefined) fields.is_active = body.isActive ? 1 : 0;
   if (body.educationLevel !== undefined) fields.education_level = body.educationLevel;
+
+  if (body.resumeText !== undefined) {
+    const resume = String(body.resumeText ?? "");
+    if (resume.length > 15000) {
+      return Response.json({ error: "Resume must be 15,000 characters or fewer" }, { status: 400 });
+    }
+    fields.resume_text = resume.trim() ? resume : null;
+  }
+  if (body.experienceYears !== undefined) {
+    if (body.experienceYears === null || body.experienceYears === "") {
+      fields.experience_years = null;
+    } else {
+      const years = Number(body.experienceYears);
+      if (!Number.isFinite(years) || years < 0 || years > 50) {
+        return Response.json({ error: "Experience years must be between 0 and 50" }, { status: 400 });
+      }
+      fields.experience_years = years;
+    }
+  }
+  if (body.llmProvider !== undefined) {
+    if (!PROVIDERS[body.llmProvider]) {
+      return Response.json({ error: "Invalid LLM provider" }, { status: 400 });
+    }
+    fields.llm_provider = body.llmProvider;
+  }
+  if (body.llmModel !== undefined) {
+    const model = String(body.llmModel ?? "").trim();
+    if (model.length > 100) return Response.json({ error: "Model name too long" }, { status: 400 });
+    fields.llm_model = model || null;
+  }
+  if (body.llmBaseUrl !== undefined) {
+    const url = String(body.llmBaseUrl ?? "").trim();
+    if (url.length > 300) return Response.json({ error: "Endpoint URL too long" }, { status: 400 });
+    fields.llm_base_url = url || null;
+  }
+
+  // Write-only LLM key handling + save-time provider validation.
+  const secret = process.env.LLM_KEY_SECRET;
+  const currentProfile = getUserProfile(session.discordId);
+  const effective = {
+    provider: fields.llm_provider ?? currentProfile.llm_provider ?? "gemini",
+    baseUrl: fields.llm_base_url !== undefined ? fields.llm_base_url : currentProfile.llm_base_url,
+    model: fields.llm_model !== undefined ? fields.llm_model : currentProfile.llm_model,
+  };
+  const providerConfigChanged =
+    fields.llm_provider !== undefined || fields.llm_model !== undefined || fields.llm_base_url !== undefined;
+
+  if (body.llmKey !== undefined && body.llmKey === "") {
+    setLlmKeyEnc(session.discordId, null);
+  } else if (body.llmKey) {
+    if (!secret) return Response.json({ error: "Server is missing LLM_KEY_SECRET" }, { status: 500 });
+    const check = await validateProviderConfig({ ...effective, apiKey: String(body.llmKey) });
+    if (!check.ok) return Response.json({ error: `Provider check failed: ${check.error}` }, { status: 400 });
+    setLlmKeyEnc(session.discordId, encryptSecret(String(body.llmKey), secret));
+  } else if (providerConfigChanged && currentProfile.llm_key_enc) {
+    // Provider/model/endpoint changed without a new key: re-ping with the stored key.
+    if (!secret) return Response.json({ error: "Server is missing LLM_KEY_SECRET" }, { status: 500 });
+    let storedKey = null;
+    try { storedKey = decryptSecret(currentProfile.llm_key_enc, secret); } catch {}
+    const check = await validateProviderConfig({ ...effective, apiKey: storedKey });
+    if (!check.ok) return Response.json({ error: `Provider check failed: ${check.error}` }, { status: 400 });
+  } else if (providerConfigChanged && effective.provider === "custom" && effective.baseUrl) {
+    // Keyless custom endpoint: still validate reachability + SSRF.
+    const check = await validateProviderConfig({ ...effective, apiKey: null });
+    if (!check.ok) return Response.json({ error: `Provider check failed: ${check.error}` }, { status: 400 });
+  }
 
   // Handle password setting/changing
   if (body.newPassword) {

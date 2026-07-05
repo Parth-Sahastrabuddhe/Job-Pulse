@@ -62,7 +62,8 @@ export function updateUserProfile(discordId, fields) {
     "first_name", "email", "email_verified", "role_categories", "seniority_levels",
     "company_selections", "country", "requires_sponsorship", "notification_mode",
     "quiet_hours_start", "quiet_hours_end", "quiet_hours_tz", "is_active",
-    "education_level"
+    "education_level",
+    "resume_text", "experience_years", "llm_provider", "llm_model", "llm_base_url"
   ];
   const updates = [];
   const values = [];
@@ -190,4 +191,22 @@ export function createCompanySuggestion(discordId, companyName, careersUrl, reas
   if (!user) return null;
   const result = d.prepare(`INSERT INTO company_suggestions (user_id, company_name, careers_url, reason, submitted_at) VALUES (?, ?, ?, ?, ?)`).run(user.id, companyName, careersUrl || "", reason || "", new Date().toISOString());
   return result.lastInsertRowid;
+}
+
+// --- Fit Check: LLM key + feature flags ---
+
+export function setLlmKeyEnc(discordId, encOrNull) {
+  getDb().prepare("UPDATE user_profiles SET llm_key_enc = ?, updated_at = ? WHERE discord_id = ?")
+    .run(encOrNull, new Date().toISOString(), discordId);
+}
+
+export function listFeatureFlags() {
+  return getDb().prepare("SELECT key, enabled, updated_at FROM feature_flags ORDER BY key").all();
+}
+
+// Updates only; flags are registered by the bot's initDb seed, never created here.
+export function setFeatureFlag(key, enabled) {
+  const result = getDb().prepare("UPDATE feature_flags SET enabled = ?, updated_at = ? WHERE key = ?")
+    .run(enabled ? 1 : 0, new Date().toISOString(), key);
+  return result.changes > 0;
 }

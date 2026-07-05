@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nextConfig = {
   serverExternalPackages: ["better-sqlite3"],
   turbopack: {
-    root: __dirname,
+    root: path.join(__dirname, ".."),
   },
 };
 
