@@ -1,6 +1,14 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { buildMuFitPrompt, formatFitReply, isFitConfigured, mapLlmErrorToMessage } from "../src/mu-fit-check.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildMuFitPrompt, formatFitReply, isFitConfigured, mapLlmErrorToMessage, runUserFitCheck } from "../src/mu-fit-check.js";
 import { LlmError } from "../src/llm-client.js";
+import { encryptSecret } from "../src/crypto-util.js";
+
+const runLLMMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../src/llm-client.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, runLLM: runLLMMock };
+});
 
 const baseProfile = {
   first_name: "Test",
@@ -100,5 +108,50 @@ describe("mapLlmErrorToMessage", () => {
 
   it("maps unknown errors to the transient message", () => {
     expect(mapLlmErrorToMessage(new Error("boom"))).toMatch(/try again/i);
+  });
+});
+
+describe("runUserFitCheck", () => {
+  const SECRET = "0123456789abcdef0123456789abcdef";
+
+  afterEach(() => {
+    delete process.env.LLM_KEY_SECRET;
+    runLLMMock.mockReset();
+  });
+
+  it("throws auth when LLM_KEY_SECRET is missing but a key is stored", async () => {
+    delete process.env.LLM_KEY_SECRET;
+    await expect(runUserFitCheck(baseProfile, job, "jd")).rejects.toMatchObject({ kind: "auth" });
+    expect(runLLMMock).not.toHaveBeenCalled();
+  });
+
+  it("throws auth when the stored key cannot be decrypted", async () => {
+    process.env.LLM_KEY_SECRET = SECRET;
+    await expect(
+      runUserFitCheck({ ...baseProfile, llm_key_enc: "v1:AAAA:BBBB:CCCC" }, job, "jd")
+    ).rejects.toMatchObject({ kind: "auth" });
+    expect(runLLMMock).not.toHaveBeenCalled();
+  });
+
+  it("throws bad_response when the model output has no contract", async () => {
+    process.env.LLM_KEY_SECRET = SECRET;
+    runLLMMock.mockResolvedValue("nothing usable here");
+    const profile = { ...baseProfile, llm_key_enc: encryptSecret("user-key", SECRET) };
+    await expect(runUserFitCheck(profile, job, "jd")).rejects.toMatchObject({ kind: "bad_response" });
+  });
+
+  it("passes the decrypted key and profile config to runLLM and returns the parsed result", async () => {
+    process.env.LLM_KEY_SECRET = SECRET;
+    runLLMMock.mockResolvedValue('═══\nFIT ASSESSMENT\nShould Apply: YES\n═══\nreasoning\n═══\nFIT_SCORES:{"score":82,"skills":85,"experience":75,"domain":90,"level":78}');
+    const profile = { ...baseProfile, llm_key_enc: encryptSecret("user-key", SECRET) };
+    const result = await runUserFitCheck(profile, job, "jd");
+    expect(result.shouldApply).toBe("YES");
+    expect(result.fitScore).toBe(82);
+    expect(runLLMMock).toHaveBeenCalledWith(expect.any(String), {
+      provider: "gemini",
+      apiKey: "user-key",
+      baseUrl: null,
+      model: null,
+    });
   });
 });
