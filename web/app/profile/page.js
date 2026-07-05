@@ -477,11 +477,21 @@ export default function ProfilePage() {
               {profile.llmKeyConfigured && (
                 <button type="button" className="text-xs text-danger hover:underline mb-2"
                   onClick={async () => {
-                    const res = await fetch("/api/profile", {
-                      method: "PUT", headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ llmKey: "" }),
-                    });
-                    if (res.ok) setProfile((p) => ({ ...p, llmKeyConfigured: false }));
+                    setError("");
+                    try {
+                      const res = await fetch("/api/profile", {
+                        method: "PUT", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ llmKey: "" }),
+                      });
+                      if (res.ok) {
+                        setProfile((p) => ({ ...p, llmKeyConfigured: false }));
+                      } else {
+                        const data = await res.json().catch(() => ({}));
+                        setError(data.error || "Failed to remove the stored key.");
+                      }
+                    } catch {
+                      setError("Network error. Please try again.");
+                    }
                   }}>
                   Remove stored key
                 </button>
