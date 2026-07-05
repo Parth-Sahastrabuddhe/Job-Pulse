@@ -46,13 +46,17 @@ import {
   flushDmLog,
   flushDmLogSync,
   isFeatureEnabled,
+  getFitResult,
+  saveFitResult,
+  countFitChecksToday,
 } from "./multi-user-state.js";
 import { filterJobForUser } from "./filter.js";
 import { isJobUrlLive } from "./liveness.js";
 import { jobIsFresh } from "./sources/shared.js";
 import { COMPANIES } from "./companies.js";
 import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } from "./jd-filter.js";
-import { fetchJobDescription } from "./job-description.js";
+import { fetchJobDescription, getJobDir, saveJobData } from "./job-description.js";
+import { isFitConfigured, runUserFitCheck, formatFitReply, mapLlmErrorToMessage } from "./mu-fit-check.js";
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
 import { sendJobDm, sendDigestDm, jobButtonHash, buildDmButtons } from "./mu-delivery.js";
 import { getConfig } from "./config.js";
@@ -87,6 +91,10 @@ function touchMuHeartbeat() {
   } catch {}
 }
 const ADMIN_DISCORD_ID = process.env.ADMIN_DISCORD_ID;
+const DASHBOARD_URL = (process.env.DASHBOARD_URL || "http://3.138.62.29").replace(/\/+$/, "");
+const MU_FIT_DAILY_CAP = Number.parseInt(process.env.MU_FIT_DAILY_CAP || "25", 10);
+// In-flight fit checks, keyed `${userId}:${hash}` (mirrors the owner path's activeFitChecks).
+const activeMuFitChecks = new Set();
 
 /** Load .env file the same way config.js does — no dotenv dependency. */
 function loadEnvFile(envFilePath = path.join(PROJECT_ROOT, ".env")) {
@@ -203,6 +211,29 @@ function findJobKeyByHash(hash, userId) {
     }
   }
 
+  return null;
+}
+
+/**
+ * Load the cached JD for a seen_jobs row, fetching and saving it when missing.
+ * Returns null when no usable description can be obtained.
+ */
+async function ensureJobDescription(row) {
+  const jobRef = { sourceKey: row.source_key, id: row.id, url: row.url ?? "", sourceLabel: row.source_label };
+  try {
+    const descPath = path.join(getJobDir(jobRef), "description.txt");
+    const cached = await fs.promises.readFile(descPath, "utf8");
+    if (cached && cached.length > 50) return cached;
+  } catch {}
+  try {
+    const description = await fetchJobDescription(jobRef);
+    if (description && description.length > 50) {
+      await saveJobData(jobRef, description);
+      return description;
+    }
+  } catch (err) {
+    console.error(`[mu-fitcheck] JD fetch failed for ${row.source_key}-${row.id}: ${err.message}`);
+  }
   return null;
 }
 
@@ -718,6 +749,104 @@ client.on("interactionCreate", async (interaction) => {
 
       const updatedButtons = buildDmButtons(hash, jobUrl, newStatus, { fitCheck: isFeatureEnabled("mu_fit_check") });
       await interaction.editReply({ components: updatedButtons });
+      return;
+    }
+
+    // ── mu_fitcheck (per-user AI fit check) ─────────────────────────────────
+    if (action === "mu_fitcheck") {
+      if (!isFeatureEnabled("mu_fit_check")) {
+        await interaction.reply({ content: "Fit Check is currently disabled.", ephemeral: true });
+        return;
+      }
+      const profile = getUserProfile(interaction.user.id);
+      if (!profile) {
+        await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
+        return;
+      }
+      if (!isFitConfigured(profile)) {
+        await interaction.reply({
+          content: `Set up Fit Check first: paste your resume and connect an LLM (a free Gemini key works great) at ${DASHBOARD_URL}/profile`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const hash = payload;
+      const guardKey = `${profile.id}:${hash}`;
+      if (activeMuFitChecks.has(guardKey)) {
+        await interaction.reply({ content: "A fit check is already running for this job.", ephemeral: true });
+        return;
+      }
+
+      const jobKey = findJobKeyByHash(hash, profile.id);
+      if (!jobKey) {
+        await interaction.reply({ content: "Job not found (MU).", ephemeral: true });
+        return;
+      }
+
+      const providerMeta = { provider: profile.llm_provider || "gemini", model: profile.llm_model };
+
+      // Cache hit: replay the stored result, no LLM call, no cap spend.
+      const cached = getFitResult(profile.id, jobKey);
+      if (cached) {
+        let scores = null;
+        try { scores = cached.fit_scores_json ? JSON.parse(cached.fit_scores_json) : null; } catch {}
+        const replay = formatFitReply(
+          { fitScore: cached.fit_score, fitScores: scores, shouldApply: cached.fit_verdict ?? "UNKNOWN", fitAssessment: cached.fit_assessment ?? "" },
+          { ...providerMeta, cachedAt: cached.fit_checked_at }
+        );
+        await interaction.reply({ content: replay, ephemeral: interaction.inGuild() });
+        return;
+      }
+
+      if (countFitChecksToday(profile.id) >= MU_FIT_DAILY_CAP) {
+        await interaction.reply({
+          content: `Daily fit-check limit reached (${MU_FIT_DAILY_CAP}). Resets at midnight UTC.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      activeMuFitChecks.add(guardKey);
+      try {
+        // Ephemeral in guild channels (admin-visible private feeds); a plain
+        // reply in real DMs so the result persists in the thread.
+        await interaction.deferReply({ ephemeral: interaction.inGuild() });
+        await interaction.editReply("Running fit check... 20-40 seconds.");
+
+        const db = getDb();
+        const row = db
+          .prepare("SELECT key, source_key, source_label, id, title, location, url FROM seen_jobs WHERE key = ?")
+          .get(jobKey);
+        if (!row) {
+          await interaction.editReply("Job details are no longer available for this posting.");
+          return;
+        }
+
+        const description = await ensureJobDescription(row);
+        if (!description) {
+          await interaction.editReply(
+            `Couldn't fetch the job description for **${row.source_label} - ${row.title}**. Use View Job to check the listing directly.`
+          );
+          return;
+        }
+
+        const result = await runUserFitCheck(profile, row, description);
+        saveFitResult(profile.id, jobKey, {
+          fitScore: result.fitScore,
+          fitVerdict: result.shouldApply,
+          fitScoresJson: result.fitScores ? JSON.stringify(result.fitScores) : null,
+          fitAssessment: result.fitAssessment,
+        });
+        await interaction.editReply(formatFitReply(result, { ...providerMeta, cachedAt: null }));
+      } catch (err) {
+        console.error(`[mu-fitcheck] user ${profile.id} job ${jobKey}: ${err.message}`);
+        try {
+          await interaction.editReply(mapLlmErrorToMessage(err));
+        } catch {}
+      } finally {
+        activeMuFitChecks.delete(guardKey);
+      }
       return;
     }
 
