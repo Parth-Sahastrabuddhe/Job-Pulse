@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import CompanySelector from "@/components/CompanySelector";
 import { ROLE_SECTIONS } from "@/lib/role-taxonomy.mjs";
+import { PROVIDERS } from "../../../src/llm-providers.js";
 
 const SENIORITY_LEVELS = [
   { value: "intern", label: "Intern" },
@@ -38,6 +39,15 @@ const COUNTRY_OPTIONS = [
 ];
 const LEGACY_COUNTRY_LABELS = { GB: "United Kingdom", DE: "Germany", IN: "India" };
 
+const LLM_PROVIDER_OPTIONS = [
+  { value: "gemini", label: "Gemini (free tier, recommended)" },
+  { value: "groq", label: "Groq (free tier)" },
+  { value: "openrouter", label: "OpenRouter (some free models)" },
+  { value: "openai", label: "OpenAI (paid)" },
+  { value: "anthropic", label: "Anthropic (paid)" },
+  { value: "custom", label: "Custom / local (OpenAI-compatible)" },
+].map((o) => ({ ...o, defaultModel: PROVIDERS[o.value].defaultModel ?? "" }));
+
 export default function ProfilePage() {
   const router = useRouter();
   const [profile, setProfile] = useState(null);
@@ -49,6 +59,7 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState("");
   const [pwSaving, setPwSaving] = useState(false);
   const [pwMsg, setPwMsg] = useState("");
+  const [llmKey, setLlmKey] = useState("");
 
   useEffect(() => {
     async function loadData() {
@@ -101,11 +112,12 @@ export default function ProfilePage() {
     try {
       const res = await fetch("/api/profile", {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(profile),
+        body: JSON.stringify(llmKey ? { ...profile, llmKey } : profile),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Failed to save profile."); return; }
       setSuccess(true);
+      setLlmKey("");
     } catch { setError("Network error. Please try again."); }
     finally { setSaving(false); }
   }
@@ -381,6 +393,105 @@ export default function ProfilePage() {
               >
                 {pwSaving ? "Saving..." : profile.hasPassword ? "Update Password" : "Set Password"}
               </button>
+            </section>
+
+            {/* Fit Check (AI) */}
+            <section className="bg-surface rounded-xl border border-line p-5">
+              <h2 className="text-sm font-semibold text-foreground mb-1 font-display uppercase tracking-wider">Fit Check (AI)</h2>
+              <p className="text-xs text-muted mb-3">
+                Bring your own LLM; JobPulse never uses your key or endpoint for anything but your own fit checks.
+                Gemini and Groq have free tiers; OpenAI and Anthropic spend your money. Get a free Gemini key at{" "}
+                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-pulse hover:underline">aistudio.google.com/apikey</a>.
+              </p>
+
+              <label className="block text-xs text-muted mb-1">Resume (plain text, pasted)</label>
+              <textarea
+                value={profile.resumeText ?? ""}
+                maxLength={15000}
+                rows={8}
+                onChange={(e) => setProfile((p) => ({ ...p, resumeText: e.target.value }))}
+                className={`${inputClass} w-full font-mono text-xs`}
+                placeholder="Paste your resume text here..."
+              />
+              <div className="text-right text-xs text-muted mb-3">{(profile.resumeText ?? "").length}/15000</div>
+
+              <label className="block text-xs text-muted mb-1">Years of experience</label>
+              <input
+                type="number" min="0" max="50" step="0.5"
+                value={profile.experienceYears ?? ""}
+                onChange={(e) => setProfile((p) => ({ ...p, experienceYears: e.target.value === "" ? null : Number(e.target.value) }))}
+                className={`${inputClass} w-32 mb-3`}
+              />
+
+              <label className="block text-xs text-muted mb-1">LLM provider</label>
+              <select
+                value={profile.llmProvider ?? "gemini"}
+                onChange={(e) => {
+                  const opt = LLM_PROVIDER_OPTIONS.find((o) => o.value === e.target.value);
+                  setProfile((p) => ({ ...p, llmProvider: e.target.value, llmModel: opt?.defaultModel ?? "" }));
+                }}
+                className={`${inputClass} w-full mb-3`}
+              >
+                {LLM_PROVIDER_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+
+              <label className="block text-xs text-muted mb-1">Model</label>
+              <input
+                type="text"
+                value={profile.llmModel ?? ""}
+                onChange={(e) => setProfile((p) => ({ ...p, llmModel: e.target.value }))}
+                className={`${inputClass} w-full mb-3`}
+                placeholder={profile.llmProvider === "openrouter" || profile.llmProvider === "custom" ? "required" : "provider default"}
+              />
+
+              {profile.llmProvider === "custom" && (
+                <>
+                  <label className="block text-xs text-muted mb-1">Endpoint base URL (OpenAI-compatible)</label>
+                  <input
+                    type="text"
+                    value={profile.llmBaseUrl ?? ""}
+                    onChange={(e) => setProfile((p) => ({ ...p, llmBaseUrl: e.target.value }))}
+                    className={`${inputClass} w-full mb-1`}
+                    placeholder="https://your-tunnel.example.com/v1"
+                  />
+                  <p className="text-xs text-muted mb-3">
+                    Your machine must be reachable from the internet (Tailscale Funnel, cloudflared, ngrok) and answer within 60s.
+                    Small models may fail the structured output and return an error instead of a score.
+                  </p>
+                </>
+              )}
+
+              <label className="block text-xs text-muted mb-1">
+                API key {profile.llmKeyConfigured ? <span className="text-pulse">(configured)</span> : profile.llmProvider === "custom" ? "(optional)" : ""}
+              </label>
+              <input
+                type="password"
+                value={llmKey}
+                onChange={(e) => setLlmKey(e.target.value)}
+                className={`${inputClass} w-full mb-1`}
+                placeholder={profile.llmKeyConfigured ? "leave blank to keep the current key" : "paste your API key"}
+                autoComplete="off"
+              />
+              {profile.llmKeyConfigured && (
+                <button type="button" className="text-xs text-danger hover:underline mb-2"
+                  onClick={async () => {
+                    const res = await fetch("/api/profile", {
+                      method: "PUT", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ llmKey: "" }),
+                    });
+                    if (res.ok) setProfile((p) => ({ ...p, llmKeyConfigured: false }));
+                  }}>
+                  Remove stored key
+                </button>
+              )}
+
+              <p className="text-xs mt-2">
+                {(profile.resumeText ?? "").trim() && (profile.llmKeyConfigured || llmKey || (profile.llmProvider === "custom" && profile.llmBaseUrl && profile.llmModel))
+                  ? <span className="text-pulse">Fit Check active: the Fit Check button on your job DMs will work after saving.</span>
+                  : <span className="text-muted">Fit Check inactive: add your resume and connect an LLM, then save.</span>}
+              </p>
             </section>
           </div>
         </form>
