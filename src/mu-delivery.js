@@ -5,7 +5,7 @@
  *
  * Exports:
  *   jobButtonHash(jobKey)                                        → 16-char SHA1 hex prefix
- *   buildDmButtons(hash, jobUrl, status)                         → ActionRow[]
+ *   buildDmButtons(hash, jobUrl, status, opts)                    → ActionRow[]
  *   buildJobEmbed(job, { timezone?, experienceYears? })           → EmbedBuilder
  *   sendJobDm(client, discordId, job, firstName, { timezone?, experienceYears? })  → { messageId } | null
  *   sendDigestDm(client, discordId, jobs, firstName, { timezone? })  → { ok, deliveredKeys }
@@ -47,9 +47,11 @@ function isValidJobUrl(url) {
  * @param {string} hash    16-char button hash (from jobButtonHash)
  * @param {string} jobUrl  direct URL to the job posting
  * @param {"pending"|"notified"|"saved"|"applied"|"skipped"} status
+ * @param {object} [opts]
+ * @param {boolean} [opts.fitCheck] append a 5th "Fit Check" (mu_fitcheck:<hash>) button
  * @returns {ActionRowBuilder[]}
  */
-export function buildDmButtons(hash, jobUrl, status) {
+export function buildDmButtons(hash, jobUrl, status, opts = {}) {
   const isApplied = status === "applied";
   const isSaved = status === "saved";
 
@@ -75,6 +77,17 @@ export function buildDmButtons(hash, jobUrl, status) {
       .setStyle(status === "skipped" ? ButtonStyle.Danger : ButtonStyle.Secondary)
       .setDisabled(isApplied)
   );
+
+  // 5th button fills the row to Discord's 5-per-row cap; a future button
+  // must start a second ActionRow.
+  if (opts.fitCheck) {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`mu_fitcheck:${hash}`)
+        .setLabel("Fit Check")
+        .setStyle(ButtonStyle.Secondary)
+    );
+  }
 
   return [row];
 }
@@ -179,6 +192,7 @@ export function buildJobEmbed(job, { timezone, experienceYears, warnings = [], h
  * @param {object}  [options]
  * @param {string}  [options.timezone]        IANA timezone for date formatting
  * @param {number}  [options.experienceYears] max experience years from JD
+ * @param {boolean} [options.fitCheckEnabled] render the Fit Check button (mu_fit_check flag)
  * @returns {Promise<{ ok: true, messageId: string }|{ ok: false, permanent: boolean }>}
  *          permanent=true means retrying cannot help (DMs closed / blocked /
  *          unknown user); permanent=false is a transient failure worth retrying.
@@ -190,7 +204,7 @@ export async function sendJobDm(client, discordId, job, firstName, options = {})
     const hash   = jobButtonHash(jobKey);
 
     const embed   = buildJobEmbed(job, options);
-    const buttons = buildDmButtons(hash, jobUrl, "pending");
+    const buttons = buildDmButtons(hash, jobUrl, "pending", { fitCheck: !!options.fitCheckEnabled });
 
     const company = job.source_label ?? job.sourceLabel ?? "";
     const title   = job.title ?? "";
@@ -231,6 +245,7 @@ export async function sendJobDm(client, discordId, job, firstName, options = {})
  * @param {string}   firstName
  * @param {object}   [options]
  * @param {string}   [options.timezone]  IANA timezone for date formatting
+ * @param {boolean}  [options.fitCheckEnabled] render the Fit Check button (mu_fit_check flag)
  * @returns {Promise<{ ok: boolean, deliveredKeys: string[] }>}
  *          ok=false if the digest could not be sent (target unresolved or the
  *          summary embed failed); deliveredKeys lists the job keys included in the
@@ -297,7 +312,7 @@ export async function sendDigestDm(client, discordId, jobs, firstName, options =
         warnings: job._warnings ?? [],
         h1bStats: job._h1bStats ?? null,
       });
-      const buttons = buildDmButtons(hash, jobUrl, "pending");
+      const buttons = buildDmButtons(hash, jobUrl, "pending", { fitCheck: !!options.fitCheckEnabled });
 
       await target.send({ embeds: [embed], components: buttons });
     } catch (err) {
