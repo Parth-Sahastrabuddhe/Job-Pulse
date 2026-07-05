@@ -174,8 +174,13 @@ export async function PUT(request) {
     baseUrl: fields.llm_base_url !== undefined ? fields.llm_base_url : currentProfile.llm_base_url,
     model: fields.llm_model !== undefined ? fields.llm_model : currentProfile.llm_model,
   };
+  // Re-ping only when a value actually changes; the profile page resends the
+  // whole profile on every save, so presence alone would ping every save and
+  // couple unrelated saves to provider availability.
   const providerConfigChanged =
-    fields.llm_provider !== undefined || fields.llm_model !== undefined || fields.llm_base_url !== undefined;
+    (fields.llm_provider !== undefined && fields.llm_provider !== (currentProfile.llm_provider || "gemini")) ||
+    (fields.llm_model !== undefined && (fields.llm_model ?? null) !== (currentProfile.llm_model ?? null)) ||
+    (fields.llm_base_url !== undefined && (fields.llm_base_url ?? null) !== (currentProfile.llm_base_url ?? null));
 
   if (body.llmKey !== undefined && body.llmKey === "") {
     setLlmKeyEnc(session.discordId, null);

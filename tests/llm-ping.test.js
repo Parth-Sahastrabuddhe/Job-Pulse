@@ -39,4 +39,36 @@ describe("validateProviderConfig", () => {
     const r = await validateProviderConfig({ provider: "skynet", apiKey: "k", baseUrl: null, model: "m" });
     expect(r.ok).toBe(false);
   });
+
+  it("pings anthropic natively with version header and 1-token body", async () => {
+    fetch.mockResolvedValue({ ok: true, status: 200 });
+    const r = await validateProviderConfig({ provider: "anthropic", apiKey: "ak", baseUrl: null, model: null });
+    expect(r.ok).toBe(true);
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe("https://api.anthropic.com/v1/messages");
+    expect(opts.headers["x-api-key"]).toBe("ak");
+    expect(opts.headers["anthropic-version"]).toBe("2023-06-01");
+    expect(JSON.parse(opts.body).max_tokens).toBe(1);
+  });
+
+  it("uses max_completion_tokens and Bearer auth for gpt-5 models", async () => {
+    fetch.mockResolvedValue({ ok: true, status: 200 });
+    await validateProviderConfig({ provider: "openai", apiKey: "sk", baseUrl: null, model: null });
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe("https://api.openai.com/v1/chat/completions");
+    expect(opts.headers.Authorization).toBe("Bearer sk");
+    const body = JSON.parse(opts.body);
+    expect(body.max_completion_tokens).toBe(1);
+    expect(body.max_tokens).toBeUndefined();
+  });
+
+  it("pings a keyless custom endpoint without an auth header", async () => {
+    fetch.mockResolvedValue({ ok: true, status: 200 });
+    const r = await validateProviderConfig({ provider: "custom", apiKey: null, baseUrl: "http://example.com/v1", model: "llama3" });
+    expect(r.ok).toBe(true);
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe("http://example.com/v1/chat/completions");
+    expect(opts.headers.Authorization).toBeUndefined();
+    expect(JSON.parse(opts.body).max_tokens).toBe(1);
+  });
 });
