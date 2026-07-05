@@ -141,6 +141,8 @@ function OverviewTab() {
           </div>
         )}
       </div>
+
+      <FeatureFlagsCard />
     </div>
   );
 }
@@ -571,6 +573,65 @@ function SuggestionsTab() {
         </div>
       )}
     </div>
+  );
+}
+
+// --- Feature Flags Card ---
+function FeatureFlagsCard() {
+  const [flags, setFlags] = useState(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState("");
+
+  useEffect(() => {
+    fetch("/api/admin/flags")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("load failed"))))
+      .then((d) => setFlags(d.flags))
+      .catch(() => setError("Failed to load feature flags."));
+  }, []);
+
+  async function toggle(flag) {
+    setSaving(flag.key);
+    setError("");
+    try {
+      const res = await fetch("/api/admin/flags", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: flag.key, enabled: flag.enabled !== 1 }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      setFlags((fs) => fs.map((f) => (f.key === flag.key ? { ...f, enabled: f.enabled === 1 ? 0 : 1, updated_at: new Date().toISOString() } : f)));
+    } catch {
+      setError("Failed to update flag.");
+    } finally {
+      setSaving("");
+    }
+  }
+
+  return (
+    <section className="bg-surface rounded-xl border border-line p-5">
+      <h2 className="text-sm font-semibold text-foreground mb-3 font-display uppercase tracking-wider">Features</h2>
+      {error && <p className="text-danger text-xs mb-2">{error}</p>}
+      {!flags && !error && <p className="text-muted text-sm">Loading...</p>}
+      {flags && flags.length === 0 && <p className="text-muted text-sm">No feature flags registered.</p>}
+      {flags && flags.map((flag) => (
+        <div key={flag.key} className="flex items-center justify-between py-2 border-b border-line last:border-0">
+          <div>
+            <div className="text-sm text-foreground font-mono">{flag.key}</div>
+            {flag.updated_at && <div className="text-xs text-muted">updated {String(flag.updated_at).slice(0, 16).replace("T", " ")}</div>}
+          </div>
+          <button
+            type="button"
+            disabled={saving === flag.key}
+            onClick={() => toggle(flag)}
+            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
+              flag.enabled === 1 ? "bg-pulse text-black hover:bg-pulse-hover" : "bg-background border border-line text-muted hover:text-foreground"
+            }`}
+          >
+            {flag.enabled === 1 ? "ON" : "OFF"}
+          </button>
+        </div>
+      ))}
+    </section>
   );
 }
 
