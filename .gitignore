@@ -17,6 +17,11 @@ add-dataset.md
 write-dataloader.md
 sql_commands.md
 *.pdf
+tla-tlw-pii-star-stories.md
+interview-prep/
+schema-review.md
+Discord Posting.png
+.npmrc
 
 # Non-project images at repo root
 autobot.jpg

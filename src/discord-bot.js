@@ -35,6 +35,8 @@ function jobButtonId(job) {
 }
 
 const ADMIN_DISCORD_ID = process.env.ADMIN_DISCORD_ID;
+// Public origin of the web dashboard, used in user-facing messages.
+const DASHBOARD_URL = (process.env.DASHBOARD_URL || "http://localhost:3000").replace(/\/+$/, "");
 
 // Fit Check is dormant (future scope). Re-enable by setting FIT_CHECK_ENABLED=1.
 // While dormant: no Fit Check button on new posts, and clicks on old messages
@@ -505,7 +507,7 @@ async function handleAddCompany(interaction) {
   // prod, so open-ended requests go through the dashboard suggestion flow.
   if (interaction.user.id !== ADMIN_DISCORD_ID) {
     await interaction.reply({
-      content: "Only the admin can queue companies right now. You can suggest one at http://3.138.62.29/support and it will be reviewed.",
+      content: `Only the admin can queue companies right now. You can suggest one at ${DASHBOARD_URL}/support and it will be reviewed.`,
       ephemeral: true,
     });
     return;

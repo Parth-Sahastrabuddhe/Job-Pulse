@@ -91,7 +91,7 @@ function touchMuHeartbeat() {
   } catch {}
 }
 const ADMIN_DISCORD_ID = process.env.ADMIN_DISCORD_ID;
-const DASHBOARD_URL = (process.env.DASHBOARD_URL || "http://3.138.62.29").replace(/\/+$/, "");
+const DASHBOARD_URL = (process.env.DASHBOARD_URL || "http://localhost:3000").replace(/\/+$/, "");
 const parsedFitCap = Number.parseInt(process.env.MU_FIT_DAILY_CAP || "25", 10);
 const MU_FIT_DAILY_CAP = Number.isNaN(parsedFitCap) ? 25 : parsedFitCap;
 // In-flight fit checks, keyed `${userId}:${hash}` (mirrors the owner path's activeFitChecks).

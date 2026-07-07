@@ -13,7 +13,8 @@ Real-time multi-user job aggregation platform. Monitors 185+ companies across 8 
 - Discord OAuth sign-up with email OTP verification
 - Per-user filters: role, seniority tier, location, experience level, H1B sponsorship requirement
 - Delivery modes: realtime DM or digest, with user-configurable quiet hours and timezone
-- Job DMs include a rich embed (title, company, location, posted date) with interactive buttons &mdash; **Applied**, **Skip**, **Save**
+- Job DMs include a rich embed (title, company, location, posted date) with interactive buttons &mdash; **Applied**, **Skip**, **Save**, **Fit Check**
+- On-demand AI Fit Check per job: scores your stored resume against the job description with a bring-your-own LLM key (Gemini, OpenAI, Anthropic, Groq, OpenRouter, or any OpenAI-compatible endpoint incl. self-hosted models); keys are AES-256-GCM encrypted at rest and results are cached per user
 - Slash commands: `/search <keywords>` for cross-company keyword search, `/company <name>` for per-company browsing
 - Saved-job expiry reminders
 
@@ -77,7 +78,7 @@ Runtime    Node.js (ESM, no framework)
 Data       SQLite (better-sqlite3, WAL mode)
 Scraping   Playwright (shared browser), REST + GraphQL clients
 Discord    discord.js (buttons, threads, slash commands, OAuth)
-Web        Next.js 15 (App Router), Tailwind CSS
+Web        Next.js 16 (App Router), Tailwind CSS
 Infra      AWS EC2, pm2, Linux
 Email      AWS SES (OTP verification)
 ```
@@ -104,8 +105,8 @@ Email      AWS SES (OTP verification)
 ## Running Locally
 
 ```bash
-git clone https://github.com/Parth-Sahastrabuddhe/Job-Pulse.git
-cd Job-Pulse
+git clone https://github.com/Parth-Sahastrabuddhe/JobPulse.git
+cd JobPulse
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env
@@ -131,7 +132,7 @@ Production runs both under `pm2` on AWS EC2 with auto-restart. The web dashboard
 
 ## Roadmap
 
-- Per-user resume tailoring powered by Gemini (currently single-user only; needs multi-user resume upload + per-user API keys)
+- Full per-user resume tailoring (the multi-user Fit Check shipped July 2026; tailored resume generation is next)
 - More ATS integrations from the community-submitted `/add` queue
 - Mobile-responsive dashboard polish
 - Public demo instance with rate-limited sign-up
