@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { width: 300px; font: 13px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; margin: 12px; color: #111827; }
+  h1 { font-size: 14px; margin: 0 0 10px; }
+  button.primary { width: 100%; padding: 8px; border: 0; border-radius: 8px; background: #0a66c2; color: #fff; font-weight: 600; cursor: pointer; }
+  button.primary:hover { background: #084d92; }
+  .row { display: flex; align-items: center; justify-content: space-between; margin: 10px 0; }
+  #stats { background: #f3f4f6; border-radius: 8px; padding: 8px 10px; min-height: 18px; }
+  details { margin-top: 10px; }
+  textarea { width: 100%; box-sizing: border-box; height: 64px; font-size: 11px; }
+  .small { font-size: 11px; color: #6b7280; }
+  a.linklike { color: #0a66c2; cursor: pointer; text-decoration: underline; }
+  #save { padding: 4px 14px; border: 1px solid #0a66c2; background: #fff; color: #0a66c2; border-radius: 6px; cursor: pointer; }
+</style>
+</head>
+<body>
+  <h1>JobPulse LinkedIn Scout</h1>
+  <button id="open" class="primary">Open today's #hiring search</button>
+  <div class="row">
+    <label for="enabled">Overlay enabled</label>
+    <input type="checkbox" id="enabled" checked>
+  </div>
+  <div id="stats">Open the LinkedIn search tab to see live stats.</div>
+  <details>
+    <summary>Settings</summary>
+    <p class="small">Search URL. To recalibrate: run the search once in LinkedIn with your filters, copy the address-bar URL, paste it here.</p>
+    <textarea id="url" spellcheck="false"></textarea>
+    <div class="row">
+      <a id="reset" class="linklike">Reset to default</a>
+      <button id="save">Save</button>
+    </div>
+    <p class="small" id="saved" hidden>Saved.</p>
+    <p class="small" style="margin-bottom:4px"><b>Your corrections</b></p>
+    <div id="fixlists" class="small">(none yet)</div>
+    <div class="row">
+      <span class="small" id="pincount"></span>
+      <a id="clearpins" class="linklike small">clear pins</a>
+    </div>
+    <button id="copyfix" style="width:100%;padding:6px;border:1px solid #0a66c2;background:#fff;color:#0a66c2;border-radius:8px;cursor:pointer">Copy corrections (JSON)</button>
+  </details>
+  <script src="src/search-url.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

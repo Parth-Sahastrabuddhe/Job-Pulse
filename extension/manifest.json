@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "JobPulse LinkedIn Scout",
+  "version": "0.3.0",
+  "description": "Private passive overlay for LinkedIn #hiring content search: classifies posts (genuine vs staffing/consulting/non-US), remembers seen posts, copies leads. No automation, no network calls.",
+  "permissions": ["storage"],
+  "action": { "default_popup": "popup.html", "default_title": "JobPulse LinkedIn Scout" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": [
+        "src/rules.js",
+        "src/classifier.js",
+        "src/lead.js",
+        "src/search-url.js",
+        "src/seen.js",
+        "src/extract.js",
+        "content.js"
+      ],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
