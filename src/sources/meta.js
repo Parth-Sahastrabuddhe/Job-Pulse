@@ -74,8 +74,6 @@ function parseMetaJob(raw, config) {
 
 export async function collectMetaJobs(_unused, config, log) {
   try {
-    const lsdToken = await getLsdToken();
-
     const variables = JSON.stringify({
       search_input: {
         q: "software engineer",
@@ -94,32 +92,51 @@ export async function collectMetaJobs(_unused, config, log) {
       }
     });
 
-    const body = new URLSearchParams({
-      lsd: lsdToken,
-      fb_api_req_friendly_name: "CareersJobSearchResultsDataQuery",
-      doc_id: META_SEARCH_DOC_ID,
-      variables
-    });
+    // Meta rate-limits REUSED LSD tokens (HTTP 200 + errors[].code 1675004,
+    // "Rate limit exceeded") while a fresh token succeeds immediately, so a
+    // soft-failure clears the cache and retries once with a fresh token
+    // instead of returning empty until the 15-min TTL expires.
+    let rawJobs = null;
+    for (let attempt = 1; attempt <= 2 && rawJobs === null; attempt++) {
+      const lsdToken = await getLsdToken();
 
-    const response = await fetchWithTimeout(META_GRAPHQL_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        "x-fb-lsd": lsdToken,
-        "user-agent": "Mozilla/5.0"
-      },
-      body: body.toString()
-    });
+      const body = new URLSearchParams({
+        lsd: lsdToken,
+        fb_api_req_friendly_name: "CareersJobSearchResultsDataQuery",
+        doc_id: META_SEARCH_DOC_ID,
+        variables
+      });
 
-    if (!response.ok) {
-      // Token might be stale — clear cache and retry next cycle
+      const response = await fetchWithTimeout(META_GRAPHQL_URL, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "x-fb-lsd": lsdToken,
+          "user-agent": "Mozilla/5.0"
+        },
+        body: body.toString()
+      });
+
+      if (!response.ok) {
+        // Token might be stale — clear cache and retry next cycle
+        cachedLsdToken = null;
+        log(`Meta API returned status ${response.status}`);
+        return [];
+      }
+
+      const data = await response.json();
+      const jobs = data?.data?.job_search_with_featured_jobs?.all_jobs;
+      if (Array.isArray(jobs)) {
+        rawJobs = jobs;
+        break;
+      }
+
       cachedLsdToken = null;
-      log(`Meta API returned status ${response.status}`);
-      return [];
+      const why = data?.errors?.[0]?.message || "missing all_jobs payload";
+      log(`Meta API soft-failure (${why}), ${attempt < 2 ? "retrying with a fresh token" : "giving up this cycle"}`);
     }
 
-    const data = await response.json();
-    const rawJobs = data?.data?.job_search_with_featured_jobs?.all_jobs ?? [];
+    if (rawJobs === null) return [];
 
     const jobs = rawJobs
       .map((raw) => parseMetaJob(raw, config))
