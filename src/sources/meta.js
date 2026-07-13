@@ -4,16 +4,41 @@ const META_CAREERS_URL = "https://www.metacareers.com";
 const META_GRAPHQL_URL = "https://www.metacareers.com/graphql";
 const META_SEARCH_DOC_ID = "29615178951461218";
 
-// Cache LSD token — reuse for up to 15 minutes
-let cachedLsdToken = null;
-let cachedLsdTokenAt = 0;
-const LSD_TOKEN_TTL_MS = 15 * 60 * 1000;
+// Meta's GraphQL endpoint enforces an IP-scoped quota (HTTP 200 with
+// errors[].code 1675004 "Rate limit exceeded"). Measured 2026-07-10..12: the
+// batch loop's one-call-per-2.5-min pressure (~576/day) got ~140 successes/day,
+// degrading to ~55/day; the identical request from a fresh IP succeeds, and
+// metacareers.com sets no cookies, so the budget is per-IP and the only lever
+// is call rate. The collector therefore throttles itself: at most one attempt
+// per BASE_POLL_MS, doubling the wait after every failed attempt (up to
+// MAX_BACKOFF_MS) and resetting on success. Throttled cycles return []
+// without touching the network. Retrying within a cycle only burns quota
+// faster — never do that here.
+const BASE_POLL_MS = 15 * 60 * 1000;
+const MAX_BACKOFF_MS = 4 * 60 * 60 * 1000;
 
+let nextAttemptAt = 0;
+let backoffMs = 0; // 0 = healthy cadence, otherwise the last applied wait
+
+export function _resetMetaThrottleForTests() {
+  nextAttemptAt = 0;
+  backoffMs = 0;
+}
+
+function noteFailure() {
+  backoffMs = backoffMs === 0 ? BASE_POLL_MS : Math.min(backoffMs * 2, MAX_BACKOFF_MS);
+  nextAttemptAt = Date.now() + backoffMs;
+  return Math.round(backoffMs / 60000);
+}
+
+function noteSuccess() {
+  backoffMs = 0;
+  nextAttemptAt = Date.now() + BASE_POLL_MS;
+}
+
+// Attempts are >= 15 min apart, so a cached token would expire before its
+// next use anyway — fetch a fresh one per attempt.
 async function getLsdToken() {
-  if (cachedLsdToken && Date.now() - cachedLsdTokenAt < LSD_TOKEN_TTL_MS) {
-    return cachedLsdToken;
-  }
-
   const response = await fetchWithTimeout(META_CAREERS_URL, {
     headers: { "user-agent": "Mozilla/5.0" }
   });
@@ -23,10 +48,7 @@ async function getLsdToken() {
   if (!match) {
     throw new Error("Could not extract LSD token from Meta careers page");
   }
-
-  cachedLsdToken = match[1];
-  cachedLsdTokenAt = Date.now();
-  return cachedLsdToken;
+  return match[1];
 }
 
 function parseMetaJob(raw, config) {
@@ -73,6 +95,8 @@ function parseMetaJob(raw, config) {
 }
 
 export async function collectMetaJobs(_unused, config, log) {
+  if (Date.now() < nextAttemptAt) return [];
+
   try {
     const variables = JSON.stringify({
       search_input: {
@@ -92,52 +116,41 @@ export async function collectMetaJobs(_unused, config, log) {
       }
     });
 
-    // Meta rate-limits REUSED LSD tokens (HTTP 200 + errors[].code 1675004,
-    // "Rate limit exceeded") while a fresh token succeeds immediately, so a
-    // soft-failure clears the cache and retries once with a fresh token
-    // instead of returning empty until the 15-min TTL expires.
-    let rawJobs = null;
-    for (let attempt = 1; attempt <= 2 && rawJobs === null; attempt++) {
-      const lsdToken = await getLsdToken();
+    const lsdToken = await getLsdToken();
 
-      const body = new URLSearchParams({
-        lsd: lsdToken,
-        fb_api_req_friendly_name: "CareersJobSearchResultsDataQuery",
-        doc_id: META_SEARCH_DOC_ID,
-        variables
-      });
+    const body = new URLSearchParams({
+      lsd: lsdToken,
+      fb_api_req_friendly_name: "CareersJobSearchResultsDataQuery",
+      doc_id: META_SEARCH_DOC_ID,
+      variables
+    });
 
-      const response = await fetchWithTimeout(META_GRAPHQL_URL, {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          "x-fb-lsd": lsdToken,
-          "user-agent": "Mozilla/5.0"
-        },
-        body: body.toString()
-      });
+    const response = await fetchWithTimeout(META_GRAPHQL_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "x-fb-lsd": lsdToken,
+        "user-agent": "Mozilla/5.0"
+      },
+      body: body.toString()
+    });
 
-      if (!response.ok) {
-        // Token might be stale — clear cache and retry next cycle
-        cachedLsdToken = null;
-        log(`Meta API returned status ${response.status}`);
-        return [];
-      }
-
-      const data = await response.json();
-      const jobs = data?.data?.job_search_with_featured_jobs?.all_jobs;
-      if (Array.isArray(jobs)) {
-        rawJobs = jobs;
-        break;
-      }
-
-      cachedLsdToken = null;
-      const why = data?.errors?.[0]?.message || "missing all_jobs payload";
-      log(`Meta API soft-failure (${why}), ${attempt < 2 ? "retrying with a fresh token" : "giving up this cycle"}`);
+    if (!response.ok) {
+      const waitMin = noteFailure();
+      log(`Meta API returned status ${response.status}; next attempt in ${waitMin} min`);
+      return [];
     }
 
-    if (rawJobs === null) return [];
+    const data = await response.json();
+    const rawJobs = data?.data?.job_search_with_featured_jobs?.all_jobs;
+    if (!Array.isArray(rawJobs)) {
+      const waitMin = noteFailure();
+      const why = data?.errors?.[0]?.message || "missing all_jobs payload";
+      log(`Meta API soft-failure (${why}); next attempt in ${waitMin} min`);
+      return [];
+    }
 
+    noteSuccess();
     const jobs = rawJobs
       .map((raw) => parseMetaJob(raw, config))
       .filter(Boolean);
@@ -145,8 +158,8 @@ export async function collectMetaJobs(_unused, config, log) {
     log(`Meta API returned ${rawJobs.length} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
-    cachedLsdToken = null; // Clear stale token on error
-    log(`Meta API error: ${error.message}`);
+    const waitMin = noteFailure();
+    log(`Meta API error: ${error.message}; next attempt in ${waitMin} min`);
     return [];
   }
 }
