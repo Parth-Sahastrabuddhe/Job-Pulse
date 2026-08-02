@@ -1,6 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
-import { ping, pingFail } from "../src/heartbeat.js";
+import os from "node:os";
+import path from "node:path";
+import { ping, pingFail, writeLivenessBeacon } from "../src/heartbeat.js";
 
 let server;
 let baseUrl;
@@ -174,5 +184,23 @@ describe("heartbeat.pingFail", () => {
 
     releaseParallelResponse();
     await blocked;
+  });
+});
+
+describe("writeLivenessBeacon", () => {
+  it("hardens an existing permissive heartbeat file to owner-only", () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "jobpulse-heartbeat-"));
+    const file = path.join(directory, "mu-heartbeat");
+    try {
+      writeFileSync(file, "old", { mode: 0o664 });
+      chmodSync(file, 0o664);
+
+      writeLivenessBeacon(file, "2026-08-02T00:00:00.000Z");
+
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+      expect(readFileSync(file, "utf8")).toBe("2026-08-02T00:00:00.000Z");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

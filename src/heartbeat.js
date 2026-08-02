@@ -2,8 +2,17 @@
 // Never throws and silently no-ops when the URL is falsy. Callers may await a
 // state transition or deliberately use `void` when fire-and-forget is safe.
 
+import fs from "node:fs";
+
 const TIMEOUT_MS = 5_000;
 const queuesByUrl = new Map();
+
+export function writeLivenessBeacon(filePath, value = new Date().toISOString()) {
+  fs.writeFileSync(filePath, String(value), { encoding: "utf8", mode: 0o600 });
+  // writeFile's mode only applies when creating a file. Harden an existing
+  // beacon too, including one left behind by an older deployment or umask.
+  fs.chmodSync(filePath, 0o600);
+}
 
 function silent(err) {
   // caller's log() helper isn't imported here to keep this module dependency-free.

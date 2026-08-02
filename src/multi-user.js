@@ -67,7 +67,7 @@ import { isFitConfigured, runUserFitCheck, formatFitReply, mapLlmErrorToMessage 
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
 import { sendJobDm, sendDigestDm, jobButtonHash, buildDmButtons } from "./mu-delivery.js";
 import { getConfig } from "./private-config.js";
-import { ping, pingFail } from "./heartbeat.js";
+import { ping, pingFail, writeLivenessBeacon } from "./heartbeat.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bootstrap
@@ -83,7 +83,7 @@ const PROJECT_ROOT = path.resolve(__dirname, "..");
 const MU_HEARTBEAT_FILE = path.join(PROJECT_ROOT, "data", "mu-heartbeat");
 function touchMuHeartbeat() {
   try {
-    fs.writeFileSync(MU_HEARTBEAT_FILE, new Date().toISOString());
+    writeLivenessBeacon(MU_HEARTBEAT_FILE);
   } catch {}
 }
 const ADMIN_DISCORD_ID = process.env.ADMIN_DISCORD_ID;
