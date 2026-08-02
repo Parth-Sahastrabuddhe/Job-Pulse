@@ -1,16 +1,19 @@
 import { chromium } from "playwright";
-import { dedupeJobs, finalizeJob, isTargetRole, inferCountryCodeFromLocation } from "./shared.js";
-import { launchChromiumWithGuard } from "../playwright-guard.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, inferCountryCodeFromLocation } from "./shared.js";
+import { launchChromiumWithGuard, newRestrictedPage } from "../playwright-guard.js";
 
 export async function collectConfluentJobs(_unused, config, log) {
   let browser;
   try {
     browser = await launchChromiumWithGuard(
       chromium,
-      { headless: true, args: ["--no-sandbox", "--disable-gpu"] },
+      { headless: true, args: ["--disable-gpu"] },
       config
     );
-    const page = await browser.newPage();
+    const page = await newRestrictedPage(browser, {
+      allowedHosts: ["confluent.io"],
+      signal: config.signal,
+    });
 
     await page.goto("https://careers.confluent.io/jobs/engineering?engineering=engineering", {
       waitUntil: "networkidle",
@@ -83,7 +86,8 @@ export async function collectConfluentJobs(_unused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Confluent scraper error: ${error.message}`);
-    return [];
+    if (config.signal?.aborted && config.signal.reason instanceof Error) throw config.signal.reason;
+    throw asCollectorError("confluent", error);
   } finally {
     if (browser) await browser.close();
   }

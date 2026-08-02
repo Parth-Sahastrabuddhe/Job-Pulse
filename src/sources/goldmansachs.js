@@ -1,4 +1,4 @@
-import { dedupeJobs, detectSeniority, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, detectSeniority, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 const GS_GRAPHQL_URL = "https://api-higher.gs.com/gateway/api/v1/graphql";
 
@@ -39,9 +39,8 @@ function parseGSJob(raw) {
 
   // Fold an ELEVATING corporate title into the job title so downstream
   // seniority detection sees it. Non-elevating corp titles (Analyst,
-  // Associate) are left off — appending them would re-key existing rows for
-  // no signal gain. Note: this re-keys elevated GS jobs once (dedup identity
-  // includes the title), which is acceptable since they were misclassified.
+  // Associate) are left off because they add no seniority signal. Job keys are
+  // based on the stable source ID, so this display metadata cannot re-key them.
   const corpTitle = raw.corporateTitle?.trim() || "";
   if (corpTitle && ELEVATED_LEVELS.has(detectSeniority(corpTitle))
       && !ELEVATED_LEVELS.has(detectSeniority(title))) {
@@ -107,22 +106,24 @@ export async function collectGoldmanSachsJobs(_unused, config, log) {
           }
         },
         query: GET_ROLES_QUERY
-      })
+      }),
+      signal: config.signal,
     });
 
     if (!response.ok) {
       log(`Goldman Sachs API returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
     const roleSearch = data?.data?.roleSearch;
     if (!roleSearch) {
       log("Goldman Sachs API returned no role search data");
-      return [];
+      throw new Error("response did not contain a jobs array");
     }
 
-    const rawJobs = roleSearch.items || [];
+    if (!Array.isArray(roleSearch.items)) throw new Error("roleSearch did not contain an items array");
+    const rawJobs = roleSearch.items;
     const jobs = rawJobs
       .map((raw) => parseGSJob(raw))
       .filter(Boolean);
@@ -131,6 +132,6 @@ export async function collectGoldmanSachsJobs(_unused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Goldman Sachs API error: ${error.message}`);
-    return [];
+    throw asCollectorError("goldmansachs", error);
   }
 }

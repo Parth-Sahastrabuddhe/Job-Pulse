@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parsePcsxJob(raw, companyConfig) {
   const title = raw.name?.trim();
@@ -57,9 +57,10 @@ function setStartParam(apiUrl, start) {
   return apiUrl.replace(/([?&])start=\d+/, `$1start=${start}`);
 }
 
-async function fetchPcsxPage(apiUrl, start) {
+async function fetchPcsxPage(apiUrl, start, signal) {
   const response = await fetchWithTimeout(setStartParam(apiUrl, start), {
-    headers: { accept: "application/json", "user-agent": "Mozilla/5.0" }
+    headers: { accept: "application/json", "user-agent": "Mozilla/5.0" },
+    signal,
   });
   if (!response.ok) {
     const err = new Error(`status ${response.status}`);
@@ -71,11 +72,12 @@ async function fetchPcsxPage(apiUrl, start) {
 
 export async function collectPcsxJobs(_unused, config, log, companyKey) {
   const companyConfig = config[companyKey];
-  if (!companyConfig) return [];
+  if (!companyConfig) throw asCollectorError(companyKey, new Error("missing company configuration"));
 
   try {
-    const firstPage = await fetchPcsxPage(companyConfig.apiUrl, 0);
-    const firstPositions = firstPage.data?.positions ?? [];
+    const firstPage = await fetchPcsxPage(companyConfig.apiUrl, 0, config.signal);
+    if (!Array.isArray(firstPage?.data?.positions)) throw new Error("response did not contain positions");
+    const firstPositions = firstPage.data.positions;
     const total = firstPage.data?.count ?? firstPositions.length;
 
     let rawJobs = [...firstPositions];
@@ -88,9 +90,12 @@ export async function collectPcsxJobs(_unused, config, log, companyKey) {
       for (let i = 0; i < offsets.length; i += PCSX_PAGE_CONCURRENCY) {
         const batch = offsets.slice(i, i + PCSX_PAGE_CONCURRENCY);
         const pages = await Promise.all(
-          batch.map((s) => fetchPcsxPage(companyConfig.apiUrl, s).catch(() => ({ data: { positions: [] } })))
+          batch.map((s) => fetchPcsxPage(companyConfig.apiUrl, s, config.signal))
         );
-        for (const p of pages) rawJobs.push(...(p.data?.positions ?? []));
+        for (const p of pages) {
+          if (!Array.isArray(p?.data?.positions)) throw new Error("page did not contain positions");
+          rawJobs.push(...p.data.positions);
+        }
       }
     }
 
@@ -106,6 +111,6 @@ export async function collectPcsxJobs(_unused, config, log, companyKey) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`${companyConfig.sourceLabel} API error: ${error.message}`);
-    return [];
+    throw asCollectorError(companyKey, error);
   }
 }

@@ -4,7 +4,8 @@
  * Uses the shared better-sqlite3 handle from state.js (synchronous API, no async/await).
  */
 
-import { getDb, withBusyRetry } from "./state.js";
+import { getDb, resolveJobKey, withBusyRetry } from "./state.js";
+import { jobButtonHash } from "./job-key-hash.js";
 
 // ---------------------------------------------------------------------------
 // User Profiles
@@ -102,15 +103,30 @@ export function updateUserProfile(discordId, fields) {
  */
 export function deleteUserProfile(discordId) {
   const db = getDb();
-  const user = db.prepare("SELECT id FROM user_profiles WHERE discord_id = ?").get(discordId);
+  const user = db.prepare("SELECT id, email FROM user_profiles WHERE discord_id = ?").get(discordId);
   if (!user) return;
 
   const del = db.transaction(() => {
+    // Explicit cleanup keeps account deletion compatible with older databases
+    // whose foreign keys were created without ON DELETE CASCADE.
+    db.prepare("DELETE FROM support_tickets WHERE user_id = ?").run(user.id);
+    db.prepare("DELETE FROM company_suggestions WHERE user_id = ?").run(user.id);
     db.prepare("DELETE FROM user_seen_jobs WHERE user_id = ?").run(user.id);
     db.prepare("DELETE FROM dm_log WHERE user_id = ?").run(user.id);
+    db.prepare("DELETE FROM delivery_claims WHERE user_id = ?").run(user.id);
+    db.prepare("DELETE FROM otp_codes WHERE email = ?").run(user.email);
+    // Address storage was removed from new installations. Clean up a user's
+    // legacy rows only when an old production database still has the table.
+    const legacyAddressTable = db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_addresses'"
+    ).get();
+    if (legacyAddressTable) {
+      db.prepare("DELETE FROM user_addresses WHERE user_id = ?").run(user.id);
+    }
     db.prepare("DELETE FROM user_profiles WHERE id = ?").run(user.id);
   });
   del();
+  _dropBufferedEntriesForUser(user.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +137,7 @@ export function deleteUserProfile(discordId) {
  * Mark a job as notified for a user (idempotent).
  */
 export function markJobNotified(userId, jobKey) {
+  jobKey = resolveJobKey(jobKey);
   const now = new Date().toISOString();
   getDb()
     .prepare(
@@ -134,6 +151,7 @@ export function markJobNotified(userId, jobKey) {
  * Update the status of a user–job row.
  */
 export function updateJobStatus(userId, jobKey, status) {
+  jobKey = resolveJobKey(jobKey);
   const now = new Date().toISOString();
   let extraSql = "";
   const params = [status, now];
@@ -169,28 +187,84 @@ export function getUserSeenJobKeys(userId) {
 
 /**
  * Get job keys the multi-user bot has already processed for a user.
- * Uses dm_log (the mu bot's own delivery ledger) plus user actions
- * (applied/saved/skipped) from user_seen_jobs. This avoids false dedup
- * caused by bridgeToTracker inserting "notified" rows from the personal bot.
+ * Uses the durable delivery-claim state, dm_log ledger, and user actions.
  * @returns {Set<string>}
  */
 export function getMuDeliveredJobKeys(userId) {
   const db = getDb();
   // Jobs the mu bot delivered (or filtered)
   const dmRows = db
-    .prepare("SELECT DISTINCT job_key FROM dm_log WHERE user_id = ? AND status IN ('sent','queued','dead_link','dm_closed')")
+    .prepare("SELECT DISTINCT job_key FROM dm_log WHERE user_id = ? AND status IN ('sent','queued','dead_link','dm_closed','uncertain')")
     .all(userId);
+  const claimRows = db
+    .prepare(`SELECT job_key FROM delivery_claims
+              WHERE user_id = ?
+                AND (status IN ('sent','queued','dead_link','dm_closed','uncertain',
+                                'sending','digest_claimed','digest_sending')
+                     OR (status = 'claimed' AND lease_until > ?))`)
+    .all(userId, new Date().toISOString());
   // Jobs the user acted on (should not re-notify regardless of source)
   const actionRows = db
     .prepare("SELECT job_key FROM user_seen_jobs WHERE user_id = ? AND status IN ('applied','saved','skipped')")
     .all(userId);
-  const keys = new Set(dmRows.map((r) => r.job_key));
-  for (const r of actionRows) keys.add(r.job_key);
+  const keys = new Set(dmRows.map((r) => resolveJobKey(r.job_key)));
+  for (const r of claimRows) keys.add(resolveJobKey(r.job_key));
+  for (const r of actionRows) keys.add(resolveJobKey(r.job_key));
   // Merge unflushed buffered deliveries — same poll cycle might enqueue and
   // re-check before the buffer hits disk.
   const buffered = _bufferedKeysByUser.get(userId);
-  if (buffered) for (const k of buffered) keys.add(k);
+  if (buffered) for (const k of buffered) keys.add(resolveJobKey(k));
   return keys;
+}
+
+// Hashes in already-delivered Discord messages cannot be rewritten when a
+// mutable legacy key is promoted to its stable source/ID key. Resolve both
+// live keys and alias old_keys, and canonicalize cached hits so another key
+// migration cannot leave a stale process-local result behind.
+const _buttonHashToKeyCache = new Map();
+
+function liveCanonicalJobKey(candidate) {
+  const canonical = resolveJobKey(candidate);
+  if (!canonical) return null;
+  return getDb().prepare("SELECT 1 FROM seen_jobs WHERE key = ?").get(canonical)
+    ? canonical
+    : null;
+}
+
+/** Resolve a MU Discord button hash, including hashes made before re-keying. */
+export function findJobKeyByHash(hash, userId) {
+  const wanted = String(hash || "");
+  if (!/^[a-f0-9]{16}$/i.test(wanted)) return null;
+
+  const cached = _buttonHashToKeyCache.get(wanted);
+  if (cached) {
+    const canonical = liveCanonicalJobKey(cached);
+    if (canonical) {
+      _buttonHashToKeyCache.set(wanted, canonical);
+      markJobNotified(userId, canonical);
+      return canonical;
+    }
+    _buttonHashToKeyCache.delete(wanted);
+  }
+
+  const db = getDb();
+  const candidates = [
+    ...db.prepare("SELECT job_key AS candidate FROM user_seen_jobs WHERE user_id = ?").all(userId),
+    ...db.prepare("SELECT key AS candidate FROM seen_jobs").all(),
+    ...db.prepare("SELECT old_key AS candidate FROM job_key_aliases").all(),
+  ];
+
+  for (const row of candidates) {
+    if (jobButtonHash(row.candidate) !== wanted) continue;
+    const canonical = liveCanonicalJobKey(row.candidate);
+    if (!canonical) continue;
+    _buttonHashToKeyCache.set(wanted, canonical);
+    // Alias/seen_jobs fallbacks also repair a delivery row that was lost before
+    // its buffered ledger write. INSERT OR IGNORE preserves user actions.
+    markJobNotified(userId, canonical);
+    return canonical;
+  }
+  return null;
 }
 
 /**
@@ -286,7 +360,7 @@ export function markRemindersSent(pairs) {
   );
   const tx = db.transaction(() => {
     for (const { user_id, job_key } of pairs) {
-      stmt.run(user_id, job_key);
+      stmt.run(user_id, resolveJobKey(job_key));
     }
   });
   tx();
@@ -362,12 +436,16 @@ export function getH1bSponsorStats(companyKey) {
 export function createOtp(email, code, expiresInMinutes = 5) {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + expiresInMinutes * 60 * 1000).toISOString();
-  getDb()
-    .prepare(
+  const db = getDb();
+  const replaceOtp = db.transaction(() => {
+    db.prepare("UPDATE otp_codes SET used = 1 WHERE email = ? AND used = 0").run(email);
+    db.prepare(
       `INSERT INTO otp_codes (email, code, expires_at, used, created_at)
        VALUES (?, ?, ?, 0, ?)`
     )
     .run(email, code, expiresAt, now.toISOString());
+  });
+  replaceOtp();
 }
 
 /**
@@ -378,29 +456,467 @@ export function createOtp(email, code, expiresInMinutes = 5) {
 export function verifyOtp(email, code) {
   const db = getDb();
   const now = new Date().toISOString();
-  const row = db
-    .prepare(
-      `SELECT rowid FROM otp_codes
-       WHERE email = ? AND code = ? AND used = 0 AND expires_at > ?
-       ORDER BY created_at DESC
-       LIMIT 1`
-    )
-    .get(email, code, now);
-
-  if (!row) return false;
-
-  db.prepare("UPDATE otp_codes SET used = 1 WHERE rowid = ?").run(row.rowid);
-  return true;
+  const consume = db.transaction(() => {
+    const row = db.prepare(
+      `UPDATE otp_codes
+          SET used = 1
+        WHERE rowid = (
+          SELECT rowid FROM otp_codes
+           WHERE email = ? AND code = ? AND used = 0 AND expires_at > ?
+           ORDER BY created_at DESC
+           LIMIT 1
+        )
+          AND used = 0
+      RETURNING rowid`
+    ).get(email, code, now);
+    if (!row) return false;
+    // A successful verification consumes every outstanding code for the email,
+    // including rows written by older versions that allowed overlap.
+    db.prepare("UPDATE otp_codes SET used = 1 WHERE email = ? AND used = 0").run(email);
+    return true;
+  });
+  return consume();
 }
 
 // ---------------------------------------------------------------------------
 // DM Log
 // ---------------------------------------------------------------------------
 
+function deliveryClaimLeaseMs() {
+  const parsed = Number.parseInt(process.env.DELIVERY_CLAIM_LEASE_MS ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30 * 60 * 1000;
+}
+
+function deliveryLeaseUntil(now = new Date()) {
+  return new Date(now.getTime() + deliveryClaimLeaseMs()).toISOString();
+}
+
+function canonicalDeliveryClaims(claims) {
+  const canonical = new Map();
+  for (const claim of claims || []) {
+    const jobKey = resolveJobKey(claim?.jobKey);
+    const claimToken = String(claim?.claimToken || "");
+    if (!jobKey || !claimToken) continue;
+    const existing = canonical.get(jobKey);
+    if (existing && existing.claimToken !== claimToken) return [];
+    canonical.set(jobKey, { jobKey, claimToken });
+  }
+  return [...canonical.values()];
+}
+
+/**
+ * Atomically reserve a user/job pair before contacting Discord. The primary
+ * key prevents two bot instances from sending the same notification.
+ */
+export function claimJobDelivery(userId, jobKey) {
+  const db = getDb();
+  const claim = db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    if (!canonicalKey) return false;
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const row = db.prepare(`
+      INSERT INTO delivery_claims
+        (user_id, job_key, status, claim_token, claimed_at, lease_until, updated_at)
+      VALUES (?, ?, 'claimed', lower(hex(randomblob(16))), ?, ?, ?)
+      ON CONFLICT(user_id, job_key) DO UPDATE SET
+        status = 'claimed',
+        claim_token = excluded.claim_token,
+        claimed_at = excluded.claimed_at,
+        lease_until = excluded.lease_until,
+        updated_at = excluded.updated_at
+      WHERE delivery_claims.status = 'failed'
+         OR (delivery_claims.status = 'claimed' AND delivery_claims.lease_until <= ?)
+      RETURNING claim_token
+    `).get(userId, canonicalKey, nowIso, deliveryLeaseUntil(now), nowIso, nowIso);
+    return row?.claim_token || null;
+  });
+  return withBusyRetry(() => claim.immediate());
+}
+
+/** Release a direct-send reservation after a known retryable failure. */
+export function releaseJobDeliveryClaim(userId, jobKey, claimToken) {
+  if (!claimToken) return false;
+  const db = getDb();
+  const release = db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    const now = new Date().toISOString();
+    return db.prepare(`
+      UPDATE delivery_claims
+         SET status = 'failed', claim_token = NULL, lease_until = NULL, updated_at = ?
+       WHERE user_id = ? AND job_key = ? AND claim_token = ?
+         AND status IN ('claimed', 'sending')
+    `).run(now, userId, canonicalKey, claimToken).changes === 1;
+  });
+  return withBusyRetry(() => release.immediate());
+}
+
+/** Durable phase boundary immediately before the external direct send. */
+export function beginJobDeliverySend(userId, jobKey, claimToken) {
+  if (!claimToken) return false;
+  const db = getDb();
+  const begin = db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    const now = new Date();
+    return db.prepare(`
+      UPDATE delivery_claims
+         SET status = 'sending', lease_until = ?, updated_at = ?
+       WHERE user_id = ? AND job_key = ? AND status = 'claimed'
+         AND claim_token = ?
+    `).run(deliveryLeaseUntil(now), now.toISOString(), userId, canonicalKey, claimToken).changes === 1;
+  });
+  return withBusyRetry(() => begin.immediate());
+}
+
+/** Finish work that never crossed the external-send boundary. */
+export function finishJobDeliveryClaim(userId, jobKey, claimToken, status) {
+  const allowed = new Set(["queued", "failed", "dm_closed", "dead_link"]);
+  if (!allowed.has(status)) throw new Error(`Invalid pre-send delivery status: ${status}`);
+  if (!claimToken) return false;
+  const db = getDb();
+  const finish = db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    const timestamp = new Date().toISOString();
+    const changed = db.prepare(`
+      UPDATE delivery_claims
+         SET status = ?, claim_token = NULL, lease_until = NULL, updated_at = ?
+       WHERE user_id = ? AND job_key = ? AND claim_token = ? AND status = 'claimed'
+    `).run(status, timestamp, userId, canonicalKey, claimToken).changes === 1;
+    return { changed, canonicalKey, timestamp };
+  });
+  const result = withBusyRetry(() => finish.immediate());
+  if (result.changed) _bufferDeliveryLog(userId, result.canonicalKey, status, result.timestamp);
+  return result.changed;
+}
+
+/** Finish a direct send from the durable sending phase and buffer its ledger row. */
+export function finishJobDeliverySend(userId, jobKey, claimToken, status) {
+  const allowed = new Set(["sent", "failed", "dm_closed", "dead_link", "uncertain"]);
+  if (!allowed.has(status)) throw new Error(`Invalid direct delivery status: ${status}`);
+  if (!claimToken) return false;
+  const db = getDb();
+  const finish = db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    const timestamp = new Date().toISOString();
+    const wasUncertain = status === "sent" && Boolean(db.prepare(`
+      SELECT 1 FROM delivery_claims
+       WHERE user_id = ? AND job_key = ? AND claim_token = ? AND status = 'uncertain'
+    `).get(userId, canonicalKey, claimToken));
+    const changed = db.prepare(`
+      UPDATE delivery_claims
+         SET status = ?,
+             claim_token = CASE WHEN ? = 'uncertain' THEN claim_token ELSE NULL END,
+             lease_until = NULL, updated_at = ?
+       WHERE user_id = ? AND job_key = ?
+         AND claim_token = ?
+         AND (status = 'sending' OR (? = 'sent' AND status = 'uncertain'))
+    `).run(status, status, timestamp, userId, canonicalKey, claimToken, status).changes === 1;
+    let reconciledLedger = false;
+    if (changed && wasUncertain) {
+      reconciledLedger = db.prepare(`
+        UPDATE dm_log SET status = 'sent', sent_at = ?
+         WHERE user_id = ? AND job_key = ? AND status = 'uncertain'
+      `).run(timestamp, userId, canonicalKey).changes > 0;
+      if (reconciledLedger) {
+        db.prepare(`
+          INSERT OR IGNORE INTO user_seen_jobs (user_id, job_key, status, notified_at)
+          VALUES (?, ?, 'notified', ?)
+        `).run(userId, canonicalKey, timestamp);
+      }
+    }
+    return { changed, canonicalKey, timestamp, reconciledLedger };
+  });
+  const result = withBusyRetry(() => finish.immediate());
+  if (result.changed && !result.reconciledLedger) {
+    _bufferDeliveryLog(userId, result.canonicalKey, status, result.timestamp);
+  }
+  return result.changed;
+}
+
+/** Reserve one durable queued item before a digest/quiet-hours flush send. */
+export function claimQueuedJobDelivery(userId, jobKey) {
+  const db = getDb();
+  const claim = db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    if (!canonicalKey) return false;
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const leaseUntil = deliveryLeaseUntil(now);
+    const updated = db.prepare(`
+      UPDATE delivery_claims
+         SET status = 'digest_claimed', claim_token = lower(hex(randomblob(16))),
+             claimed_at = ?, lease_until = ?, updated_at = ?
+       WHERE user_id = ? AND job_key = ?
+         AND (status = 'queued' OR (status = 'digest_claimed' AND lease_until <= ?))
+      RETURNING claim_token
+    `).get(nowIso, leaseUntil, nowIso, userId, canonicalKey, nowIso);
+    if (updated) return updated.claim_token;
+
+    // Compatibility for queued rows produced before delivery_claims existed.
+    const row = db.prepare(`
+      INSERT INTO delivery_claims
+        (user_id, job_key, status, claim_token, claimed_at, lease_until, updated_at)
+      SELECT ?, ?, 'digest_claimed', lower(hex(randomblob(16))), ?, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM dm_log WHERE user_id = ? AND job_key = ? AND status = 'queued'
+       )
+      ON CONFLICT(user_id, job_key) DO NOTHING
+      RETURNING claim_token
+    `).get(userId, canonicalKey, nowIso, leaseUntil, nowIso, userId, canonicalKey);
+    return row?.claim_token || null;
+  });
+  return withBusyRetry(() => claim.immediate());
+}
+
+export function releaseQueuedJobDeliveryClaim(userId, jobKey, claimToken) {
+  if (!claimToken) return false;
+  const db = getDb();
+  const release = db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    const now = new Date().toISOString();
+    return db.prepare(`
+      UPDATE delivery_claims
+         SET status = 'queued', claim_token = NULL, lease_until = NULL, updated_at = ?
+       WHERE user_id = ? AND job_key = ?
+         AND claim_token = ?
+         AND status IN ('digest_claimed', 'digest_sending')
+    `).run(now, userId, canonicalKey, claimToken).changes === 1;
+  });
+  return withBusyRetry(() => release.immediate());
+}
+
+/** Atomically move every selected digest item across the pre-send boundary. */
+export function beginQueuedJobDeliverySend(userId, claims) {
+  const db = getDb();
+  const begin = db.transaction(() => {
+    const canonicalClaims = canonicalDeliveryClaims(claims);
+    if (canonicalClaims.length === 0 || canonicalClaims.length !== claims.length) return false;
+    const placeholders = canonicalClaims.map(() => "?").join(",");
+    const canonicalKeys = canonicalClaims.map((claim) => claim.jobKey);
+    const rows = db.prepare(`
+      SELECT job_key, status, claim_token FROM delivery_claims
+       WHERE user_id = ? AND job_key IN (${placeholders})
+    `).all(userId, ...canonicalKeys);
+    const wantedTokens = new Map(canonicalClaims.map((claim) => [claim.jobKey, claim.claimToken]));
+    if (rows.length !== canonicalKeys.length || rows.some((row) =>
+      row.status !== "digest_claimed" || row.claim_token !== wantedTokens.get(row.job_key)
+    )) {
+      return false;
+    }
+    const now = new Date();
+    return db.prepare(`
+      UPDATE delivery_claims
+         SET status = 'digest_sending', lease_until = ?, updated_at = ?
+       WHERE user_id = ? AND status = 'digest_claimed'
+         AND job_key IN (${placeholders})
+    `).run(deliveryLeaseUntil(now), now.toISOString(), userId, ...canonicalKeys).changes === canonicalKeys.length;
+  });
+  return withBusyRetry(() => begin.immediate());
+}
+
+/** Atomically finish all jobs represented by one digest summary send. */
+export function finishQueuedJobDeliverySend(userId, claims, status) {
+  const allowed = new Set(["sent", "queued", "dm_closed", "dead_link", "uncertain"]);
+  if (!allowed.has(status)) throw new Error(`Invalid digest delivery status: ${status}`);
+  const db = getDb();
+  const finish = db.transaction(() => {
+    const canonicalClaims = canonicalDeliveryClaims(claims);
+    if (canonicalClaims.length === 0 || canonicalClaims.length !== claims.length) return false;
+    const placeholders = canonicalClaims.map(() => "?").join(",");
+    const canonicalKeys = canonicalClaims.map((claim) => claim.jobKey);
+    const rows = db.prepare(`
+      SELECT job_key, status, claim_token FROM delivery_claims
+       WHERE user_id = ? AND job_key IN (${placeholders})
+    `).all(userId, ...canonicalKeys);
+    const wantedTokens = new Map(canonicalClaims.map((claim) => [claim.jobKey, claim.claimToken]));
+    const canFinish = rows.length === canonicalKeys.length && rows.every((row) =>
+      row.claim_token === wantedTokens.get(row.job_key) &&
+      (row.status === "digest_sending" || (status === "sent" && row.status === "uncertain"))
+    );
+    if (!canFinish) return false;
+
+    const timestamp = new Date().toISOString();
+    const changed = db.prepare(`
+      UPDATE delivery_claims
+         SET status = ?,
+             claim_token = CASE WHEN ? = 'uncertain' THEN claim_token ELSE NULL END,
+             lease_until = NULL, updated_at = ?
+       WHERE user_id = ?
+         AND (status = 'digest_sending' OR (? = 'sent' AND status = 'uncertain'))
+         AND job_key IN (${placeholders})
+    `).run(status, status, timestamp, userId, status, ...canonicalKeys).changes;
+    if (changed !== canonicalKeys.length) throw new Error("Digest delivery state changed concurrently");
+
+    if (status !== "queued") {
+      db.prepare(`
+        UPDATE dm_log SET status = ?, sent_at = ?
+         WHERE user_id = ?
+           AND (status = 'queued' OR (? = 'sent' AND status = 'uncertain'))
+           AND job_key IN (${placeholders})
+      `).run(status, timestamp, userId, status, ...canonicalKeys);
+    }
+    if (status === "sent") {
+      const insertSeen = db.prepare(`
+        INSERT OR IGNORE INTO user_seen_jobs (user_id, job_key, status, notified_at)
+        VALUES (?, ?, 'notified', ?)
+      `);
+      for (const canonicalKey of canonicalKeys) {
+        insertSeen.run(userId, canonicalKey, timestamp);
+      }
+    }
+    return true;
+  });
+  return withBusyRetry(() => finish.immediate());
+}
+
+export function finishQueuedJobDeliveryClaim(userId, jobKey, claimToken, status) {
+  const allowed = new Set(["dm_closed", "dead_link"]);
+  if (!allowed.has(status)) throw new Error(`Invalid pre-send queued delivery status: ${status}`);
+  if (!claimToken) return false;
+  const db = getDb();
+  const finish = db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    const now = new Date().toISOString();
+    const changed = db.prepare(`
+      UPDATE delivery_claims
+         SET status = ?, claim_token = NULL, lease_until = NULL, updated_at = ?
+       WHERE user_id = ? AND job_key = ?
+         AND claim_token = ?
+         AND status = 'digest_claimed'
+    `).run(status, now, userId, canonicalKey, claimToken).changes === 1;
+    if (changed) {
+      db.prepare(`
+        UPDATE dm_log SET status = ?, sent_at = ?
+         WHERE user_id = ? AND job_key = ? AND status = 'queued'
+      `).run(status, now, userId, canonicalKey);
+    }
+    return changed;
+  });
+  return withBusyRetry(() => finish.immediate());
+}
+
+/** Recover leases left behind by a crashed process without touching terminals. */
+export function recoverExpiredDeliveryClaims() {
+  const db = getDb();
+  const now = new Date().toISOString();
+  return withBusyRetry(() => db.transaction(() => {
+    const direct = db.prepare(`
+      UPDATE delivery_claims
+         SET status = 'failed', claim_token = NULL, lease_until = NULL, updated_at = ?
+       WHERE status = 'claimed' AND lease_until <= ?
+    `).run(now, now).changes;
+    const queued = db.prepare(`
+      UPDATE delivery_claims
+         SET status = 'queued', claim_token = NULL, lease_until = NULL, updated_at = ?
+       WHERE status = 'digest_claimed' AND lease_until <= ?
+    `).run(now, now).changes;
+    // Crossing the sending boundary means Discord may already have accepted the
+    // message. Expiration can classify it as uncertain, but must never make it
+    // retryable again.
+    db.prepare(`
+      UPDATE delivery_claims
+         SET status = 'uncertain', lease_until = NULL, updated_at = ?
+       WHERE status IN ('sending', 'digest_sending')
+         AND (lease_until IS NULL OR lease_until <= ?)
+    `).run(now, now);
+
+    // Reconcile terminal claim state into the older ledger. This closes the
+    // crash window where Discord accepted a send (or a queue claim committed)
+    // but the buffered dm_log write had not reached disk yet.
+    db.prepare(`
+      UPDATE dm_log
+         SET status = (
+               SELECT dc.status FROM delivery_claims dc
+                WHERE dc.user_id = dm_log.user_id AND dc.job_key = dm_log.job_key
+             ),
+             sent_at = (
+               SELECT dc.updated_at FROM delivery_claims dc
+                WHERE dc.user_id = dm_log.user_id AND dc.job_key = dm_log.job_key
+             )
+       WHERE status = 'queued'
+         AND EXISTS (
+           SELECT 1 FROM delivery_claims dc
+            WHERE dc.user_id = dm_log.user_id AND dc.job_key = dm_log.job_key
+              AND dc.status IN ('sent', 'dead_link', 'dm_closed', 'uncertain')
+         )
+    `).run();
+    db.prepare(`
+      INSERT INTO dm_log (user_id, job_key, status, sent_at)
+      SELECT dc.user_id, dc.job_key, dc.status, dc.updated_at
+        FROM delivery_claims dc
+       WHERE dc.status IN ('sent', 'queued', 'dead_link', 'dm_closed', 'uncertain')
+         AND NOT EXISTS (
+           SELECT 1 FROM dm_log dl
+            WHERE dl.user_id = dc.user_id AND dl.job_key = dc.job_key
+              AND dl.status IN ('sent', 'queued', 'dead_link', 'dm_closed', 'uncertain')
+         )
+    `).run();
+    db.prepare(`
+      INSERT OR IGNORE INTO user_seen_jobs (user_id, job_key, status, notified_at)
+      SELECT user_id, job_key, 'notified', updated_at
+        FROM delivery_claims
+       WHERE status IN ('sent', 'queued')
+    `).run();
+    return { direct, queued };
+  })());
+}
+
+function _setDeliveryClaimStatus(userId, jobKey, status, timestamp) {
+  const terminal = new Set(["sent", "queued", "dead_link", "dm_closed", "uncertain"]);
+  if (!terminal.has(status) && status !== "failed") {
+    return { jobKey: resolveJobKey(jobKey), accepted: false };
+  }
+  const db = getDb();
+  const setStatus = db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    const row = db.prepare(`
+      INSERT INTO delivery_claims
+        (user_id, job_key, status, claim_token, claimed_at, lease_until, updated_at)
+      VALUES (?, ?, ?, NULL, ?, NULL, ?)
+      ON CONFLICT(user_id, job_key) DO UPDATE SET
+        status = CASE
+          WHEN delivery_claims.status IN ('claimed', 'digest_claimed', 'uncertain', 'sending', 'digest_sending')
+            THEN delivery_claims.status
+          WHEN delivery_claims.status = 'sent' THEN delivery_claims.status
+          WHEN excluded.status = 'sent' THEN excluded.status
+          WHEN excluded.status = 'uncertain' THEN excluded.status
+          WHEN delivery_claims.status IN ('dead_link', 'dm_closed') THEN delivery_claims.status
+          WHEN excluded.status IN ('dead_link', 'dm_closed') THEN excluded.status
+          WHEN delivery_claims.status = 'queued' AND excluded.status IN ('claimed', 'failed')
+            THEN delivery_claims.status
+          ELSE excluded.status
+        END,
+        claim_token = CASE
+          WHEN delivery_claims.status IN ('claimed', 'digest_claimed', 'uncertain', 'sending', 'digest_sending')
+            THEN delivery_claims.claim_token
+          WHEN excluded.status = 'sent' THEN NULL
+          WHEN excluded.status = 'uncertain' THEN delivery_claims.claim_token
+          ELSE NULL
+        END,
+        lease_until = CASE
+          WHEN delivery_claims.status IN ('claimed', 'digest_claimed', 'sending', 'digest_sending')
+            THEN delivery_claims.lease_until
+          ELSE NULL
+        END,
+        updated_at = CASE
+          WHEN delivery_claims.status IN ('claimed', 'digest_claimed', 'uncertain', 'sending', 'digest_sending', 'sent')
+            THEN delivery_claims.updated_at
+          ELSE excluded.updated_at
+        END
+      WHERE delivery_claims.status NOT IN
+        ('claimed', 'digest_claimed', 'sending', 'digest_sending', 'uncertain', 'sent')
+      RETURNING status
+    `).get(userId, canonicalKey, status, timestamp, timestamp);
+    return { jobKey: canonicalKey, accepted: row?.status === status };
+  });
+  return withBusyRetry(() => setStatus.immediate());
+}
+
 /**
  * Log a DM delivery event.
  */
 export function logDm(userId, jobKey, status = "sent") {
+  jobKey = resolveJobKey(jobKey);
   getDb()
     .prepare(
       `INSERT INTO dm_log (user_id, job_key, status, sent_at)
@@ -430,7 +946,7 @@ function dmLogFlushMaxSize() {
 }
 // 'dm_closed' = permanent recipient failure (DMs closed / bot blocked / unknown
 // user): retrying cannot help, so it dedups like a delivery instead of looping.
-const _DM_LOG_DEDUP_STATUSES = new Set(["sent", "queued", "dead_link", "dm_closed"]);
+const _DM_LOG_DEDUP_STATUSES = new Set(["sent", "queued", "dead_link", "dm_closed", "uncertain"]);
 
 const _dmLogBuffer = [];
 const _bufferedKeysByUser = new Map(); // userId -> Set<jobKey>
@@ -449,6 +965,54 @@ function _clearBufferedKey(userId, jobKey) {
   if (set.size === 0) _bufferedKeysByUser.delete(userId);
 }
 
+const _BUFFERED_STATUS_RANK = new Map([
+  ["sent", 60],
+  ["uncertain", 55],
+  ["dm_closed", 50],
+  ["dead_link", 50],
+  ["queued", 40],
+  ["failed", 10],
+]);
+
+function coalesceCanonicalBufferedEntries(entries) {
+  const coalesced = new Map();
+  for (const entry of entries) {
+    const canonicalKey = resolveJobKey(entry.jobKey);
+    const identity = `${entry.userId}\u0000${canonicalKey}`;
+    const existing = coalesced.get(identity);
+    if (!existing) {
+      coalesced.set(identity, {
+        ...entry,
+        jobKey: canonicalKey,
+        bufferedKeys: new Set([entry.jobKey, canonicalKey]),
+      });
+      continue;
+    }
+
+    existing.bufferedKeys.add(entry.jobKey);
+    existing.bufferedKeys.add(canonicalKey);
+    const existingRank = _BUFFERED_STATUS_RANK.get(existing.status) || 0;
+    const incomingRank = _BUFFERED_STATUS_RANK.get(entry.status) || 0;
+    if (incomingRank > existingRank ||
+        (incomingRank === existingRank && entry.timestamp > existing.timestamp)) {
+      existing.status = entry.status;
+      existing.timestamp = entry.timestamp;
+    }
+  }
+  return [...coalesced.values()];
+}
+
+function _dropBufferedEntriesForUser(userId) {
+  for (let i = _dmLogBuffer.length - 1; i >= 0; i--) {
+    if (_dmLogBuffer[i].userId === userId) _dmLogBuffer.splice(i, 1);
+  }
+  _bufferedKeysByUser.delete(userId);
+  if (_dmLogBuffer.length === 0 && _flushTimer) {
+    clearTimeout(_flushTimer);
+    _flushTimer = null;
+  }
+}
+
 function _scheduleFlush() {
   if (_flushTimer) return;
   _flushTimer = setTimeout(() => {
@@ -462,8 +1026,8 @@ function _scheduleFlush() {
 function _doFlush(useRetry) {
   if (_flushTimer) { clearTimeout(_flushTimer); _flushTimer = null; }
   if (_dmLogBuffer.length === 0) return 0;
-  const toFlush = _dmLogBuffer.splice(0);
   const db = getDb();
+  const pending = _dmLogBuffer.splice(0);
   const insertUserJob = db.prepare(
     `INSERT OR IGNORE INTO user_seen_jobs (user_id, job_key, status, notified_at)
      VALUES (?, ?, 'notified', ?)`
@@ -472,7 +1036,20 @@ function _doFlush(useRetry) {
     `INSERT INTO dm_log (user_id, job_key, status, sent_at)
      VALUES (?, ?, ?, ?)`
   );
+  // Resolve aliases inside the write transaction. If another process commits a
+  // re-key after our first read, WAL rejects the snapshot upgrade and
+  // withBusyRetry reruns this transaction against the new alias instead of
+  // recreating an orphan under the legacy key.
   const tx = db.transaction(() => {
+    const userIds = [...new Set(pending.map((entry) => entry.userId))];
+    const placeholders = userIds.map(() => "?").join(",");
+    const liveUsers = userIds.length > 0
+      ? new Set(db.prepare(`SELECT id FROM user_profiles WHERE id IN (${placeholders})`).all(...userIds).map((row) => row.id))
+      : new Set();
+    const liveEntries = pending.filter((entry) => liveUsers.has(entry.userId));
+    const droppedEntries = pending.filter((entry) => !liveUsers.has(entry.userId));
+    const toFlush = coalesceCanonicalBufferedEntries(liveEntries);
+
     for (const e of toFlush) {
       // Only deliveries and queued-for-digest entries create a user-visible
       // "notified" row; failed/dead_link/dm_closed are delivery bookkeeping
@@ -482,17 +1059,28 @@ function _doFlush(useRetry) {
       }
       insertDm.run(e.userId, e.jobKey, e.status, e.timestamp);
     }
+    return { toFlush, droppedEntries };
   });
   try {
-    if (useRetry) withBusyRetry(() => tx());
-    else tx();
+    const { toFlush, droppedEntries } = useRetry ? withBusyRetry(() => tx()) : tx();
+    if (droppedEntries.length > 0) {
+      console.warn(`[dm-log] Dropped ${droppedEntries.length} buffered entries for deleted users.`);
+    }
+    for (const e of droppedEntries) {
+      if (_DM_LOG_DEDUP_STATUSES.has(e.status)) {
+        _clearBufferedKey(e.userId, e.jobKey);
+        _clearBufferedKey(e.userId, resolveJobKey(e.jobKey));
+      }
+    }
     for (const e of toFlush) {
-      if (_DM_LOG_DEDUP_STATUSES.has(e.status)) _clearBufferedKey(e.userId, e.jobKey);
+      if (_DM_LOG_DEDUP_STATUSES.has(e.status)) {
+        for (const key of e.bufferedKeys) _clearBufferedKey(e.userId, key);
+      }
     }
     return toFlush.length;
   } catch (err) {
     // Restore buffer state for a later retry (preserves original order).
-    _dmLogBuffer.unshift(...toFlush);
+    _dmLogBuffer.unshift(...pending);
     if (useRetry) _scheduleFlush();
     throw err;
   }
@@ -541,6 +1129,13 @@ export function flushDmLogSync() {
  */
 export function recordJobDelivery(userId, jobKey, status = "sent") {
   const timestamp = new Date().toISOString();
+  const result = _setDeliveryClaimStatus(userId, jobKey, status, timestamp);
+  if (!result.accepted) return false;
+  _bufferDeliveryLog(userId, result.jobKey, status, timestamp);
+  return true;
+}
+
+function _bufferDeliveryLog(userId, jobKey, status, timestamp) {
   _dmLogBuffer.push({ userId, jobKey, status, timestamp });
   if (_DM_LOG_DEDUP_STATUSES.has(status)) _addBufferedKey(userId, jobKey);
   if (_dmLogBuffer.length >= dmLogFlushMaxSize()) {
@@ -785,6 +1380,7 @@ export function isFeatureEnabled(key) {
  * Persist a successful fit check for (user, job). Failures never call this.
  */
 export function saveFitResult(userId, jobKey, { fitScore, fitVerdict, fitScoresJson, fitAssessment }) {
+  jobKey = resolveJobKey(jobKey);
   const now = new Date().toISOString();
   getDb()
     .prepare(
@@ -799,6 +1395,7 @@ export function saveFitResult(userId, jobKey, { fitScore, fitVerdict, fitScoresJ
  * Cached fit result for (user, job); undefined when never checked.
  */
 export function getFitResult(userId, jobKey) {
+  jobKey = resolveJobKey(jobKey);
   return getDb()
     .prepare(
       `SELECT fit_score, fit_verdict, fit_scores_json, fit_assessment, fit_checked_at

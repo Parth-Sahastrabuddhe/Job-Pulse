@@ -29,6 +29,13 @@ describe("validateProviderConfig", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("requires HTTPS even for a public custom endpoint", async () => {
+    const r = await validateProviderConfig({ provider: "custom", apiKey: null, baseUrl: "http://example.com/v1", model: "llama3" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/https/i);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("requires a model for openrouter and custom", async () => {
     const r = await validateProviderConfig({ provider: "openrouter", apiKey: "k", baseUrl: null, model: null });
     expect(r.ok).toBe(false);
@@ -63,12 +70,17 @@ describe("validateProviderConfig", () => {
   });
 
   it("pings a keyless custom endpoint without an auth header", async () => {
-    fetch.mockResolvedValue({ ok: true, status: 200 });
-    const r = await validateProviderConfig({ provider: "custom", apiKey: null, baseUrl: "http://example.com/v1", model: "llama3" });
+    const customFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const r = await validateProviderConfig(
+      { provider: "custom", apiKey: null, baseUrl: "https://example.com/v1", model: "llama3" },
+      { customFetch },
+    );
     expect(r.ok).toBe(true);
-    const [url, opts] = fetch.mock.calls[0];
-    expect(url).toBe("http://example.com/v1/chat/completions");
+    const [url, opts, policy] = customFetch.mock.calls[0];
+    expect(url).toBe("https://example.com/v1/chat/completions");
     expect(opts.headers.Authorization).toBeUndefined();
     expect(JSON.parse(opts.body).max_tokens).toBe(1);
+    expect(policy).toMatchObject({ requireHttps: true, maxRedirects: 2 });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

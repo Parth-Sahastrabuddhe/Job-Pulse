@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 // EXL Service runs on Oracle Cloud HCM (same Fusion SaaS pod family as Hexaware).
 // Unlike Hexaware, EXL's board is ~64% India and US is a minority, so we apply the
@@ -62,16 +62,19 @@ export async function collectExlJobs(_unused, config, log) {
         "accept": "application/json",
         "accept-encoding": "identity",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      }
+      },
+      signal: config.signal,
     });
 
     if (!response.ok) {
       log(`EXL API returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
-    const rawJobs = data?.items?.[0]?.requisitionList || [];
+    if (!Array.isArray(data?.items)) throw new Error("response did not contain an items array");
+    const rawJobs = data.items.length === 0 ? [] : data.items[0]?.requisitionList;
+    if (!Array.isArray(rawJobs)) throw new Error("response did not contain requisitions");
 
     const jobs = rawJobs
       .map((raw) => parseExlJob(raw))
@@ -81,6 +84,6 @@ export async function collectExlJobs(_unused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`EXL API error: ${error.message}`);
-    return [];
+    throw asCollectorError("exl", error);
   }
 }

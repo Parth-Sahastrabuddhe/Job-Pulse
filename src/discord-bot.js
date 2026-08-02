@@ -11,19 +11,13 @@ import {
 } from "discord.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { fetchJobDescription, saveJobData, jobDirId, getJobDir } from "./job-description.js";
 import { fitCheckResume } from "./tailor.js";
-import { upsertJobPost, updateJobPostStatus, bridgeToTracker, getDb, addToCompanyQueue, listCompanyQueue, getJobPost, getFunnelStats, updateJobFitScore } from "./state.js";
+import { upsertJobPost, updateJobPostStatus, getDb, getJobPost, getFunnelStats, updateJobFitScore } from "./state.js";
 import { getH1bSponsorStats } from "./multi-user-state.js";
 import { formatH1bLine } from "./mu-delivery.js";
 import { formatLevelLine } from "./role-taxonomy.js";
-
-const execFileAsync = promisify(execFile);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let client = null;
 let channelId = null;
@@ -35,8 +29,6 @@ function jobButtonId(job) {
 }
 
 const ADMIN_DISCORD_ID = process.env.ADMIN_DISCORD_ID;
-// Public origin of the web dashboard, used in user-facing messages.
-const DASHBOARD_URL = (process.env.DASHBOARD_URL || "http://localhost:3000").replace(/\/+$/, "");
 
 // Fit Check is dormant (future scope). Re-enable by setting FIT_CHECK_ENABLED=1.
 // While dormant: no Fit Check button on new posts, and clicks on old messages
@@ -122,16 +114,24 @@ export async function startDiscordBot(config) {
   });
 
   client.on("interactionCreate", async (interaction) => {
+    // This process is the owner's personal bot. Commands and notification
+    // buttons can expose or mutate the owner's job history, so the actor check
+    // belongs at the single dispatch boundary rather than in selected handlers.
+    if (!ADMIN_DISCORD_ID || interaction.user?.id !== ADMIN_DISCORD_ID) {
+      if (interaction.isRepliable()) {
+        try {
+          await interaction.reply({ content: "This personal bot is restricted to its owner.", ephemeral: true });
+        } catch {}
+      }
+      return;
+    }
+
     // Handle slash commands. This dispatch MUST be try/caught: discord.js does
     // not catch listener promise rejections, and the process-level
     // unhandledRejection handler exits the whole bot (collectors included).
     if (interaction.isChatInputCommand()) {
       try {
-        if (interaction.commandName === "add") {
-          await handleAddCompany(interaction);
-        } else if (interaction.commandName === "queue") {
-          await handleShowQueue(interaction);
-        } else if (interaction.commandName === "saved") {
+        if (interaction.commandName === "saved") {
           await handleSavedCommand(interaction);
         } else if (interaction.commandName === "stats") {
           await handleStatsCommand(interaction);
@@ -209,15 +209,6 @@ export async function startDiscordBot(config) {
   try {
     const rest = new REST().setToken(token);
     const commands = [
-      new SlashCommandBuilder()
-        .setName("add")
-        .setDescription("Queue a company for automated integration (admin only)")
-        .addStringOption((opt) =>
-          opt.setName("company").setDescription("Company name").setRequired(true)
-        ),
-      new SlashCommandBuilder()
-        .setName("queue")
-        .setDescription("Show pending companies in the integration queue"),
       new SlashCommandBuilder()
         .setName("saved")
         .setDescription("Show your saved jobs"),
@@ -451,9 +442,9 @@ async function handleConfirmApply(interaction, hash) {
   }
 
   try {
-    // Don't flip the buttons to "Applied" or write the sheet unless the status
-    // was actually persisted — same guard as Skip (commit 2adbaab). Otherwise
-    // the UI claims a write that silently no-op'd and /stats undercounts.
+    // Don't flip the buttons to "Applied" unless the local status was actually
+    // persisted. Otherwise the UI claims a write that silently no-op'd and
+    // /stats undercounts.
     const applyKey = findJobKeyByMessageId(message.id);
     if (!applyKey) {
       const jobUrl = getJobUrlFromMessage(message);
@@ -465,8 +456,6 @@ async function handleConfirmApply(interaction, hash) {
     }
 
     updateJobPostStatus(applyKey, "applied");
-    bridgeToTracker(applyKey, "applied");
-
     // Restore buttons with applied state
     const jobUrl = getJobUrlFromMessage(message);
     if (jobUrl) {
@@ -474,15 +463,6 @@ async function handleConfirmApply(interaction, hash) {
       await message.edit({ components: updatedRows });
     }
 
-    // Update Google Sheet in background
-    try {
-      const scriptPath = path.resolve(__dirname, "..", "scripts", "add_application.py");
-      const isLinux = process.platform === "linux";
-      const pythonCmd = isLinux ? path.resolve(process.env.HOME, "venv", "bin", "python") : "python";
-      await execFileAsync(pythonCmd, [scriptPath, details.company, details.role, details.url]);
-    } catch (sheetErr) {
-      console.error(`[applied] Sheet update failed: ${sheetErr.message}`);
-    }
   } catch (error) {
     console.error(`[applied] Error: ${error.message}`);
     try {
@@ -499,86 +479,6 @@ async function handleCancelApply(interaction, hash) {
   if (jobUrl) {
     const restoredRows = buildButtonRows(hash, jobUrl, "pending", true);
     await interaction.message.edit({ components: restoredRows });
-  }
-}
-
-async function handleAddCompany(interaction) {
-  // Admin-only: the automated integration pipeline pushes code and restarts
-  // prod, so open-ended requests go through the dashboard suggestion flow.
-  if (interaction.user.id !== ADMIN_DISCORD_ID) {
-    await interaction.reply({
-      content: `Only the admin can queue companies right now. You can suggest one at ${DASHBOARD_URL}/support and it will be reviewed.`,
-      ephemeral: true,
-    });
-    return;
-  }
-
-  // Ack first: the DB write below is synchronous and can block up to
-  // busy_timeout (2s) with four writers on jobs.db, eating into the 3s window.
-  await interaction.deferReply();
-  const companyName = interaction.options.getString("company");
-  try {
-    addToCompanyQueue(companyName, interaction.user.id);
-    await interaction.editReply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle("Company Queued")
-          .setDescription(`**${companyName}** is queued for automated integration.\nThe pipeline picks it up within ~10 minutes and DMs you the outcome. Track it with \`/queue\`.`)
-      ]
-    });
-  } catch (error) {
-    console.error(`[add] Failed to queue ${companyName}: ${error.message}`);
-    await interaction.editReply({ content: "Couldn't queue that company right now. Try again in a moment." });
-  }
-}
-
-const QUEUE_STATUS_ICONS = {
-  pending: "⏳",       // hourglass
-  in_progress: "🔧", // wrench
-  added: "✅",
-  failed: "❌",
-  duplicate: "♻️",
-  needs_human: "🙋",
-};
-
-async function handleShowQueue(interaction) {
-  await interaction.deferReply({ ephemeral: true });
-  try {
-    const items = listCompanyQueue(null, 15);
-    if (items.length === 0) {
-      await interaction.editReply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0x57F287)
-            .setTitle("Integration Queue")
-            .setDescription("No companies in the queue. Use `/add <company>` to add one.")
-        ]
-      });
-      return;
-    }
-
-    const pendingCount = items.filter((c) => c.status === "pending" || c.status === "in_progress").length;
-    const lines = items.map((c) => {
-      const icon = QUEUE_STATUS_ICONS[c.status] ?? "•";
-      const when = new Date(c.requested_at).toLocaleDateString();
-      const note = (c.status === "failed" || c.status === "needs_human") && c.notes
-        ? ` (${String(c.notes).slice(0, 60)})`
-        : "";
-      return `${icon} **${c.company_name}**, ${c.status.replace("_", " ")}, queued ${when}${note}`;
-    });
-
-    await interaction.editReply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(pendingCount > 0 ? 0xFFA500 : 0x57F287)
-          .setTitle(`Integration Queue (${pendingCount} open, last ${items.length} shown)`)
-          .setDescription(lines.join("\n"))
-      ]
-    });
-  } catch (error) {
-    console.error(`[queue] Failed to load queue: ${error.message}`);
-    await interaction.editReply({ content: "Couldn't load the queue right now. Try again in a moment." });
   }
 }
 
@@ -726,7 +626,6 @@ async function handleSavedAction(interaction, hash, action) {
 
   const newStatus = action === "saved_apply" ? "applied" : "pending";
   updateJobPostStatus(jobKey, newStatus);
-  bridgeToTracker(jobKey, newStatus === "pending" ? "notified" : newStatus);
 
   // Update buttons on the original notification message
   const post = getJobPost(jobKey);
@@ -769,7 +668,6 @@ async function handleSave(interaction, hash) {
     const post = getJobPost(saveKey);
     const newStatus = post?.status === "saved" ? "pending" : "saved";
     updateJobPostStatus(saveKey, newStatus);
-    bridgeToTracker(saveKey, newStatus === "pending" ? "notified" : newStatus);
 
     const jobUrl = getJobUrlFromMessage(interaction.message);
     if (jobUrl) {
@@ -905,15 +803,31 @@ async function handleAutoFill(interaction, hash) {
 }
 
 export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), options = {}) {
-  if (!client || !channelId) return;
+  const result = { deliveredJobs: [], failedJobs: [], uncertainJobs: [], errors: [] };
+  if (!client || !channelId) {
+    result.failedJobs.push(...jobs);
+    return result;
+  }
 
-  const channel = await client.channels.fetch(channelId);
-  if (!channel) return;
+  let channel;
+  try {
+    channel = await client.channels.fetch(channelId);
+  } catch (error) {
+    result.failedJobs.push(...jobs);
+    result.errors.push(error);
+    return result;
+  }
+  if (!channel) {
+    result.failedJobs.push(...jobs);
+    result.errors.push(new Error("Discord notification channel was not found"));
+    return result;
+  }
 
   const legitimacyMap = options.legitimacyMap instanceof Map ? options.legitimacyMap : new Map();
   for (const [index, job] of jobs.entries()) {
     if (options.dryRun) {
       console.log(`[dry-run][discord-bot] Would send: ${job.title}`);
+      result.deliveredJobs.push(job);
       continue;
     }
 
@@ -969,15 +883,25 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
       const message = await channel.send({
         content: `${job.sourceLabel} — ${job.title}`,
         embeds: [embed],
-        components: rows
+        components: rows,
+        allowedMentions: { parse: [] },
       });
 
       // Store in DB (thread created on-demand when user clicks Fit Check)
       try {
-        upsertJobPost(job.key, message.id, null, channelId);
-        bridgeToTracker(job.key, "notified");
+        const claimToken = options.claimTokens instanceof Map
+          ? options.claimTokens.get(job.key)
+          : null;
+        const finalized = upsertJobPost(job.key, message.id, null, channelId, claimToken);
+        if (!finalized) throw new Error("Delivery claim ownership was lost before finalization");
+        result.deliveredJobs.push(job);
       } catch (err) {
         console.error(`[discord-bot] Failed to store job_post: ${err.message}`);
+        // The message was accepted by Discord. Retrying it through a fallback
+        // would duplicate the post, so leave the durable claim in place and
+        // report an uncertain result for manual reconciliation.
+        result.uncertainJobs.push(job);
+        result.errors.push(err);
       }
 
       if (index < jobs.length - 1) {
@@ -985,8 +909,21 @@ export async function sendDiscordBotNotification(jobs, warningsMap = new Map(), 
       }
     } catch (error) {
       console.error(`Discord send error: ${error.message}`);
+      const status = Number(error?.status ?? error?.httpStatus);
+      // A concrete 4xx response means Discord rejected the request. Network
+      // exceptions and 5xx responses are ambiguous: the service may have
+      // accepted the message before the acknowledgement was lost, so an
+      // automatic fallback could duplicate it.
+      if (Number.isInteger(status) && status >= 400 && status < 500) {
+        result.failedJobs.push(job);
+      } else {
+        result.uncertainJobs.push(job);
+      }
+      result.errors.push(error);
     }
   }
+
+  return result;
 }
 
 export function stopDiscordBot() {

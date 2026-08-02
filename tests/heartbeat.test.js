@@ -5,6 +5,9 @@ import { ping, pingFail } from "../src/heartbeat.js";
 let server;
 let baseUrl;
 let hits;
+let releaseOrderedResponse;
+let releaseOrderedFailureResponse;
+let releaseParallelResponse;
 
 beforeAll(async () => {
   hits = [];
@@ -13,6 +16,27 @@ beforeAll(async () => {
     hits.push(hit);
     req.on("data", (chunk) => { hit.body += chunk.toString(); });
     req.on("end", () => {
+      if (req.url === "/ordered" && req.method === "GET") {
+        releaseOrderedResponse = () => {
+          res.statusCode = 200;
+          res.end("ok");
+        };
+        return;
+      }
+      if (req.url === "/ordered-failure/fail" && req.method === "POST") {
+        releaseOrderedFailureResponse = () => {
+          res.statusCode = 200;
+          res.end("ok");
+        };
+        return;
+      }
+      if (req.url === "/parallel-blocked" && req.method === "GET") {
+        releaseParallelResponse = () => {
+          res.statusCode = 200;
+          res.end("ok");
+        };
+        return;
+      }
       if (req.url === "/slow") {
         setTimeout(() => {
           res.statusCode = 200;
@@ -89,5 +113,66 @@ describe("heartbeat.pingFail", () => {
 
   it("does not throw when reason is missing", async () => {
     await expect(pingFail(`${baseUrl}/hc`)).resolves.toBeUndefined();
+  });
+
+  it("serializes updates to the same check URL", async () => {
+    releaseOrderedResponse = null;
+    const before = hits.length;
+    const success = ping(`${baseUrl}/ordered`);
+    for (let attempt = 0; attempt < 100 && !releaseOrderedResponse; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(releaseOrderedResponse).toBeTypeOf("function");
+
+    const failure = pingFail(`${baseUrl}/ordered`, "newer failure");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(hits.slice(before).map((hit) => hit.url)).toEqual(["/ordered"]);
+
+    releaseOrderedResponse();
+    await Promise.all([success, failure]);
+    expect(hits.slice(before).map((hit) => hit.url)).toEqual([
+      "/ordered",
+      "/ordered/fail",
+    ]);
+  });
+
+  it("does not let a newer success overtake an older failure", async () => {
+    releaseOrderedFailureResponse = null;
+    const before = hits.length;
+    const failure = pingFail(`${baseUrl}/ordered-failure`, "older failure");
+    for (let attempt = 0; attempt < 100 && !releaseOrderedFailureResponse; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(releaseOrderedFailureResponse).toBeTypeOf("function");
+
+    const success = ping(`${baseUrl}/ordered-failure`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(hits.slice(before).map((hit) => hit.url)).toEqual(["/ordered-failure/fail"]);
+
+    releaseOrderedFailureResponse();
+    await Promise.all([failure, success]);
+    expect(hits.slice(before).map((hit) => hit.url)).toEqual([
+      "/ordered-failure/fail",
+      "/ordered-failure",
+    ]);
+  });
+
+  it("does not serialize independent health checks", async () => {
+    releaseParallelResponse = null;
+    const before = hits.length;
+    const blocked = ping(`${baseUrl}/parallel-blocked`);
+    for (let attempt = 0; attempt < 100 && !releaseParallelResponse; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(releaseParallelResponse).toBeTypeOf("function");
+
+    await ping(`${baseUrl}/parallel-free`);
+    expect(hits.slice(before).map((hit) => hit.url)).toEqual([
+      "/parallel-blocked",
+      "/parallel-free",
+    ]);
+
+    releaseParallelResponse();
+    await blocked;
   });
 });

@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function inferCountry(locations) {
   if (!Array.isArray(locations)) return "";
@@ -59,19 +59,20 @@ const APPLE_SEARCH_TERMS = [
   "product+manager",
 ];
 
-async function fetchAppleSearchResults(term, locationParam, log) {
+async function fetchAppleSearchResults(term, locationParam, log, signal) {
   const searchUrl = `https://jobs.apple.com/en-us/search?search=${term}&sort=newest&location=${locationParam}`;
   try {
     const response = await fetchWithTimeout(searchUrl, {
       headers: {
         "accept": "text/html",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      }
+      },
+      signal,
     });
 
     if (!response.ok) {
       log(`Apple [${term}]: returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const html = await response.text();
@@ -79,7 +80,7 @@ async function fetchAppleSearchResults(term, locationParam, log) {
     const match = html.match(/__staticRouterHydrationData\s*=\s*JSON\.parse\("(.+?)"\);/);
     if (!match) {
       log(`Apple [${term}]: could not find hydration data`);
-      return [];
+      throw new Error("hydration data was not present");
     }
 
     let data;
@@ -96,17 +97,19 @@ async function fetchAppleSearchResults(term, locationParam, log) {
         data = JSON.parse(raw);
       } catch (e2) {
         log(`Apple [${term}]: failed to parse hydration data: ${e2.message}`);
-        return [];
+        throw e2;
       }
     }
 
     const searchData = data?.loaderData?.search;
-    if (!searchData?.searchResults) return [];
+    if (!Array.isArray(searchData?.searchResults)) {
+      throw new Error("hydration payload did not contain searchResults");
+    }
 
     return searchData.searchResults;
   } catch (err) {
     log(`Apple [${term}]: fetch error: ${err.message}`);
-    return [];
+    throw err;
   }
 }
 
@@ -117,9 +120,10 @@ export async function collectAppleJobs(_unused, config, log) {
     const allRaw = [];
     for (const term of APPLE_SEARCH_TERMS) {
       for (const locationParam of APPLE_LOCATIONS) {
-        const results = await fetchAppleSearchResults(term, locationParam, log);
+        const results = await fetchAppleSearchResults(term, locationParam, log, config.signal);
         allRaw.push(...results);
         // Small delay to avoid hammering Apple's servers
+        if (config.signal?.aborted) throw config.signal.reason || new DOMException("Aborted", "AbortError");
         await new Promise((r) => setTimeout(r, 300));
       }
     }
@@ -138,6 +142,6 @@ export async function collectAppleJobs(_unused, config, log) {
     return deduped.slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Apple API error: ${error.message}`);
-    return [];
+    throw asCollectorError("apple", error);
   }
 }

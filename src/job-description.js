@@ -6,14 +6,42 @@ import {
   WORKDAY_KEYS, ASHBY_KEYS, LEVER_KEYS, SMARTRECRUITERS_KEYS
 } from "./companies.js";
 import { fetchWithTimeout } from "./sources/shared.js";
-import { launchChromiumWithGuard } from "./playwright-guard.js";
+import { launchChromiumWithGuard, newRestrictedPage } from "./playwright-guard.js";
+import { assertSafeUrl, safeFetch } from "./ssrf-guard.js";
 
 const JOBS_DIR = path.join(PROJECT_ROOT, "data", "jobs");
+const JD_MAX_BYTES = 2 * 1024 * 1024;
+const JOB_DIR_ID_PATTERN = /^[A-Za-z0-9_-]{1,200}$/;
+const BROWSER_HOSTS = Object.freeze({
+  confluent: ["confluent.io"],
+  oracle: ["oracle.com", "oraclecloud.com"],
+  uber: ["uber.com", "uber-assets.com"],
+  goldmanSachs: ["gs.com"],
+});
+
+const ORACLE_HCM_HOSTS = {
+  jpmorgan: "jpmc.fa.oraclecloud.com",
+  ford: "efds.fa.em5.oraclecloud.com",
+  exl: "fa-ewjt-saasfaprod1.fa.ocs.oraclecloud.com",
+  hexaware: "fa-etqo-saasfaprod1.fa.ocs.oraclecloud.com",
+};
+
+function oracleHcmHostForSource(sourceKey) {
+  const hostname = ORACLE_HCM_HOSTS[sourceKey];
+  if (!hostname) throw new Error(`No trusted Oracle HCM host for ${sourceKey}`);
+  return hostname;
+}
+
+function throwIfAborted(error, signal) {
+  if (!signal?.aborted && error?.name !== "AbortError" && error?.code !== "ABORT_ERR") return;
+  if (signal?.reason instanceof Error) throw signal.reason;
+  throw error;
+}
 
 // Stricter Chromium flags reduce per-process RAM. /dev/shm here is tmpfs with
 // plenty of headroom, so we keep Chrome's IPC there — using /tmp (EBS disk)
 // causes severe iowait stalls.
-const CHROMIUM_ARGS = ["--no-sandbox", "--disable-gpu"];
+const CHROMIUM_ARGS = ["--disable-gpu"];
 
 function stripHtml(html) {
   return String(html ?? "")
@@ -37,7 +65,7 @@ export function getJobDir(job) {
   return path.join(JOBS_DIR, jobDirId(job));
 }
 
-async function fetchMicrosoftDescription(job) {
+async function fetchMicrosoftDescription(job, signal) {
   // Guarded like every other fetcher: a network error/abort here must return
   // null (so the fallback chain and saveJobData still run), not throw out of
   // fetchJobDescription.
@@ -49,7 +77,9 @@ async function fetchMicrosoftDescription(job) {
       "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       "referer": `https://apply.careers.microsoft.com/careers/job/${job.id}`,
       "origin": "https://apply.careers.microsoft.com"
-    }
+    },
+    signal,
+    maxResponseBytes: JD_MAX_BYTES,
   }, 20000);
   if (!resp.ok) return null;
 
@@ -71,12 +101,13 @@ async function fetchMicrosoftDescription(job) {
 
   return parts.join("\n");
   } catch (e) {
+    throwIfAborted(e, signal);
     console.error(`[jd] Microsoft fetch failed: ${e.message}`);
     return null;
   }
 }
 
-async function fetchAmazonDescription(job, rawJobData) {
+async function fetchAmazonDescription(job, rawJobData, signal) {
   // Amazon search API already returns description fields
   if (rawJobData) {
     const parts = [];
@@ -92,7 +123,9 @@ async function fetchAmazonDescription(job, rawJobData) {
   // Fallback: fetch via Amazon search.json API by job ID
   try {
     const apiResp = await fetchWithTimeout(`https://www.amazon.jobs/en/search.json?job_ids=${job.id}`, {
-      headers: { accept: "application/json", "user-agent": "Mozilla/5.0" }
+      headers: { accept: "application/json", "user-agent": "Mozilla/5.0" },
+      signal,
+      maxResponseBytes: JD_MAX_BYTES,
     }, 20000);
     if (apiResp.ok) {
       const apiData = await apiResp.json();
@@ -108,12 +141,15 @@ async function fetchAmazonDescription(job, rawJobData) {
         return parts.join("\n");
       }
     }
-  } catch (e) { console.error(`[jd] Amazon fallback fetch failed: ${e.message}`); }
+  } catch (e) {
+    throwIfAborted(e, signal);
+    console.error(`[jd] Amazon fallback fetch failed: ${e.message}`);
+  }
 
   return null;
 }
 
-async function fetchGoogleDescription(job, rawJobData) {
+async function fetchGoogleDescription(job, rawJobData, signal) {
   // Google batchexecute response includes description in fields 3, 4, 10
   if (rawJobData && Array.isArray(rawJobData)) {
     const parts = [];
@@ -157,7 +193,9 @@ async function fetchGoogleDescription(job, rawJobData) {
       {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded;charset=UTF-8", "user-agent": "Mozilla/5.0" },
-        body
+        body,
+        signal,
+        maxResponseBytes: JD_MAX_BYTES,
       },
       20000
     );
@@ -187,17 +225,22 @@ async function fetchGoogleDescription(job, rawJobData) {
         } catch {}
       }
     }
-  } catch (e) { console.error(`[jd] Google batchexecute fallback failed: ${e.message}`); }
+  } catch (e) {
+    throwIfAborted(e, signal);
+    console.error(`[jd] Google batchexecute fallback failed: ${e.message}`);
+  }
 
   return null;
 }
 
-async function fetchMetaDescription(job) {
+async function fetchMetaDescription(job, signal) {
   // Guarded like every other fetcher: a metacareers.com timeout must return
   // null (fallback chain + saveJobData still run), not throw.
   try {
   const resp = await fetchWithTimeout(`https://www.metacareers.com/jobs/${job.id}`, {
-    headers: { "user-agent": "Mozilla/5.0" }
+    headers: { "user-agent": "Mozilla/5.0" },
+    signal,
+    maxResponseBytes: JD_MAX_BYTES,
   }, 20000);
   if (!resp.ok) return null;
 
@@ -213,7 +256,8 @@ async function fetchMetaDescription(job) {
     if (ld.responsibilities) parts.push(`\nResponsibilities:\n${stripHtml(ld.responsibilities)}`);
     if (ld.qualifications) parts.push(`\nQualifications:\n${stripHtml(ld.qualifications)}`);
     return parts.join("\n");
-  } catch {
+  } catch (error) {
+    throwIfAborted(error, signal);
     return null;
   }
 }
@@ -221,13 +265,15 @@ async function fetchMetaDescription(job) {
 // Greenhouse companies — fetch full job detail from their API
 // GREENHOUSE_BOARDS — imported from companies.js
 
-async function fetchGreenhouseDescription(job) {
+async function fetchGreenhouseDescription(job, signal) {
   const board = GREENHOUSE_BOARDS[job.sourceKey];
   if (!board) return null;
 
   try {
     const resp = await fetchWithTimeout(`https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${job.id}`, {
-      headers: { accept: "application/json" }
+      headers: { accept: "application/json" },
+      signal,
+      maxResponseBytes: JD_MAX_BYTES,
     }, 20000);
     if (!resp.ok) return null;
 
@@ -237,20 +283,23 @@ async function fetchGreenhouseDescription(job) {
     if (data.location?.name) parts.push(`Location: ${data.location.name}`);
     if (data.content) parts.push(`\nDescription:\n${stripHtml(data.content)}`);
     return parts.length > 1 ? parts.join("\n") : null;
-  } catch {
+  } catch (error) {
+    throwIfAborted(error, signal);
     return null;
   }
 }
 
 // Lever companies — fetch full job detail
-async function fetchLeverDescription(job) {
+async function fetchLeverDescription(job, signal) {
   try {
     // Lever hosted URLs contain the company slug: jobs.lever.co/{company}/{id}
     const leverMatch = job.url?.match(/jobs\.lever\.co\/([^/]+)\/([a-f0-9-]+)/i);
     const company = leverMatch?.[1] || job.sourceKey;
 
     const resp = await fetchWithTimeout(`https://api.lever.co/v0/postings/${company}/${job.id}?mode=json`, {
-      headers: { accept: "application/json" }
+      headers: { accept: "application/json" },
+      signal,
+      maxResponseBytes: JD_MAX_BYTES,
     }, 20000);
     if (!resp.ok) return null;
 
@@ -262,19 +311,23 @@ async function fetchLeverDescription(job) {
     else if (data.description) parts.push(`\nDescription:\n${stripHtml(data.description)}`);
     if (data.additionalPlain) parts.push(`\nAdditional:\n${data.additionalPlain}`);
     return parts.length > 1 ? parts.join("\n") : null;
-  } catch {
+  } catch (error) {
+    throwIfAborted(error, signal);
     return null;
   }
 }
 
 // SMARTRECRUITERS_SLUGS — imported from companies.js
 
-async function fetchConfluentDescription(job) {
+async function fetchConfluentDescription(job, signal) {
   try {
     const { chromium } = await import("playwright");
-    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS });
+    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS }, { signal });
     try {
-      const page = await browser.newPage();
+      const page = await newRestrictedPage(browser, {
+        allowedHosts: BROWSER_HOSTS.confluent,
+        signal,
+      });
       await page.goto(`https://careers.confluent.io/jobs/job/${job.id}`, { waitUntil: "networkidle", timeout: 30000 });
       await page.waitForTimeout(3000);
       const desc = await page.evaluate(() => {
@@ -283,15 +336,21 @@ async function fetchConfluentDescription(job) {
       });
       return desc.length > 50 ? desc : null;
     } finally { await browser.close(); }
-  } catch { return null; }
+  } catch (error) {
+    throwIfAborted(error, signal);
+    return null;
+  }
 }
 
-async function fetchOracleDescription(job) {
+async function fetchOracleDescription(job, signal) {
   try {
     const { chromium } = await import("playwright");
-    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS });
+    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS }, { signal });
     try {
-      const page = await browser.newPage();
+      const page = await newRestrictedPage(browser, {
+        allowedHosts: BROWSER_HOSTS.oracle,
+        signal,
+      });
       await page.goto(`https://careers.oracle.com/jobs/#en/sites/jobsearch/job/${job.id}`, { timeout: 60000 });
       try { await page.waitForSelector(".job-details__body", { timeout: 15000 }); } catch {}
       await page.waitForTimeout(5000);
@@ -305,16 +364,29 @@ async function fetchOracleDescription(job) {
       });
       return desc.length > 50 ? desc : null;
     } finally { await browser.close(); }
-  } catch { return null; }
+  } catch (error) {
+    throwIfAborted(error, signal);
+    return null;
+  }
 }
 
-async function fetchOracleHCMDescription(job) {
+async function fetchOracleHCMDescription(job, signal) {
   // JPMorgan and Ford use Oracle HCM - same Playwright approach
   try {
     const { chromium } = await import("playwright");
-    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS });
+    const trustedHost = oracleHcmHostForSource(job.sourceKey);
+    await assertSafeUrl(job.url, {
+      requireHttps: true,
+      allowedHosts: [trustedHost],
+      signal,
+      timeoutMs: 5000,
+    });
+    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS }, { signal });
     try {
-      const page = await browser.newPage();
+      const page = await newRestrictedPage(browser, {
+        allowedHosts: [trustedHost],
+        signal,
+      });
       await page.goto(job.url, { timeout: 60000 });
       try { await page.waitForSelector(".job-details__description-content, .job-details__body, [class*=requisition]", { timeout: 15000 }); } catch {}
       await page.waitForTimeout(5000);
@@ -330,16 +402,22 @@ async function fetchOracleHCMDescription(job) {
       });
       return desc.length > 50 ? desc : null;
     } finally { await browser.close(); }
-  } catch { return null; }
+  } catch (error) {
+    throwIfAborted(error, signal);
+    return null;
+  }
 }
 
-async function fetchUberDescription(job) {
+async function fetchUberDescription(job, signal) {
   // Uber's detail page doesn't work. Fetch via the search API which includes descriptions.
   try {
     const { chromium } = await import("playwright");
-    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS });
+    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS }, { signal });
     try {
-      const page = await browser.newPage();
+      const page = await newRestrictedPage(browser, {
+        allowedHosts: BROWSER_HOSTS.uber,
+        signal,
+      });
       let jobsData = null;
       page.on("response", async (resp) => {
         if (resp.url().includes("loadSearchJobsResults")) {
@@ -355,15 +433,27 @@ async function fetchUberDescription(job) {
       }
       return null;
     } finally { await browser.close(); }
-  } catch { return null; }
+  } catch (error) {
+    throwIfAborted(error, signal);
+    return null;
+  }
 }
 
-async function fetchGoldmanSachsDescription(job) {
+async function fetchGoldmanSachsDescription(job, signal) {
   try {
     const { chromium } = await import("playwright");
-    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS });
+    await assertSafeUrl(job.url, {
+      requireHttps: true,
+      allowedHosts: ["higher.gs.com"],
+      signal,
+      timeoutMs: 5000,
+    });
+    const browser = await launchChromiumWithGuard(chromium, { headless: true, args: CHROMIUM_ARGS }, { signal });
     try {
-      const page = await browser.newPage();
+      const page = await newRestrictedPage(browser, {
+        allowedHosts: BROWSER_HOSTS.goldmanSachs,
+        signal,
+      });
       await page.goto(job.url, { waitUntil: "networkidle", timeout: 30000 });
       await page.waitForTimeout(3000);
 
@@ -376,18 +466,21 @@ async function fetchGoldmanSachsDescription(job) {
     } finally {
       await browser.close();
     }
-  } catch {
+  } catch (error) {
+    throwIfAborted(error, signal);
     return null;
   }
 }
 
-async function fetchSmartRecruitersDescription(job) {
+async function fetchSmartRecruitersDescription(job, signal) {
   try {
     const companySlug = SMARTRECRUITERS_SLUGS[job.sourceKey];
     if (!companySlug) return null;
 
     const response = await fetchWithTimeout(`https://api.smartrecruiters.com/v1/companies/${companySlug}/postings/${job.id}`, {
-      headers: { "accept": "application/json" }
+      headers: { "accept": "application/json" },
+      signal,
+      maxResponseBytes: JD_MAX_BYTES,
     }, 20000);
     if (!response.ok) return null;
 
@@ -403,16 +496,27 @@ async function fetchSmartRecruitersDescription(job) {
     ].filter(Boolean);
 
     return parts.join("\n\n") || null;
-  } catch {
+  } catch (error) {
+    throwIfAborted(error, signal);
     return null;
   }
 }
 
-async function fetchAppleDescription(job) {
+async function fetchAppleDescription(job, signal) {
   try {
-    const response = await fetchWithTimeout(job.url, {
-      headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
-    }, 20000);
+    const response = await safeFetch(job.url, {
+      headers: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        accept: "text/html,application/xhtml+xml",
+      },
+      signal,
+    }, {
+      requireHttps: true,
+      allowedHosts: ["jobs.apple.com"],
+      allowedContentTypes: ["text/html", "application/xhtml+xml"],
+      maxResponseBytes: JD_MAX_BYTES,
+      timeoutMs: 20_000,
+    });
     if (!response.ok) return null;
 
     const html = await response.text();
@@ -437,20 +541,33 @@ async function fetchAppleDescription(job) {
     ].filter(Boolean);
 
     return parts.join("\n\n") || null;
-  } catch {
+  } catch (error) {
+    throwIfAborted(error, signal);
     return null;
   }
 }
 
-async function fetchDescriptionFallback(job) {
+async function fetchDescriptionFallback(job, signal) {
   const url = job.url;
-  if (!url || !url.startsWith("http")) return null;
+  if (!url) return null;
 
   try {
-    const resp = await fetchWithTimeout(url, {
+    const initial = new URL(url);
+    if (initial.protocol !== "https:") return null;
+    const resp = await safeFetch(url, {
       headers: { "user-agent": "Mozilla/5.0", accept: "text/html" },
-      redirect: "follow"
-    }, 20000);
+      redirect: "follow",
+      signal,
+    }, {
+      requireHttps: true,
+      // Cross-site redirects from a stored job URL are unnecessary for
+      // extraction and are a common way to bypass a one-time URL check.
+      allowedHosts: [initial.hostname],
+      allowedContentTypes: ["text/html", "application/xhtml+xml", "text/plain"],
+      maxResponseBytes: JD_MAX_BYTES,
+      timeoutMs: 20_000,
+      maxRedirects: 3,
+    });
     if (!resp.ok) return null;
 
     const html = await resp.text();
@@ -509,7 +626,10 @@ async function fetchDescriptionFallback(job) {
     }
 
     if (metaParts.length > 0) return metaParts.join("\n");
-  } catch (e) { console.error(`[jd] HTML fallback failed for ${job.url}: ${e.message}`); }
+  } catch (e) {
+    throwIfAborted(e, signal);
+    console.error(`[jd] HTML fallback failed for ${job.url}: ${e.message}`);
+  }
 
   return null;
 }
@@ -527,15 +647,23 @@ function workdayApiUrl(jobUrl) {
   return `${base}/wday/cxs/${company}/${rest}`;
 }
 
-async function fetchWorkdayDescription(job) {
+async function fetchWorkdayDescription(job, signal) {
   if (!job.url) return null;
 
   // Workday exposes a JSON API at the /wday/cxs/ prefixed URL
   try {
     const apiUrl = workdayApiUrl(job.url);
-    const resp = await fetchWithTimeout(apiUrl, {
-      headers: { accept: "application/json", "content-type": "application/json" }
-    }, 20000);
+    const resp = await safeFetch(apiUrl, {
+      headers: { accept: "application/json", "content-type": "application/json" },
+      signal,
+    }, {
+      requireHttps: true,
+      allowedHosts: ["myworkdayjobs.com"],
+      allowedContentTypes: ["application/json"],
+      maxResponseBytes: JD_MAX_BYTES,
+      timeoutMs: 20_000,
+      maxRedirects: 0,
+    });
     if (!resp.ok) return null;
 
     const data = await resp.json();
@@ -547,7 +675,10 @@ async function fetchWorkdayDescription(job) {
     if (info.location) parts.push(`Location: ${info.location}`);
     if (info.jobDescription) parts.push(`\nDescription:\n${stripHtml(info.jobDescription)}`);
     return parts.length > 1 ? parts.join("\n") : null;
-  } catch (e) { console.error(`[jd] Workday description fetch failed: ${e.message}`); }
+  } catch (e) {
+    throwIfAborted(e, signal);
+    console.error(`[jd] Workday description fetch failed: ${e.message}`);
+  }
 
   return null;
 }
@@ -557,7 +688,7 @@ const ASHBY_SOURCES = ASHBY_KEYS;
 
 // ASHBY_BOARDS — imported from companies.js
 
-async function fetchAshbyDescription(job) {
+async function fetchAshbyDescription(job, signal) {
   if (!job.id) return null;
 
   const board = ASHBY_BOARDS[job.sourceKey];
@@ -576,7 +707,9 @@ async function fetchAshbyDescription(job) {
             title descriptionHtml locationName departmentName
           }
         }`
-      })
+      }),
+      signal,
+      maxResponseBytes: JD_MAX_BYTES,
     }, 20000);
     if (!resp.ok) return null;
 
@@ -591,7 +724,10 @@ async function fetchAshbyDescription(job) {
       posting.descriptionHtml && `\nDescription:\n${stripHtml(posting.descriptionHtml)}`
     ].filter(Boolean);
     return parts.length > 1 ? parts.join("\n") : null;
-  } catch (e) { console.error(`[jd] Ashby description fetch failed: ${e.message}`); }
+  } catch (e) {
+    throwIfAborted(e, signal);
+    console.error(`[jd] Ashby description fetch failed: ${e.message}`);
+  }
 
   return null;
 }
@@ -600,50 +736,51 @@ export async function fetchJobDescription(job, rawJobData, options = {}) {
   // Try company-specific fetcher first
   let description = null;
   const allowPlaywright = options.allowPlaywright !== false;
+  const { signal } = options;
 
   switch (job.sourceKey) {
     case "microsoft":
-      description = await fetchMicrosoftDescription(job);
+      description = await fetchMicrosoftDescription(job, signal);
       break;
     case "amazon":
-      description = await fetchAmazonDescription(job, rawJobData);
+      description = await fetchAmazonDescription(job, rawJobData, signal);
       break;
     case "google":
-      description = await fetchGoogleDescription(job, rawJobData);
+      description = await fetchGoogleDescription(job, rawJobData, signal);
       break;
     case "meta":
-      description = await fetchMetaDescription(job);
+      description = await fetchMetaDescription(job, signal);
       break;
   }
 
   // Greenhouse API fallback
   if (!description && job.sourceKey in GREENHOUSE_BOARDS) {
-    description = await fetchGreenhouseDescription(job);
+    description = await fetchGreenhouseDescription(job, signal);
   }
 
   // Lever API fallback
   if (!description && (job.url?.includes("lever.co") || LEVER_KEYS.includes(job.sourceKey))) {
-    description = await fetchLeverDescription(job);
+    description = await fetchLeverDescription(job, signal);
   }
 
   // Ashby API fallback
   if (!description && ASHBY_SOURCES.includes(job.sourceKey)) {
-    description = await fetchAshbyDescription(job);
+    description = await fetchAshbyDescription(job, signal);
   }
 
   // Workday HTML fallback
   if (!description && WORKDAY_SOURCES.includes(job.sourceKey)) {
-    description = await fetchWorkdayDescription(job);
+    description = await fetchWorkdayDescription(job, signal);
   }
 
   // Oracle (HCM SPA, needs Playwright to render)
   if (!description && allowPlaywright && job.sourceKey === "oracle") {
-    description = await fetchOracleDescription(job);
+    description = await fetchOracleDescription(job, signal);
   }
 
   // Uber (description available from search API, but detail page doesn't exist)
   if (!description && allowPlaywright && job.sourceKey === "uber") {
-    description = await fetchUberDescription(job);
+    description = await fetchUberDescription(job, signal);
   }
 
   // JPMorgan / Ford / EXL / Hexaware (Oracle HCM - same approach). Hexaware
@@ -651,32 +788,32 @@ export async function fetchJobDescription(job, rawJobData, options = {}) {
   // HTTP gets an empty shell; without this route its descriptions were always blank.
   const ORACLE_HCM_SOURCES = new Set(["jpmorgan", "ford", "exl", "hexaware"]);
   if (!description && allowPlaywright && ORACLE_HCM_SOURCES.has(job.sourceKey)) {
-    description = await fetchOracleHCMDescription(job);
+    description = await fetchOracleHCMDescription(job, signal);
   }
 
   // Confluent (Vercel bot protection, needs Playwright)
   if (!description && allowPlaywright && job.sourceKey === "confluent") {
-    description = await fetchConfluentDescription(job);
+    description = await fetchConfluentDescription(job, signal);
   }
 
   // Goldman Sachs (Contentful CMS, needs Playwright to render)
   if (!description && allowPlaywright && job.sourceKey === "goldmansachs") {
-    description = await fetchGoldmanSachsDescription(job);
+    description = await fetchGoldmanSachsDescription(job, signal);
   }
 
   // SmartRecruiters (Visa, ServiceNow, Arista Networks)
   if (!description && SMARTRECRUITERS_KEYS.includes(job.sourceKey)) {
-    description = await fetchSmartRecruitersDescription(job);
+    description = await fetchSmartRecruitersDescription(job, signal);
   }
 
   // Apple SSR hydration data
   if (!description && job.sourceKey === "apple") {
-    description = await fetchAppleDescription(job);
+    description = await fetchAppleDescription(job, signal);
   }
 
   // Universal HTML fallback for any company
   if (!description) {
-    description = await fetchDescriptionFallback(job);
+    description = await fetchDescriptionFallback(job, signal);
   }
 
   return description;
@@ -707,7 +844,17 @@ export async function saveJobData(job, description) {
 }
 
 export async function loadJobData(jobDirIdStr) {
-  const dir = path.join(JOBS_DIR, jobDirIdStr);
+  if (typeof jobDirIdStr !== "string" || !JOB_DIR_ID_PATTERN.test(jobDirIdStr)) {
+    throw new TypeError("Invalid job directory id");
+  }
+  const jobsRoot = path.resolve(JOBS_DIR);
+  const dir = path.resolve(jobsRoot, jobDirIdStr);
+  // The character policy already excludes separators; retain an explicit
+  // containment check so future policy changes cannot silently reintroduce
+  // traversal into an arbitrary directory containing meta.json.
+  if (path.dirname(dir) !== jobsRoot) {
+    throw new TypeError("Invalid job directory id");
+  }
   const meta = JSON.parse(await fs.readFile(path.join(dir, "meta.json"), "utf8"));
   let description = "";
   try {

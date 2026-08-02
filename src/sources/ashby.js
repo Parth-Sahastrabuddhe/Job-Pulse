@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseAshbyJob(raw, companyConfig) {
   const title = raw.title?.trim();
@@ -43,14 +43,14 @@ const ashbyBoardCache = new Map(); // companyKey -> { lastModified, jobs }
 
 export async function collectAshbyJobs(_unused, config, log, companyKey) {
   const companyConfig = config[companyKey];
-  if (!companyConfig) return [];
+  if (!companyConfig) throw asCollectorError(companyKey, new Error("missing company configuration"));
 
   const cached = ashbyBoardCache.get(companyKey);
   try {
     const headers = { accept: "application/json" };
     if (cached?.lastModified) headers["if-modified-since"] = cached.lastModified;
 
-    const response = await fetchWithTimeout(companyConfig.apiUrl, { headers });
+    const response = await fetchWithTimeout(companyConfig.apiUrl, { headers, signal: config.signal });
 
     if (response.status === 304 && cached) {
       return [...cached.jobs];
@@ -58,11 +58,12 @@ export async function collectAshbyJobs(_unused, config, log, companyKey) {
 
     if (!response.ok) {
       log(`${companyConfig.sourceLabel} API returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
-    const rawJobs = data.jobs ?? [];
+    if (!Array.isArray(data?.jobs)) throw new Error("response did not contain a jobs array");
+    const rawJobs = data.jobs;
 
     const jobs = rawJobs.map((raw) => parseAshbyJob(raw, companyConfig)).filter(Boolean);
 
@@ -77,6 +78,6 @@ export async function collectAshbyJobs(_unused, config, log, companyKey) {
     return result;
   } catch (error) {
     log(`${companyConfig.sourceLabel} API error: ${error.message}`);
-    return [];
+    throw asCollectorError(companyKey, error);
   }
 }

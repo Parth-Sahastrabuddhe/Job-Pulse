@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseBloombergJobs(html) {
   const jobs = [];
@@ -69,12 +69,13 @@ export async function collectBloombergJobs(_unused, config, log) {
       headers: {
         "accept": "text/html",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      }
+      },
+      signal: config.signal,
     });
 
     if (!response.ok) {
       log(`Bloomberg returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const html = await response.text();
@@ -86,6 +87,6 @@ export async function collectBloombergJobs(_unused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Bloomberg API error: ${error.message}`);
-    return [];
+    throw asCollectorError("bloomberg", error);
   }
 }

@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function slugifyTitle(title) {
   return title
@@ -49,20 +49,22 @@ function parseGreenhouseJob(raw, companyConfig) {
 
 export async function collectGreenhouseJobs(_unused, config, log, companyKey) {
   const companyConfig = config[companyKey];
-  if (!companyConfig) return [];
+  if (!companyConfig) throw asCollectorError(companyKey, new Error("missing company configuration"));
 
   try {
     const response = await fetchWithTimeout(companyConfig.apiUrl, {
-      headers: { accept: "application/json" }
+      headers: { accept: "application/json" },
+      signal: config.signal,
     });
 
     if (!response.ok) {
       log(`${companyConfig.sourceLabel} API returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
-    const rawJobs = data.jobs ?? [];
+    if (!Array.isArray(data?.jobs)) throw new Error("response did not contain a jobs array");
+    const rawJobs = data.jobs;
 
     const jobs = rawJobs.map((raw) => parseGreenhouseJob(raw, companyConfig)).filter(Boolean);
 
@@ -74,6 +76,6 @@ export async function collectGreenhouseJobs(_unused, config, log, companyKey) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`${companyConfig.sourceLabel} API error: ${error.message}`);
-    return [];
+    throw asCollectorError(companyKey, error);
   }
 }

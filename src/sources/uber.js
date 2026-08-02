@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
-import { dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
-import { launchChromiumWithGuard } from "../playwright-guard.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import { launchChromiumWithGuard, newRestrictedPage } from "../playwright-guard.js";
 
 function parseUberJob(raw) {
   const title = raw.title?.trim();
@@ -43,10 +43,13 @@ export async function collectUberJobs(_unused, config, log) {
   try {
     browser = await launchChromiumWithGuard(
       chromium,
-      { headless: true, args: ["--no-sandbox", "--disable-gpu"] },
+      { headless: true, args: ["--disable-gpu"] },
       config
     );
-    const page = await browser.newPage();
+    const page = await newRestrictedPage(browser, {
+      allowedHosts: ["uber.com", "uber-assets.com"],
+      signal: config.signal,
+    });
 
     let jobsData = null;
     page.on("response", async (response) => {
@@ -63,9 +66,9 @@ export async function collectUberJobs(_unused, config, log) {
     });
     await page.waitForTimeout(3000);
 
-    if (!jobsData?.data?.results) {
+    if (!Array.isArray(jobsData?.data?.results)) {
       log("Uber: no job data captured from API");
-      return [];
+      throw new Error("no job data captured from API");
     }
 
     const rawJobs = jobsData.data.results;
@@ -78,7 +81,8 @@ export async function collectUberJobs(_unused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Uber scraper error: ${error.message}`);
-    return [];
+    if (config.signal?.aborted && config.signal.reason instanceof Error) throw config.signal.reason;
+    throw asCollectorError("uber", error);
   } finally {
     if (browser) await browser.close();
   }

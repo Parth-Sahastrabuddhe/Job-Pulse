@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseFordJob(raw) {
   const title = raw.Title?.trim();
@@ -49,16 +49,19 @@ export async function collectFordJobs(_unused, config, log) {
       headers: {
         "accept": "application/json",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      }
+      },
+      signal: config.signal,
     });
 
     if (!response.ok) {
       log(`Ford Motor API returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
-    const rawJobs = data?.items?.[0]?.requisitionList || [];
+    if (!Array.isArray(data?.items)) throw new Error("response did not contain an items array");
+    const rawJobs = data.items.length === 0 ? [] : data.items[0]?.requisitionList;
+    if (!Array.isArray(rawJobs)) throw new Error("response did not contain requisitions");
 
     const jobs = rawJobs
       .map((raw) => parseFordJob(raw))
@@ -68,6 +71,6 @@ export async function collectFordJobs(_unused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Ford Motor API error: ${error.message}`);
-    return [];
+    throw asCollectorError("ford", error);
   }
 }

@@ -1,5 +1,5 @@
 /**
- * Shared filter for both the personal (micro) bot and the multi-user bot.
+ * Delivery-agnostic per-profile job filter shared by pipeline consumers.
  *
  * Pure, no I/O. Always derives role/seniority classification from `job.title`
  * via detectRoleCategories / detectSeniority — never reads job.roleCategories
@@ -37,7 +37,7 @@ export function filterJobForUser(job, profile, options = {}) {
   }
 
   // 2. Seniority — director check runs before role matching (unconditional block)
-  const level = detectSeniority(job.title || "") || "mid";
+  const level = detectSeniority(job.title || "", job.sourceKey || job.source_key || "") || "mid";
   if (level === "director") {
     return { pass: false, reason: "director_blocked" };
   }

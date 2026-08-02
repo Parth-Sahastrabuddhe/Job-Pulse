@@ -3,7 +3,8 @@ import {
   finalizeJob,
   isTargetRole,
   normalizeUrl,
-  fetchWithTimeout
+  fetchWithTimeout,
+  asCollectorError
 } from "./shared.js";
 
 const AMAZON_BASE_URL = "https://www.amazon.jobs";
@@ -79,16 +80,18 @@ export async function collectAmazonJobs(_browserUnused, config, log) {
 
   try {
     const response = await fetchWithTimeout(apiUrl, {
-      headers: { accept: "application/json", "user-agent": "Mozilla/5.0" }
+      headers: { accept: "application/json", "user-agent": "Mozilla/5.0" },
+      signal: config.signal,
     });
 
     if (!response.ok) {
       log(`Amazon API returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
-    const rawJobs = data.jobs ?? [];
+    if (!Array.isArray(data?.jobs)) throw new Error("response did not contain a jobs array");
+    const rawJobs = data.jobs;
 
     const jobs = rawJobs
       .map((raw) => parseAmazonJob(raw, config))
@@ -98,6 +101,6 @@ export async function collectAmazonJobs(_browserUnused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Amazon API error: ${error.message}`);
-    return [];
+    throw asCollectorError("amazon", error);
   }
 }

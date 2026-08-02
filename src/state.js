@@ -1,7 +1,9 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
-import { addressBookMigrate } from "./address-book.js";
+import { randomUUID } from "node:crypto";
+import { hardenSqliteFilePermissions, preparePrivateDbFile } from "./db-path.js";
+import { finalizeJob } from "./sources/shared.js";
 
 let db = null;
 let _hasSeenJobsCached = false;
@@ -43,17 +45,15 @@ export function withBusyRetry(fn, { retries = 2, baseDelayMs = 200 } = {}) {
 
 // --- In-memory seen_jobs cache ---
 // Eliminates 1-3 SELECTs per job inside the upsertJobs chunk transaction.
-// Cross-process safety: only this process writes the non-`sheet:%` rows that
-// micro-bot collects; sync-sheet writes `sheet:%` keys with disjoint URLs in
-// practice, and mu/web never write seen_jobs. The TTL reload guards against
-// rare overlap (user-entered sheet URL matching a collected job URL).
+// Cross-process safety: the TTL reload makes writes from another collector
+// process visible without turning every job comparison into a database read.
 
 // Tracks only the fields used for dedup + existingJobNeedsUpsert comparison.
 // Excluded by design: fit_score, fit_scores_json, legitimacy_tier,
 // legitimacy_signals_json (written by updateJobFitScore / updateJobLegitimacy,
 // never read from cache — callers query the DB directly).
 const SEEN_JOBS_CACHE_FIELDS =
-  "key, source_key, id, url, posted_at, posted_precision, country_code, " +
+  "key, source_key, source_label, id, title, location, url, posted_text, posted_at, posted_precision, country_code, " +
   "seniority_level, role_categories, archetype, first_seen_at, last_seen_at";
 
 let _seenJobsCache = null;
@@ -77,7 +77,7 @@ function loadSeenJobsCache() {
   for (const row of rows) {
     _seenJobsCache.set(row.key, row);
     if (row.url) _seenJobsUrlIndex.set(row.url, row.key);
-    if (row.source_key && row.id !== null && row.id !== undefined) {
+    if (row.source_key && String(row.id || "").trim()) {
       _seenJobsSourceIdIndex.set(sourceIdCacheKey(row.source_key, String(row.id)), row.key);
     }
   }
@@ -104,6 +104,7 @@ function cacheGetByUrl(url) {
 }
 
 function cacheGetBySourceId(sourceKey, id) {
+  if (!String(sourceKey || "").trim() || !String(id || "").trim()) return undefined;
   return _seenJobsSourceIdIndex
     ? _seenJobsSourceIdIndex.get(sourceIdCacheKey(sourceKey, String(id)))
     : undefined;
@@ -121,8 +122,12 @@ function cacheSetFromValues(values) {
   const row = {
     key: values.key,
     source_key: values.sourceKey,
+    source_label: values.sourceLabel,
     id: String(values.id || ""),
+    title: values.title,
+    location: values.location,
     url: values.url,
+    posted_text: values.postedText,
     posted_at: values.postedAt,
     posted_precision: values.postedPrecision,
     country_code: values.countryCode,
@@ -134,7 +139,9 @@ function cacheSetFromValues(values) {
   };
   _seenJobsCache.set(values.key, row);
   if (values.url) _seenJobsUrlIndex.set(values.url, values.key);
-  _seenJobsSourceIdIndex.set(sourceIdCacheKey(values.sourceKey, String(values.id || "")), values.key);
+  if (values.sourceKey && String(values.id || "").trim()) {
+    _seenJobsSourceIdIndex.set(sourceIdCacheKey(values.sourceKey, String(values.id)), values.key);
+  }
 }
 
 function cacheTouchEntry(key, lastSeenAt) {
@@ -148,7 +155,7 @@ function cacheDelete(key) {
   const entry = _seenJobsCache.get(key);
   if (!entry) return;
   if (entry.url) _seenJobsUrlIndex.delete(entry.url);
-  if (entry.source_key) {
+  if (entry.source_key && String(entry.id || "").trim()) {
     _seenJobsSourceIdIndex.delete(sourceIdCacheKey(entry.source_key, String(entry.id)));
   }
   _seenJobsCache.delete(key);
@@ -166,12 +173,23 @@ export function _invalidateSeenJobsCache() {
 
 export function initDb(dbFile) {
   _invalidateSeenJobsCache();
-  fs.mkdirSync(path.dirname(dbFile), { recursive: true });
+  if (!dbFile || dbFile === ":memory:") {
+    db = new Database(dbFile || ":memory:");
+    db.pragma(`busy_timeout = ${sqliteBusyTimeoutMs()}`);
+    db.pragma("foreign_keys = ON");
+    return initializeSchema();
+  }
+  preparePrivateDbFile(dbFile);
   db = new Database(dbFile);
   db.pragma("journal_mode = WAL");
   db.pragma(`busy_timeout = ${sqliteBusyTimeoutMs()}`);
   db.pragma("wal_autocheckpoint = 500");
   db.pragma("foreign_keys = ON");
+
+  return initializeSchema();
+}
+
+function initializeSchema() {
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS seen_jobs (
@@ -200,7 +218,9 @@ export function initDb(dbFile) {
       message_id TEXT NOT NULL,
       thread_id TEXT,
       channel_id TEXT NOT NULL,
-      status TEXT DEFAULT 'pending'
+      status TEXT DEFAULT 'pending',
+      delivery_claim_token TEXT,
+      delivery_claimed_at TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_job_posts_message_id ON job_posts(message_id);
@@ -208,14 +228,6 @@ export function initDb(dbFile) {
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
       value TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS company_queue (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      company_name TEXT NOT NULL,
-      requested_at TEXT NOT NULL,
-      status TEXT DEFAULT 'pending',
-      notes TEXT DEFAULT ''
     );
   `);
 
@@ -242,6 +254,34 @@ export function initDb(dbFile) {
   if (!seenJobsCols.includes("legitimacy_signals_json")) {
     db.exec("ALTER TABLE seen_jobs ADD COLUMN legitimacy_signals_json TEXT DEFAULT NULL");
   }
+
+  const jobPostCols = db.pragma("table_info(job_posts)").map((c) => c.name);
+  if (!jobPostCols.includes("delivery_claim_token")) {
+    db.exec("ALTER TABLE job_posts ADD COLUMN delivery_claim_token TEXT DEFAULT NULL");
+  }
+  if (!jobPostCols.includes("delivery_claimed_at")) {
+    db.exec("ALTER TABLE job_posts ADD COLUMN delivery_claimed_at TEXT DEFAULT NULL");
+  }
+  // Make any sentinel created by an interrupted pre-release process
+  // reconcilable under the ownership-token contract. The timestamp is the
+  // migration time when the original claim time was unavailable.
+  db.prepare(`
+    UPDATE job_posts
+       SET delivery_claim_token = lower(hex(randomblob(16)))
+     WHERE status = 'delivery_claimed'
+       AND (delivery_claim_token IS NULL OR delivery_claim_token = '')
+  `).run();
+  db.prepare(`
+    UPDATE job_posts
+       SET delivery_claimed_at = ?
+     WHERE status = 'delivery_claimed'
+       AND delivery_claimed_at IS NULL
+  `).run(new Date().toISOString());
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_job_posts_delivery_claims
+      ON job_posts(status, delivery_claimed_at)
+     WHERE status = 'delivery_claimed'
+  `);
 
   // Add password_hash column to user_profiles (idempotent)
   const userCols = db.pragma("table_info(user_profiles)").map((c) => c.name);
@@ -386,6 +426,26 @@ export function initDb(dbFile) {
       FOREIGN KEY (user_id) REFERENCES user_profiles(id)
     );
 
+    CREATE TABLE IF NOT EXISTS delivery_claims (
+      user_id INTEGER NOT NULL,
+      job_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'claimed',
+      claim_token TEXT,
+      claimed_at TEXT NOT NULL,
+      lease_until TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, job_key),
+      FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON DELETE CASCADE
+    );
+
+    -- Durable aliases make the stable-key rollout safe for in-flight workers
+    -- and old Discord buttons that still carry a legacy mutable job key.
+    CREATE TABLE IF NOT EXISTS job_key_aliases (
+      old_key TEXT PRIMARY KEY,
+      canonical_key TEXT NOT NULL,
+      migrated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS error_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       source_key TEXT,
@@ -425,6 +485,9 @@ export function initDb(dbFile) {
     CREATE INDEX IF NOT EXISTS idx_dm_log_user_status_job ON dm_log(user_id, status, job_key);
     CREATE INDEX IF NOT EXISTS idx_dm_log_user_status_sent ON dm_log(user_id, status, sent_at DESC);
     CREATE INDEX IF NOT EXISTS idx_dm_log_user_status_id ON dm_log(user_id, status, id);
+    CREATE INDEX IF NOT EXISTS idx_delivery_claims_status_lease ON delivery_claims(status, lease_until);
+    CREATE INDEX IF NOT EXISTS idx_delivery_claims_user_status_job ON delivery_claims(user_id, status, job_key);
+    CREATE INDEX IF NOT EXISTS idx_job_key_aliases_canonical ON job_key_aliases(canonical_key);
     CREATE INDEX IF NOT EXISTS idx_otp_email ON otp_codes(email);
 
     -- Indexes for the pruneState() scans (range deletes + the seen_jobs orphan
@@ -450,21 +513,22 @@ export function initDb(dbFile) {
     );
   `);
 
+  const deliveryClaimCols = db.pragma("table_info(delivery_claims)").map((c) => c.name);
+  if (!deliveryClaimCols.includes("claim_token")) {
+    db.exec("ALTER TABLE delivery_claims ADD COLUMN claim_token TEXT DEFAULT NULL");
+  }
+  // Old pre-send leases need an owner generation before token-checked workers
+  // can safely recover or complete them. Terminal rows do not need a token.
+  db.prepare(`
+    UPDATE delivery_claims
+       SET claim_token = lower(hex(randomblob(16)))
+     WHERE status IN ('claimed', 'digest_claimed', 'sending', 'digest_sending')
+       AND (claim_token IS NULL OR claim_token = '')
+  `).run();
+
   // Registered feature flags. INSERT OR IGNORE so a flipped flag survives restarts.
   db.prepare("INSERT OR IGNORE INTO feature_flags (key, enabled, updated_at) VALUES (?, 0, ?)")
     .run("mu_fit_check", new Date().toISOString());
-
-  // --- Automation / enrichment migrations (idempotent) ---
-  const cqCols = db.pragma("table_info(company_queue)").map((c) => c.name);
-  if (!cqCols.includes("requested_by")) {
-    db.exec("ALTER TABLE company_queue ADD COLUMN requested_by TEXT DEFAULT ''");
-  }
-  if (!cqCols.includes("attempts")) {
-    db.exec("ALTER TABLE company_queue ADD COLUMN attempts INTEGER DEFAULT 0");
-  }
-  if (!cqCols.includes("claimed_at")) {
-    db.exec("ALTER TABLE company_queue ADD COLUMN claimed_at TEXT DEFAULT NULL");
-  }
 
   // Provenance label for the LCA-derived sponsor stats (e.g. "2025").
   const h1bCols = db.pragma("table_info(h1b_sponsors)").map((c) => c.name);
@@ -472,7 +536,7 @@ export function initDb(dbFile) {
     db.exec("ALTER TABLE h1b_sponsors ADD COLUMN lca_fy TEXT DEFAULT ''");
   }
 
-  addressBookMigrate(db);
+  hardenSqliteFilePermissions(db.name);
 
   return db;
 }
@@ -487,6 +551,39 @@ export function closeDb() {
 
 export function getDb() {
   return db;
+}
+
+/** Resolve a legacy job key to its durable canonical key (chains are bounded). */
+export function resolveJobKey(jobKey) {
+  let current = String(jobKey || "");
+  if (!current || !db) return current;
+  const lookup = db.prepare("SELECT canonical_key FROM job_key_aliases WHERE old_key = ?");
+  const visited = new Set();
+  for (let depth = 0; depth < 32 && !visited.has(current); depth++) {
+    visited.add(current);
+    const row = lookup.get(current);
+    if (!row?.canonical_key || row.canonical_key === current) break;
+    current = row.canonical_key;
+  }
+  return current;
+}
+
+function recordJobKeyAlias(oldKey, newKey) {
+  if (!oldKey || !newKey || oldKey === newKey) return;
+  const canonical = resolveJobKey(newKey);
+  if (!canonical || canonical === oldKey) return;
+  const now = new Date().toISOString();
+  // Flatten existing chains before recording the new edge. This keeps every
+  // runtime lookup to one row after repeated historical migrations.
+  db.prepare("UPDATE job_key_aliases SET canonical_key = ?, migrated_at = ? WHERE canonical_key = ?")
+    .run(canonical, now, oldKey);
+  db.prepare(`
+    INSERT INTO job_key_aliases (old_key, canonical_key, migrated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(old_key) DO UPDATE SET
+      canonical_key = excluded.canonical_key,
+      migrated_at = excluded.migrated_at
+  `).run(oldKey, canonical, now);
 }
 
 export function migrateFromJson(jsonFile) {
@@ -583,9 +680,53 @@ export function getNewJobs(jobs) {
 // instead of seen_jobs, so two processes sharing the DB don't race.
 const _stmtByKeyPost = () => db.prepare("SELECT 1 FROM job_posts WHERE job_key = ?");
 
+// A durable, at-most-once pre-send marker for the personal notification path.
+// If the process dies after the external service accepts a message but before
+// the real message id is stored, leaving this row in place is safer than
+// automatically sending the same job again. Known send failures explicitly
+// release the marker so a later cycle can retry.
+export const PERSONAL_DELIVERY_CLAIM_MESSAGE_ID = "__jobpulse_delivery_claim__";
+
 export function getUnnotifiedJobs(jobs) {
   const byKey = _stmtByKeyPost();
-  return jobs.filter((job) => !byKey.get(job.key));
+  return jobs.filter((job) => !byKey.get(resolveJobKey(job.key)));
+}
+
+export function claimPersonalDelivery(jobKey, channelId = "") {
+  const claimToken = randomUUID();
+  const claimedAt = new Date().toISOString();
+  const inserted = db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    if (!canonicalKey) return 0;
+    return db.prepare(`
+      INSERT OR IGNORE INTO job_posts
+        (job_key, message_id, thread_id, channel_id, status,
+         delivery_claim_token, delivery_claimed_at)
+      VALUES (?, ?, NULL, ?, 'delivery_claimed', ?, ?)
+    `).run(
+      canonicalKey,
+      PERSONAL_DELIVERY_CLAIM_MESSAGE_ID,
+      channelId || "",
+      claimToken,
+      claimedAt,
+    ).changes;
+  }).immediate();
+  return inserted === 1 ? claimToken : null;
+}
+
+export function releasePersonalDeliveryClaim(jobKey, claimToken) {
+  if (!claimToken) return false;
+  return db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    if (!canonicalKey) return false;
+    return db.prepare(`
+      DELETE FROM job_posts
+       WHERE job_key = ?
+         AND message_id = ?
+         AND status = 'delivery_claimed'
+         AND delivery_claim_token = ?
+    `).run(canonicalKey, PERSONAL_DELIVERY_CLAIM_MESSAGE_ID, claimToken).changes === 1;
+  }).immediate();
 }
 
 // Lookup helpers are now in-memory cache reads; only the touch UPDATE remains.
@@ -636,6 +777,11 @@ function jobDbValues(job, seenAt, firstSeenAt = seenAt) {
 function existingJobNeedsUpsert(existing, values) {
   if (!existing) return true;
   return (
+    (values.sourceLabel !== "" && existing.source_label !== values.sourceLabel) ||
+    (values.title !== "" && existing.title !== values.title) ||
+    (values.location !== "" && existing.location !== values.location) ||
+    (values.url !== "" && existing.url !== values.url) ||
+    (values.postedText !== "" && existing.posted_text !== values.postedText) ||
     (values.postedAt !== "" && existing.posted_at !== values.postedAt) ||
     (values.postedPrecision !== "" && existing.posted_precision !== values.postedPrecision) ||
     (values.countryCode !== "" && existing.country_code !== values.countryCode) ||
@@ -654,6 +800,22 @@ function userJobStatusRankSql(expr) {
     WHEN 'saved' THEN 30
     WHEN 'skipped' THEN 20
     WHEN 'notified' THEN 10
+    ELSE 0
+  END`;
+}
+
+function deliveryClaimStatusRankSql(expr) {
+  return `CASE COALESCE(${expr}, '')
+    WHEN 'sent' THEN 100
+    WHEN 'uncertain' THEN 90
+    WHEN 'sending' THEN 80
+    WHEN 'digest_sending' THEN 80
+    WHEN 'dm_closed' THEN 70
+    WHEN 'dead_link' THEN 70
+    WHEN 'queued' THEN 40
+    WHEN 'digest_claimed' THEN 30
+    WHEN 'claimed' THEN 20
+    WHEN 'failed' THEN 10
     ELSE 0
   END`;
 }
@@ -681,12 +843,19 @@ function remapJobReferences(oldKey, newKey) {
 
   const oldPost = db.prepare("SELECT 1 FROM job_posts WHERE job_key = ?").get(oldKey);
   const newPost = db.prepare("SELECT 1 FROM job_posts WHERE job_key = ?").get(newKey);
+  // Never discard an in-flight claim or a confirmed interactive message. A
+  // future cycle can reconcile after the claim is manually resolved; choosing
+  // either row here creates a late-finalize/late-release race for its owner.
   if (oldPost && newPost) return false;
 
   db.prepare(`
     INSERT INTO user_seen_jobs
-      (user_id, job_key, status, notified_at, applied_at, saved_at, save_reminder_sent, updated_at)
-    SELECT user_id, ?, status, notified_at, applied_at, saved_at, save_reminder_sent, updated_at
+      (user_id, job_key, status, notified_at, applied_at, saved_at,
+       save_reminder_sent, fit_score, fit_verdict, fit_scores_json,
+       fit_assessment, fit_checked_at, updated_at)
+    SELECT user_id, ?, status, notified_at, applied_at, saved_at,
+           save_reminder_sent, fit_score, fit_verdict, fit_scores_json,
+           fit_assessment, fit_checked_at, updated_at
     FROM user_seen_jobs
     WHERE job_key = ?
     ON CONFLICT(user_id, job_key) DO UPDATE SET
@@ -702,22 +871,186 @@ function remapJobReferences(oldKey, newKey) {
         WHEN COALESCE(user_seen_jobs.save_reminder_sent, 0) = 1 OR COALESCE(excluded.save_reminder_sent, 0) = 1 THEN 1
         ELSE 0
       END,
+      fit_score = COALESCE(user_seen_jobs.fit_score, excluded.fit_score),
+      fit_verdict = COALESCE(user_seen_jobs.fit_verdict, excluded.fit_verdict),
+      fit_scores_json = COALESCE(user_seen_jobs.fit_scores_json, excluded.fit_scores_json),
+      fit_assessment = COALESCE(user_seen_jobs.fit_assessment, excluded.fit_assessment),
+      fit_checked_at = ${latestIsoSql("user_seen_jobs.fit_checked_at", "excluded.fit_checked_at")},
       updated_at = ${latestIsoSql("user_seen_jobs.updated_at", "excluded.updated_at")}
   `).run(newKey, oldKey);
   db.prepare("DELETE FROM user_seen_jobs WHERE job_key = ?").run(oldKey);
 
   db.prepare("UPDATE dm_log SET job_key = ? WHERE job_key = ?").run(newKey, oldKey);
 
+  const dualActiveUsers = db.prepare(`
+    SELECT old.user_id
+      FROM delivery_claims old
+      JOIN delivery_claims current
+        ON current.user_id = old.user_id AND current.job_key = ?
+     WHERE old.job_key = ?
+       AND old.status IN ('sending', 'digest_sending')
+       AND current.status IN ('sending', 'digest_sending')
+  `).all(newKey, oldKey).map((row) => row.user_id);
+
+  db.prepare(`
+    INSERT INTO delivery_claims
+      (user_id, job_key, status, claim_token, claimed_at, lease_until, updated_at)
+    SELECT user_id, ?, status, claim_token, claimed_at, lease_until, updated_at
+      FROM delivery_claims
+     WHERE job_key = ?
+    ON CONFLICT(user_id, job_key) DO UPDATE SET
+      status = CASE
+        WHEN ${deliveryClaimStatusRankSql("excluded.status")} > ${deliveryClaimStatusRankSql("delivery_claims.status")}
+          THEN excluded.status
+        ELSE delivery_claims.status
+      END,
+      claim_token = CASE
+        WHEN ${deliveryClaimStatusRankSql("excluded.status")} > ${deliveryClaimStatusRankSql("delivery_claims.status")}
+          THEN excluded.claim_token
+        ELSE delivery_claims.claim_token
+      END,
+      claimed_at = CASE
+        WHEN ${deliveryClaimStatusRankSql("excluded.status")} > ${deliveryClaimStatusRankSql("delivery_claims.status")}
+          THEN excluded.claimed_at
+        ELSE delivery_claims.claimed_at
+      END,
+      lease_until = CASE
+        WHEN ${deliveryClaimStatusRankSql("excluded.status")} > ${deliveryClaimStatusRankSql("delivery_claims.status")}
+          THEN excluded.lease_until
+        ELSE delivery_claims.lease_until
+      END,
+      updated_at = CASE
+        WHEN ${deliveryClaimStatusRankSql("excluded.status")} > ${deliveryClaimStatusRankSql("delivery_claims.status")}
+          THEN excluded.updated_at
+        ELSE delivery_claims.updated_at
+      END
+  `).run(newKey, oldKey);
+  db.prepare("DELETE FROM delivery_claims WHERE job_key = ?").run(oldKey);
+  if (dualActiveUsers.length > 0) {
+    const placeholders = dualActiveUsers.map(() => "?").join(",");
+    db.prepare(`
+      UPDATE delivery_claims
+         SET status = 'uncertain', claim_token = NULL, lease_until = NULL, updated_at = ?
+       WHERE job_key = ? AND user_id IN (${placeholders})
+    `).run(new Date().toISOString(), newKey, ...dualActiveUsers);
+  }
+
   db.prepare("UPDATE job_posts SET job_key = ? WHERE job_key = ?").run(newKey, oldKey);
   db.prepare("DELETE FROM job_posts WHERE job_key = ?").run(oldKey);
   return true;
+}
+
+function remapSeenJobToCanonical(oldKey, newKey) {
+  if (!oldKey || !newKey || oldKey === newKey) return true;
+  if (!remapJobReferences(oldKey, newKey)) return false;
+  recordJobKeyAlias(oldKey, newKey);
+
+  const canonicalExists = db.prepare("SELECT 1 FROM seen_jobs WHERE key = ?").get(newKey);
+  if (!canonicalExists) {
+    db.prepare("UPDATE seen_jobs SET key = ? WHERE key = ?").run(newKey, oldKey);
+    return true;
+  }
+
+  // Preserve expensive enrichment produced before the stable canonical key was
+  // introduced. Incoming scraper metadata must not erase fit or legitimacy data.
+  db.prepare(`
+    UPDATE seen_jobs
+       SET fit_score = COALESCE(fit_score, (SELECT fit_score FROM seen_jobs WHERE key = ?)),
+           fit_scores_json = COALESCE(fit_scores_json, (SELECT fit_scores_json FROM seen_jobs WHERE key = ?)),
+           legitimacy_tier = COALESCE(legitimacy_tier, (SELECT legitimacy_tier FROM seen_jobs WHERE key = ?)),
+           legitimacy_signals_json = COALESCE(legitimacy_signals_json, (SELECT legitimacy_signals_json FROM seen_jobs WHERE key = ?)),
+           first_seen_at = MIN(first_seen_at, (SELECT first_seen_at FROM seen_jobs WHERE key = ?)),
+           last_seen_at = MAX(last_seen_at, (SELECT last_seen_at FROM seen_jobs WHERE key = ?))
+     WHERE key = ?
+  `).run(oldKey, oldKey, oldKey, oldKey, oldKey, oldKey, newKey);
+  db.prepare("DELETE FROM seen_jobs WHERE key = ?").run(oldKey);
+  return true;
+}
+
+/**
+ * One-time maintenance for databases created before stable source/ID keys.
+ *
+ * This deliberately uses the same reference merge, conflict policy, and alias
+ * recording as live collector upserts. URL-only rows are left untouched: a
+ * shared URL is weaker than two distinct non-empty ATS identities and is not a
+ * safe basis for an offline destructive merge.
+ */
+export function canonicalizeStoredStableJobKeys() {
+  const groups = db.prepare(`
+    SELECT source_key, id
+      FROM seen_jobs
+     WHERE TRIM(source_key) != '' AND TRIM(id) != ''
+     GROUP BY source_key, id
+     ORDER BY source_key, id
+  `).all();
+  const stats = {
+    groups: groups.length,
+    alreadyCanonical: 0,
+    remapped: 0,
+    skipped: 0,
+  };
+
+  for (const group of groups) {
+    const result = withBusyRetry(() => db.transaction(() => {
+      const rows = db.prepare(`
+        SELECT * FROM seen_jobs
+         WHERE source_key = ? AND id = ?
+         ORDER BY last_seen_at DESC, first_seen_at ASC, key ASC
+      `).all(group.source_key, group.id);
+      if (rows.length === 0) return { remapped: 0, skipped: 0, alreadyCanonical: 0 };
+
+      const representative = rows[0];
+      const canonicalKey = finalizeJob({
+        sourceKey: group.source_key,
+        sourceLabel: representative.source_label,
+        id: group.id,
+        title: representative.title,
+        location: representative.location,
+        url: representative.url,
+      }).key;
+      const canonicalRow = rows.find((row) => row.key === canonicalKey);
+      const ordered = canonicalRow
+        ? [canonicalRow, ...rows.filter((row) => row !== canonicalRow)]
+        : rows;
+      let remapped = 0;
+      let skipped = 0;
+
+      for (const row of ordered) {
+        if (row.key === canonicalKey) continue;
+        if (remapSeenJobToCanonical(row.key, canonicalKey)) {
+          remapped++;
+        } else {
+          skipped++;
+        }
+      }
+      return {
+        remapped,
+        skipped,
+        alreadyCanonical: remapped === 0 && skipped === 0 &&
+          rows.length === 1 && rows[0].key === canonicalKey ? 1 : 0,
+      };
+    }).immediate());
+    stats.remapped += result.remapped;
+    stats.skipped += result.skipped;
+    stats.alreadyCanonical += result.alreadyCanonical;
+  }
+
+  _invalidateSeenJobsCache();
+  stats.remainingDuplicateSourceIds = db.prepare(`
+    SELECT COUNT(*) AS count FROM (
+      SELECT 1 FROM seen_jobs
+       WHERE TRIM(source_key) != '' AND TRIM(id) != ''
+       GROUP BY source_key, id
+      HAVING COUNT(*) > 1
+    )
+  `).get().count;
+  return stats;
 }
 
 export function upsertJobs(jobs, seenAt) {
   _hasSeenJobsCached = true;
   ensureSeenJobsCache();
   const touchLastSeen = _stmtTouchLastSeen();
-  const deleteStmt = db.prepare("DELETE FROM seen_jobs WHERE key = ?");
   const touchIntervalMs = seenJobTouchIntervalMs();
 
   const upsert = db.prepare(`
@@ -733,6 +1066,11 @@ export function upsertJobs(jobs, seenAt) {
        @firstSeenAt, @lastSeenAt)
     ON CONFLICT(key) DO UPDATE SET
       last_seen_at = @lastSeenAt,
+      source_label = CASE WHEN excluded.source_label != '' THEN excluded.source_label ELSE seen_jobs.source_label END,
+      title = CASE WHEN excluded.title != '' THEN excluded.title ELSE seen_jobs.title END,
+      location = CASE WHEN excluded.location != '' THEN excluded.location ELSE seen_jobs.location END,
+      url = CASE WHEN excluded.url != '' THEN excluded.url ELSE seen_jobs.url END,
+      posted_text = CASE WHEN excluded.posted_text != '' THEN excluded.posted_text ELSE seen_jobs.posted_text END,
       posted_at = CASE WHEN excluded.posted_at != '' THEN excluded.posted_at ELSE seen_jobs.posted_at END,
       posted_precision = CASE WHEN excluded.posted_precision != '' THEN excluded.posted_precision ELSE seen_jobs.posted_precision END,
       country_code = CASE WHEN excluded.country_code != '' THEN excluded.country_code ELSE seen_jobs.country_code END,
@@ -756,31 +1094,48 @@ export function upsertJobs(jobs, seenAt) {
   }
 
   const processChunk = db.transaction((chunk) => {
-    for (const job of chunk) {
-      if (job.url) {
-        const urlAltKey = cacheGetByUrl(job.url);
-        if (urlAltKey && urlAltKey !== job.key) {
-          const urlAltEntry = cacheGet(urlAltKey);
-          if (urlAltEntry) {
-            touchIfDue(urlAltKey, urlAltEntry.last_seen_at);
-            continue;
-          }
-        }
+    for (const incomingJob of chunk) {
+      // A worker can hold a job object created before another process remaps a
+      // legacy mutable key. Never let that stale object reverse the durable
+      // old -> canonical alias or recreate split seen/delivery rows.
+      const canonicalIncomingKey = resolveJobKey(incomingJob.key);
+      const job = canonicalIncomingKey !== incomingJob.key
+        ? { ...incomingJob, key: canonicalIncomingKey }
+        : incomingJob;
+      let existingFirstSeen = null;
+      let legacyAltKeys = [];
+      const sourceKey = String(job.sourceKey || "").trim();
+      const sourceId = String(job.id || "").trim();
+      if (sourceKey && sourceId) {
+        // The cache index intentionally stores one key per source/id, but a
+        // legacy database can contain several mutable hashes for that same ATS
+        // posting. Always reconcile the complete DB set; otherwise whichever
+        // row happened to populate the cache index last could hide the rest.
+        legacyAltKeys = db.prepare(`
+          SELECT key FROM seen_jobs
+           WHERE source_key = ? AND id = ? AND key != ?
+           ORDER BY first_seen_at ASC
+        `).all(sourceKey, sourceId, job.key).map((row) => row.key);
+      } else if (job.url) {
+        legacyAltKeys = db.prepare(`
+          SELECT key FROM seen_jobs WHERE url = ? AND key != ?
+          ORDER BY first_seen_at ASC
+        `).all(job.url, job.key).map((row) => row.key);
       }
 
-      let existingFirstSeen = null;
-
-      const sourceIdAltKey = cacheGetBySourceId(job.sourceKey, String(job.id));
-      if (sourceIdAltKey && sourceIdAltKey !== job.key) {
-        const altEntry = cacheGet(sourceIdAltKey);
+      for (const legacyAltKey of legacyAltKeys) {
+        const altEntry = cacheGet(legacyAltKey) || db.prepare(
+          `SELECT ${SEEN_JOBS_CACHE_FIELDS} FROM seen_jobs WHERE key = ?`
+        ).get(legacyAltKey);
         if (altEntry) {
-          existingFirstSeen = altEntry.first_seen_at;
-          if (!remapJobReferences(sourceIdAltKey, job.key)) {
-            touchIfDue(sourceIdAltKey, altEntry.last_seen_at);
+          if (!existingFirstSeen || altEntry.first_seen_at < existingFirstSeen) {
+            existingFirstSeen = altEntry.first_seen_at;
+          }
+          if (!remapSeenJobToCanonical(legacyAltKey, job.key)) {
+            touchIfDue(legacyAltKey, altEntry.last_seen_at);
             continue;
           }
-          deleteStmt.run(sourceIdAltKey);
-          cacheDelete(sourceIdAltKey);
+          cacheDelete(legacyAltKey);
           stats.remapped++;
         }
       }
@@ -802,7 +1157,7 @@ export function upsertJobs(jobs, seenAt) {
 
   for (let i = 0; i < jobs.length; i += chunkSize) {
     const slice = jobs.slice(i, i + chunkSize);
-    withBusyRetry(() => processChunk(slice));
+    withBusyRetry(() => processChunk.immediate(slice));
     if (i + chunkSize < jobs.length) sleepSync(chunkDelayMs);
   }
 
@@ -815,7 +1170,9 @@ export function upsertJobs(jobs, seenAt) {
 export function pruneState(retentionDays) {
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
 
-  db.prepare("DELETE FROM dm_log WHERE sent_at < ?").run(cutoff);
+  // Queued rows are undelivered work, not historical logs. Retaining them (and
+  // their source job) is required for daily/digest and quiet-hours delivery.
+  db.prepare("DELETE FROM dm_log WHERE sent_at < ? AND status != 'queued'").run(cutoff);
   db.prepare(`
     DELETE FROM user_seen_jobs
     WHERE notified_at < ?
@@ -833,7 +1190,24 @@ export function pruneState(retentionDays) {
       AND NOT EXISTS (SELECT 1 FROM user_seen_jobs usj WHERE usj.job_key = seen_jobs.key)
       AND NOT EXISTS (SELECT 1 FROM job_posts jp WHERE jp.job_key = seen_jobs.key)
       AND NOT EXISTS (SELECT 1 FROM dm_log dl WHERE dl.job_key = seen_jobs.key)
+      AND NOT EXISTS (
+        SELECT 1 FROM delivery_claims dc
+         WHERE dc.job_key = seen_jobs.key
+           AND dc.status IN ('queued', 'claimed', 'sending', 'digest_claimed', 'digest_sending', 'uncertain')
+      )
   `).run(cutoff).changes;
+
+  // Claims are a concurrency/durability mechanism, not an eternal audit log.
+  // Preserve queued and active leases; retire old terminal/failed claims, plus
+  // terminal orphans whose source job has already been removed.
+  db.prepare(`
+    DELETE FROM delivery_claims
+     WHERE status IN ('sent', 'dead_link', 'dm_closed', 'failed')
+       AND (
+         updated_at < ?
+         OR NOT EXISTS (SELECT 1 FROM seen_jobs sj WHERE sj.key = delivery_claims.job_key)
+       )
+  `).run(cutoff);
   // Clear cache only when pruneState actually deleted seen_jobs rows.
   if (seenJobsDeleted > 0) _invalidateSeenJobsCache();
 
@@ -856,11 +1230,39 @@ export function pruneState(retentionDays) {
 }
 
 // job_posts CRUD
-export function upsertJobPost(jobKey, messageId, threadId, channelId) {
-  db.prepare(`
-    INSERT OR REPLACE INTO job_posts (job_key, message_id, thread_id, channel_id, status)
-    VALUES (?, ?, ?, ?, 'pending')
-  `).run(jobKey, messageId, threadId, channelId);
+export function upsertJobPost(jobKey, messageId, threadId, channelId, claimToken = null) {
+  return db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    if (!canonicalKey) return false;
+    if (claimToken) {
+      const finalized = db.prepare(`
+        UPDATE job_posts
+           SET message_id = ?, thread_id = ?, channel_id = ?, status = 'pending',
+               delivery_claim_token = NULL, delivery_claimed_at = NULL
+         WHERE job_key = ?
+           AND message_id = ?
+           AND status = 'delivery_claimed'
+           AND delivery_claim_token = ?
+      `).run(
+        messageId,
+        threadId,
+        channelId,
+        canonicalKey,
+        PERSONAL_DELIVERY_CLAIM_MESSAGE_ID,
+        claimToken,
+      ).changes;
+      return finalized === 1;
+    }
+
+    // Compatibility for manual/direct callers: insert a new confirmed row but
+    // never overwrite an existing message or another worker's claim.
+    return db.prepare(`
+      INSERT OR IGNORE INTO job_posts
+        (job_key, message_id, thread_id, channel_id, status,
+         delivery_claim_token, delivery_claimed_at)
+      VALUES (?, ?, ?, ?, 'pending', NULL, NULL)
+    `).run(canonicalKey, messageId, threadId, channelId).changes === 1;
+  }).immediate();
 }
 
 // Ledger-only record for jobs delivered via a non-bot path (webhook fallback).
@@ -869,19 +1271,70 @@ export function upsertJobPost(jobKey, messageId, threadId, channelId) {
 // every cycle. Empty-string sentinels satisfy the constraints without risking a
 // false message-id match (real Discord snowflakes are never ''), and OR IGNORE
 // guarantees an existing bot-posted row is never clobbered.
-export function recordExternalDelivery(jobKey, channelId) {
-  db.prepare(`
-    INSERT OR IGNORE INTO job_posts (job_key, message_id, thread_id, channel_id, status)
-    VALUES (?, '', NULL, ?, 'pending')
-  `).run(jobKey, channelId || "");
+export function recordExternalDelivery(jobKey, channelId, claimToken = null) {
+  const destination = channelId || "";
+  return db.transaction(() => {
+    const canonicalKey = resolveJobKey(jobKey);
+    if (!canonicalKey) return false;
+    if (claimToken) {
+      return db.prepare(`
+        UPDATE job_posts
+           SET message_id = '', thread_id = NULL, channel_id = ?, status = 'pending',
+               delivery_claim_token = NULL, delivery_claimed_at = NULL
+         WHERE job_key = ?
+           AND message_id = ?
+           AND status = 'delivery_claimed'
+           AND delivery_claim_token = ?
+      `).run(
+        destination,
+        canonicalKey,
+        PERSONAL_DELIVERY_CLAIM_MESSAGE_ID,
+        claimToken,
+      ).changes === 1;
+    }
+
+    return db.prepare(`
+      INSERT OR IGNORE INTO job_posts
+        (job_key, message_id, thread_id, channel_id, status,
+         delivery_claim_token, delivery_claimed_at)
+      VALUES (?, '', NULL, ?, 'pending', NULL, NULL)
+    `).run(canonicalKey, destination).changes === 1;
+  }).immediate();
 }
 
 export function getJobPost(jobKey) {
-  return db.prepare("SELECT * FROM job_posts WHERE job_key = ?").get(jobKey);
+  return db.prepare("SELECT * FROM job_posts WHERE job_key = ?").get(resolveJobKey(jobKey));
 }
 
 export function updateJobPostStatus(jobKey, status) {
-  db.prepare("UPDATE job_posts SET status = ? WHERE job_key = ?").run(status, jobKey);
+  db.prepare("UPDATE job_posts SET status = ? WHERE job_key = ?").run(status, resolveJobKey(jobKey));
+}
+
+/** Owner-only view of personal deliveries whose remote result is unresolved. */
+export function listPersonalDeliveryClaims({ olderThanMinutes = null } = {}) {
+  const parsedMinutes = Number(olderThanMinutes);
+  const hasCutoff = Number.isFinite(parsedMinutes) && parsedMinutes >= 0;
+  const cutoff = hasCutoff
+    ? new Date(Date.now() - parsedMinutes * 60 * 1000).toISOString()
+    : null;
+  const whereCutoff = hasCutoff ? "AND jp.delivery_claimed_at <= ?" : "";
+  const rows = db.prepare(`
+    SELECT jp.job_key AS jobKey,
+           jp.channel_id AS channelId,
+           jp.delivery_claim_token AS claimToken,
+           jp.delivery_claimed_at AS claimedAt,
+           sj.source_label AS sourceLabel,
+           sj.title AS title
+      FROM job_posts jp
+      LEFT JOIN seen_jobs sj ON sj.key = jp.job_key
+     WHERE jp.status = 'delivery_claimed'
+       AND jp.message_id = ?
+       ${whereCutoff}
+     ORDER BY jp.delivery_claimed_at ASC, jp.job_key ASC
+  `).all(...(hasCutoff
+    ? [PERSONAL_DELIVERY_CLAIM_MESSAGE_ID, cutoff]
+    : [PERSONAL_DELIVERY_CLAIM_MESSAGE_ID]));
+  return rows;
 }
 
 export function expireSavedJobPosts() {
@@ -889,84 +1342,6 @@ export function expireSavedJobPosts() {
   return db.prepare(
     "UPDATE job_posts SET status = 'skipped' WHERE status = 'saved' AND job_key IN (SELECT key FROM seen_jobs WHERE last_seen_at <= ?)"
   ).run(cutoff).changes;
-}
-
-// Bridge personal bot actions → web dashboard (user_seen_jobs) for admin user
-const ADMIN_DISCORD_ID = process.env.ADMIN_DISCORD_ID;
-
-export function bridgeToTracker(jobKey, status) {
-  try {
-    const user = db.prepare("SELECT id FROM user_profiles WHERE discord_id = ?").get(ADMIN_DISCORD_ID);
-    if (!user) return;
-    const now = new Date().toISOString();
-    const appliedAt = status === "applied" ? now : null;
-    const savedAt = status === "saved" ? now : null;
-    db.prepare(`
-      INSERT INTO user_seen_jobs (user_id, job_key, status, notified_at, applied_at, saved_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(user_id, job_key) DO UPDATE SET status = excluded.status,
-        applied_at = COALESCE(user_seen_jobs.applied_at, excluded.applied_at),
-        saved_at = CASE WHEN excluded.status = 'saved' THEN excluded.saved_at ELSE user_seen_jobs.saved_at END,
-        save_reminder_sent = CASE WHEN excluded.status = 'saved' THEN 0 ELSE user_seen_jobs.save_reminder_sent END,
-        updated_at = excluded.updated_at
-    `).run(user.id, jobKey, status, now, appliedAt, savedAt, now);
-  } catch {}
-}
-
-// company_queue CRUD
-// Lifecycle: pending → in_progress → added | failed | duplicate | needs_human.
-// The add-company automation claims items via claimNextPendingCompany (atomic:
-// the UPDATE is guarded on status='pending' so two runners can't claim one row).
-export function addToCompanyQueue(companyName, requestedBy = "") {
-  db.prepare(`
-    INSERT INTO company_queue (company_name, requested_at, requested_by)
-    VALUES (?, ?, ?)
-  `).run(companyName, new Date().toISOString(), String(requestedBy || ""));
-}
-
-export function getPendingCompanies() {
-  return db.prepare("SELECT * FROM company_queue WHERE status = 'pending' ORDER BY requested_at").all();
-}
-
-export function listCompanyQueue(status = null, limit = 50) {
-  return status
-    ? db.prepare("SELECT * FROM company_queue WHERE status = ? ORDER BY id DESC LIMIT ?").all(status, limit)
-    : db.prepare("SELECT * FROM company_queue ORDER BY id DESC LIMIT ?").all(limit);
-}
-
-export function claimNextPendingCompany() {
-  const now = new Date().toISOString();
-  const row = db.prepare(
-    "SELECT * FROM company_queue WHERE status = 'pending' ORDER BY requested_at LIMIT 1"
-  ).get();
-  if (!row) return null;
-  const res = db.prepare(
-    "UPDATE company_queue SET status = 'in_progress', attempts = attempts + 1, claimed_at = ? WHERE id = ? AND status = 'pending'"
-  ).run(now, row.id);
-  if (res.changes !== 1) return null;
-  return { ...row, status: "in_progress", attempts: (row.attempts ?? 0) + 1, claimed_at: now };
-}
-
-export function completeCompanyQueueItem(id, status, notes = "") {
-  return db.prepare("UPDATE company_queue SET status = ?, notes = ? WHERE id = ?")
-    .run(status, String(notes || "").slice(0, 500), id).changes;
-}
-
-// Recover items whose runner died mid-flight: requeue until the attempts cap,
-// then park them as failed so they stop being retried forever.
-export function requeueStaleInProgress(maxAgeMinutes = 120, maxAttempts = 2) {
-  const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
-  const failed = db.prepare(
-    "UPDATE company_queue SET status = 'failed', notes = 'runner stalled; attempts exhausted' WHERE status = 'in_progress' AND claimed_at IS NOT NULL AND claimed_at < ? AND attempts >= ?"
-  ).run(cutoff, maxAttempts).changes;
-  const requeued = db.prepare(
-    "UPDATE company_queue SET status = 'pending' WHERE status = 'in_progress' AND claimed_at IS NOT NULL AND claimed_at < ? AND attempts < ?"
-  ).run(cutoff, maxAttempts).changes;
-  return { requeued, failed };
-}
-
-export function updateCompanyQueueStatus(id, status, notes) {
-  db.prepare("UPDATE company_queue SET status = ?, notes = ? WHERE id = ?").run(status, notes || "", id);
 }
 
 // Cleanup expired OTP codes
@@ -998,7 +1373,7 @@ export function getFunnelStats(periodDays = null) {
   let notified = 0;
   for (const row of statusRows) {
     byStatus[row.status] = row.cnt;
-    notified += row.cnt;
+    if (row.status !== "delivery_claimed") notified += row.cnt;
   }
 
   return {
@@ -1009,17 +1384,19 @@ export function getFunnelStats(periodDays = null) {
     saved: byStatus.saved || 0,
     applied: byStatus.applied || 0,
     skipped: byStatus.skipped || 0,
+    uncertain: byStatus.delivery_claimed || 0,
   };
 }
 
 // --- Fit score CRUD ---
 export function updateJobFitScore(jobKey, score, scoresJson) {
   db.prepare("UPDATE seen_jobs SET fit_score = ?, fit_scores_json = ? WHERE key = ?")
-    .run(score, scoresJson, jobKey);
+    .run(score, scoresJson, resolveJobKey(jobKey));
 }
 
 export function getJobFitScore(jobKey) {
-  return db.prepare("SELECT fit_score, fit_scores_json FROM seen_jobs WHERE key = ?").get(jobKey);
+  return db.prepare("SELECT fit_score, fit_scores_json FROM seen_jobs WHERE key = ?")
+    .get(resolveJobKey(jobKey));
 }
 
 // --- Legitimacy CRUD ---
@@ -1036,7 +1413,7 @@ export function getRepostCount(sourceLabel, titleCore, excludeKey, lookbackDays 
         AND first_seen_at >= ?
         AND first_seen_at < ?
         AND key != ?
-    `).get(sourceLabel, titleCore, cutoff, batchCutoff, excludeKey);
+    `).get(sourceLabel, titleCore, cutoff, batchCutoff, resolveJobKey(excludeKey));
     return row?.cnt ?? 0;
   } catch (err) {
     console.warn(`[legitimacy] getRepostCount failed: ${err.message}`);
@@ -1047,7 +1424,7 @@ export function getRepostCount(sourceLabel, titleCore, excludeKey, lookbackDays 
 export function updateJobLegitimacy(jobKey, tier, signalsJson) {
   try {
     db.prepare("UPDATE seen_jobs SET legitimacy_tier = ?, legitimacy_signals_json = ? WHERE key = ?")
-      .run(tier, signalsJson, jobKey);
+      .run(tier, signalsJson, resolveJobKey(jobKey));
   } catch (err) {
     console.warn(`[legitimacy] updateJobLegitimacy failed: ${err.message}`);
   }

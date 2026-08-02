@@ -11,7 +11,6 @@
  *   sendDigestDm(client, discordId, jobs, firstName, { timezone? })  → { ok, deliveredKeys }
  */
 
-import crypto from "node:crypto";
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -19,6 +18,9 @@ import {
   EmbedBuilder,
 } from "discord.js";
 import { formatLevelLine } from "./role-taxonomy.js";
+import { jobButtonHash } from "./job-key-hash.js";
+
+export { jobButtonHash } from "./job-key-hash.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -30,10 +32,6 @@ import { formatLevelLine } from "./role-taxonomy.js";
  * @param {string} jobKey
  * @returns {string}
  */
-export function jobButtonHash(jobKey) {
-  return crypto.createHash("sha1").update(jobKey).digest("hex").slice(0, 16);
-}
-
 function isValidJobUrl(url) {
   return typeof url === "string" && /^https?:\/\/.+/.test(url);
 }
@@ -182,6 +180,64 @@ export function buildJobEmbed(job, { timezone, experienceYears, warnings = [], h
 // DM senders
 // ─────────────────────────────────────────────────────────────────────────────
 
+const PERMANENT_DISCORD_CODES = new Set([50007, 10013]);
+
+function numericDiscordValue(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Classify an error raised by the external Discord send itself. A response in
+ * the 4xx range is an explicit rejection and therefore safe to retry (except
+ * permanent recipient errors). A 5xx or an error without an HTTP response can
+ * happen after Discord accepted the message, so its outcome is uncertain.
+ */
+export function classifyDiscordSendError(error) {
+  const code = numericDiscordValue(error?.code ?? error?.rawError?.code ?? error?.data?.code);
+  if (PERMANENT_DISCORD_CODES.has(code)) return "dm_closed";
+
+  const status = numericDiscordValue(
+    error?.status ?? error?.statusCode ?? error?.httpStatus ?? error?.response?.status
+  );
+  if (status !== null && status >= 400 && status < 500) return "known_failure";
+  return "uncertain";
+}
+
+function deliveryFailure(error, { sendStarted = false } = {}) {
+  const code = numericDiscordValue(error?.code ?? error?.rawError?.code ?? error?.data?.code);
+  const outcome = PERMANENT_DISCORD_CODES.has(code)
+    ? "dm_closed"
+    : sendStarted
+      ? classifyDiscordSendError(error)
+      : "known_failure";
+  return {
+    ok: false,
+    outcome,
+    permanent: outcome === "dm_closed",
+    uncertain: outcome === "uncertain",
+    sendStarted,
+    error,
+  };
+}
+
+async function resolveDeliveryTarget(client, discordId, notificationChannelId) {
+  const target = notificationChannelId
+    ? await client.channels.fetch(notificationChannelId)
+    : await client.users.fetch(discordId);
+  if (!target || typeof target.send !== "function") {
+    throw new Error("Discord delivery target is unavailable");
+  }
+  return target;
+}
+
+async function beginExternalSend(options, jobKeys) {
+  if (!options.onBeforeSend) return true;
+  const began = await options.onBeforeSend(jobKeys);
+  if (began === false) throw new Error("Durable delivery state could not enter sending");
+  return true;
+}
+
 /**
  * Fetch a Discord user and send a single job DM with embed + buttons.
  *
@@ -193,13 +249,19 @@ export function buildJobEmbed(job, { timezone, experienceYears, warnings = [], h
  * @param {string}  [options.timezone]        IANA timezone for date formatting
  * @param {number}  [options.experienceYears] max experience years from JD
  * @param {boolean} [options.fitCheckEnabled] render the Fit Check button (mu_fit_check flag)
- * @returns {Promise<{ ok: true, messageId: string }|{ ok: false, permanent: boolean }>}
- *          permanent=true means retrying cannot help (DMs closed / blocked /
- *          unknown user); permanent=false is a transient failure worth retrying.
+ * @param {(jobKeys: string[]) => boolean|Promise<boolean>} [options.onBeforeSend]
+ *        Durable claimed->sending transition, invoked after target lookup and
+ *        immediately before the external send.
+ * @returns {Promise<{ ok: true, messageId: string, outcome: "sent" }|{
+ *   ok: false, outcome: "known_failure"|"dm_closed"|"uncertain",
+ *   permanent: boolean, uncertain: boolean, sendStarted: boolean, error: unknown
+ * }>}
  */
 export async function sendJobDm(client, discordId, job, firstName, options = {}) {
+  let jobKey;
+  let payload;
   try {
-    const jobKey = job.key ?? job.jobKey ?? "";
+    jobKey = job.key ?? job.jobKey ?? "";
     const jobUrl = job.url ?? "";
     const hash   = jobButtonHash(jobKey);
 
@@ -208,28 +270,40 @@ export async function sendJobDm(client, discordId, job, firstName, options = {})
 
     const company = job.source_label ?? job.sourceLabel ?? "";
     const title   = job.title ?? "";
-    const payload = {
+    payload = {
       content: company ? `${company} — ${title}` : undefined,
       embeds: [embed],
       components: buttons,
+      allowedMentions: { parse: [] },
     };
-
-    let message;
-    if (options.notificationChannelId) {
-      const channel = await client.channels.fetch(options.notificationChannelId);
-      message = await channel.send(payload);
-    } else {
-      const user = await client.users.fetch(discordId);
-      message = await user.send(payload);
-    }
-
-    return { ok: true, messageId: message.id };
   } catch (err) {
-    // 50007 = Cannot send messages to this user (DMs closed / bot blocked),
-    // 10013 = Unknown user. Both are permanent for this recipient.
-    const permanent = err?.code === 50007 || err?.code === 10013;
-    console.error(`[mu-delivery] Failed to send notification for ${discordId}${permanent ? " (permanent: DMs closed/blocked)" : ""}: ${err.message}`);
-    return { ok: false, permanent };
+    console.error(`[mu-delivery] Failed to prepare notification for ${discordId}: ${err.message}`);
+    return deliveryFailure(err);
+  }
+
+  let target;
+  try {
+    target = await resolveDeliveryTarget(client, discordId, options.notificationChannelId);
+  } catch (err) {
+    const result = deliveryFailure(err);
+    console.error(`[mu-delivery] Failed to resolve notification target for ${discordId}${result.permanent ? " (permanent: DMs closed/blocked)" : ""}: ${err.message}`);
+    return result;
+  }
+
+  try {
+    await beginExternalSend(options, [jobKey]);
+  } catch (err) {
+    console.error(`[mu-delivery] Failed to persist pre-send state for ${discordId}: ${err.message}`);
+    return deliveryFailure(err);
+  }
+
+  try {
+    const message = await target.send(payload);
+    return { ok: true, messageId: message.id, outcome: "sent" };
+  } catch (err) {
+    const result = deliveryFailure(err, { sendStarted: true });
+    console.error(`[mu-delivery] Failed to send notification for ${discordId}${result.permanent ? " (permanent: DMs closed/blocked)" : result.uncertain ? " (outcome uncertain)" : ""}: ${err.message}`);
+    return result;
   }
 }
 
@@ -246,22 +320,20 @@ export async function sendJobDm(client, discordId, job, firstName, options = {})
  * @param {object}   [options]
  * @param {string}   [options.timezone]  IANA timezone for date formatting
  * @param {boolean}  [options.fitCheckEnabled] render the Fit Check button (mu_fit_check flag)
- * @returns {Promise<{ ok: boolean, deliveredKeys: string[] }>}
- *          ok=false if the digest could not be sent (target unresolved or the
- *          summary embed failed); deliveredKeys lists the job keys included in the
- *          summary, so the caller marks only those sent and rolls the rest over.
+ * @param {(jobKeys: string[]) => boolean|Promise<boolean>} [options.onBeforeSend]
+ *        Atomically transitions every selected digest claim to digest_sending.
+ * @returns {Promise<{ ok: boolean, deliveredKeys: string[], outcome: string,
+ *   permanent?: boolean, uncertain?: boolean, sendStarted?: boolean,
+ *   attemptedKeys?: string[], error?: unknown }>}
  */
 export async function sendDigestDm(client, discordId, jobs, firstName, options = {}) {
   let target;
   try {
-    if (options.notificationChannelId) {
-      target = await client.channels.fetch(options.notificationChannelId);
-    } else {
-      target = await client.users.fetch(discordId);
-    }
+    target = await resolveDeliveryTarget(client, discordId, options.notificationChannelId);
   } catch (err) {
+    const result = deliveryFailure(err);
     console.error(`[mu-delivery] Failed to resolve digest target for ${discordId}: ${err.message}`);
-    return { ok: false, deliveredKeys: [] };
+    return { ...result, deliveredKeys: [], attemptedKeys: [] };
   }
 
   // The summary lists up to 20 jobs (with links); the first 10 also get their own
@@ -279,28 +351,35 @@ export async function sendDigestDm(client, discordId, jobs, firstName, options =
   });
 
   const overflow = jobs.length - displayJobs.length;
-  const summaryEmbed = new EmbedBuilder()
-    .setTitle(`Hey ${firstName}, here are your job matches (${jobs.length} new)`)
-    .setDescription(
-      (summaryLines.join("\n") || "No jobs to show.") +
-      (overflow > 0 ? `\n\n…and ${overflow} more in your next digest.` : "")
-    )
-    .setColor(0x5865F2);
+  let summaryEmbed;
+  try {
+    summaryEmbed = new EmbedBuilder()
+      .setTitle(`Hey ${firstName}, here are your job matches (${jobs.length} new)`)
+      .setDescription(
+        (summaryLines.join("\n") || "No jobs to show.") +
+        (overflow > 0 ? `\n\n…and ${overflow} more in your next digest.` : "")
+      )
+      .setColor(0x5865F2);
+    await beginExternalSend(options, deliveredKeys);
+  } catch (err) {
+    console.error(`[mu-delivery] Failed to prepare digest send for ${discordId}: ${err.message}`);
+    return { ...deliveryFailure(err), deliveredKeys: [], attemptedKeys: deliveredKeys };
+  }
 
   try {
-    await target.send({ embeds: [summaryEmbed] });
+    await target.send({ embeds: [summaryEmbed], allowedMentions: { parse: [] } });
   } catch (err) {
-    // The summary is what notifies the user of these jobs; if it fails, nothing
-    // was delivered, so report failure and the caller leaves them queued for retry.
-    console.error(`[mu-delivery] Failed digest summary send to ${discordId}: ${err.message}`);
-    return { ok: false, deliveredKeys: [] };
+    const result = deliveryFailure(err, { sendStarted: true });
+    console.error(`[mu-delivery] Failed digest summary send to ${discordId}${result.uncertain ? " (outcome uncertain)" : ""}: ${err.message}`);
+    return { ...result, deliveredKeys: [], attemptedKeys: deliveredKeys };
   }
 
   // Individual embeds are best-effort enhancements (action buttons); the jobs are
   // already listed in the summary, so a failure here does not un-deliver them.
   for (const job of individualJobs) {
     try {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      const delay = options.delayFn || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+      await delay(500);
 
       const jobKey = job.key ?? job.jobKey ?? "";
       const jobUrl = job.url ?? "";
@@ -314,11 +393,11 @@ export async function sendDigestDm(client, discordId, jobs, firstName, options =
       });
       const buttons = buildDmButtons(hash, jobUrl, "pending", { fitCheck: !!options.fitCheckEnabled });
 
-      await target.send({ embeds: [embed], components: buttons });
+      await target.send({ embeds: [embed], components: buttons, allowedMentions: { parse: [] } });
     } catch (err) {
       console.error(`[mu-delivery] Failed digest item send to ${discordId}: ${err.message}`);
     }
   }
 
-  return { ok: true, deliveredKeys };
+  return { ok: true, deliveredKeys, attemptedKeys: deliveredKeys, outcome: "sent" };
 }

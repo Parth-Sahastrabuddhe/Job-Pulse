@@ -7,7 +7,7 @@
  */
 import { runGemini } from "./gemini.js";
 import { PROVIDERS } from "./llm-providers.js";
-import { assertSafeUrl } from "./ssrf-guard.js";
+import { safeFetch } from "./ssrf-guard.js";
 
 // Re-export so bot-side callers (mu-fit-check.js) import everything from here.
 export { PROVIDERS };
@@ -23,6 +23,7 @@ export class LlmError extends Error {
 
 const MAX_OUTPUT_TOKENS = 4096;
 const TIMEOUT_MS = 60000;
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 function kindForStatus(status) {
   if (status === 429) return "quota";
@@ -32,6 +33,12 @@ function kindForStatus(status) {
 
 async function readBodySnippet(response) {
   try {
+    if (response.body?.getReader) {
+      const reader = response.body.getReader();
+      const { value } = await reader.read();
+      await reader.cancel().catch(() => {});
+      return Buffer.from(value || []).toString("utf8").slice(0, 300);
+    }
     return (await response.text()).slice(0, 300);
   } catch {
     return "";
@@ -49,7 +56,62 @@ async function doFetch(url, options) {
   }
 }
 
-async function runOpenAiCompatible(prompt, { apiKey, baseUrl, model }) {
+async function doCustomFetch(url, options, fetchImpl = safeFetch) {
+  try {
+    return await fetchImpl(url, { ...options, redirect: "error" }, {
+      requireHttps: true,
+      allowedContentTypes: ["application/json"],
+      maxRequestBytes: 2 * 1024 * 1024,
+      maxResponseBytes: MAX_RESPONSE_BYTES,
+      timeoutMs: TIMEOUT_MS,
+      maxRedirects: 0,
+    });
+  } catch (err) {
+    if (err instanceof LlmError) throw err;
+    if (err?.blocked) throw new LlmError("blocked_url", err.message);
+    throw new LlmError("transient", `Network error: ${err.message}`);
+  }
+}
+
+async function readJsonLimited(response) {
+  if (!response.body?.getReader) {
+    try {
+      const value = await response.json();
+      if (Buffer.byteLength(JSON.stringify(value)) > MAX_RESPONSE_BYTES) {
+        throw new LlmError("bad_response", "Provider response was too large");
+      }
+      return value;
+    } catch (error) {
+      if (error instanceof LlmError) throw error;
+      throw new LlmError("bad_response", "Provider returned invalid JSON");
+    }
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new LlmError("bad_response", "Provider response was too large");
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks, total).toString("utf8"));
+  } catch (error) {
+    if (error instanceof LlmError) throw error;
+    throw new LlmError("bad_response", "Provider returned invalid JSON");
+  }
+}
+
+async function runOpenAiCompatible(prompt, { apiKey, baseUrl, model }, network = {}) {
   const body = { model, messages: [{ role: "user", content: prompt }] };
   if (model.startsWith("gpt-5")) {
     // gpt-5 family rejects max_tokens and non-default temperature.
@@ -61,15 +123,30 @@ async function runOpenAiCompatible(prompt, { apiKey, baseUrl, model }) {
   const headers = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-  const response = await doFetch(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+  let endpoint;
+  try {
+    endpoint = new URL(baseUrl);
+  } catch {
+    throw new LlmError(network.custom ? "blocked_url" : "auth", "Invalid provider endpoint URL");
+  }
+  endpoint.pathname = `${endpoint.pathname.replace(/\/+$/, "")}/chat/completions`;
+  endpoint.search = "";
+  endpoint.hash = "";
+  const response = await (network.custom
+    ? doCustomFetch(endpoint.toString(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    }, network.safeFetch)
+    : doFetch(endpoint.toString(), {
     method: "POST",
     headers,
     body: JSON.stringify(body),
-  });
+    }));
   if (!response.ok) {
     throw new LlmError(kindForStatus(response.status), `Provider error (${response.status}): ${await readBodySnippet(response)}`, response.status);
   }
-  const data = await response.json();
+  const data = network.custom ? await response.json() : await readJsonLimited(response);
   const text = data.choices?.[0]?.message?.content;
   if (!text) throw new LlmError("bad_response", "Empty response from model");
   return text;
@@ -92,7 +169,7 @@ async function runAnthropic(prompt, { apiKey, model }) {
   if (!response.ok) {
     throw new LlmError(kindForStatus(response.status), `Provider error (${response.status}): ${await readBodySnippet(response)}`, response.status);
   }
-  const data = await response.json();
+  const data = await readJsonLimited(response);
   if (data.stop_reason === "refusal") {
     throw new LlmError("bad_response", "The model declined this request");
   }
@@ -115,7 +192,7 @@ async function runGeminiWire(prompt, { apiKey, model }) {
   }
 }
 
-export async function runLLM(prompt, config) {
+export async function runLLM(prompt, config, dependencies = {}) {
   const provider = PROVIDERS[config.provider];
   if (!provider) throw new LlmError("auth", `Unknown provider: ${config.provider}`);
   if (provider.keyRequired && !config.apiKey) {
@@ -126,12 +203,11 @@ export async function runLLM(prompt, config) {
 
   if (config.provider === "custom") {
     if (!config.baseUrl) throw new LlmError("blocked_url", "No endpoint configured");
-    try {
-      await assertSafeUrl(config.baseUrl); // call-time re-check narrows the DNS-rebinding window (residual TOCTOU accepted per spec)
-    } catch (err) {
-      throw new LlmError("blocked_url", err.message);
-    }
-    return runOpenAiCompatible(prompt, { apiKey: config.apiKey, baseUrl: config.baseUrl, model });
+    return runOpenAiCompatible(
+      prompt,
+      { apiKey: config.apiKey, baseUrl: config.baseUrl, model },
+      { custom: true, safeFetch: dependencies.safeFetch || safeFetch }
+    );
   }
   if (provider.wire === "gemini") return runGeminiWire(prompt, { apiKey: config.apiKey, model });
   if (provider.wire === "anthropic") return runAnthropic(prompt, { apiKey: config.apiKey, model });

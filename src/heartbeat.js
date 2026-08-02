@@ -1,7 +1,9 @@
-// Fire-and-forget heartbeat pings to healthchecks.io.
-// Never throws; silent no-op when url is falsy. Do not block the caller on network failures.
+// Ordered heartbeat pings to healthchecks.io.
+// Never throws and silently no-ops when the URL is falsy. Callers may await a
+// state transition or deliberately use `void` when fire-and-forget is safe.
 
 const TIMEOUT_MS = 5_000;
+const queuesByUrl = new Map();
 
 function silent(err) {
   // caller's log() helper isn't imported here to keep this module dependency-free.
@@ -9,8 +11,7 @@ function silent(err) {
   console.error(`[heartbeat] ${err?.message || err}`);
 }
 
-async function send(url, { method = "GET", body } = {}) {
-  if (!url) return;
+async function sendNow(url, { method = "GET", body } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -27,11 +28,33 @@ async function send(url, { method = "GET", body } = {}) {
   }
 }
 
+// Healthchecks.io stores the state of the latest request. Serialize requests
+// per check URL so an older slow success cannot arrive after a newer failure
+// and incorrectly turn the check green again. Different checks (micro/MU) do
+// not block one another.
+function send(url, options, queueKey = url) {
+  if (!url) return Promise.resolve();
+  const previous = queuesByUrl.get(queueKey) || Promise.resolve();
+  const current = previous
+    .catch(() => undefined)
+    .then(() => sendNow(url, options));
+  queuesByUrl.set(queueKey, current);
+  const clear = () => {
+    if (queuesByUrl.get(queueKey) === current) queuesByUrl.delete(queueKey);
+  };
+  current.then(clear, clear);
+  return current;
+}
+
 export async function ping(url) {
   await send(url);
 }
 
 export async function pingFail(url, reason) {
   if (!url) return;
-  await send(`${url}/fail`, { method: "POST", body: String(reason ?? "") });
+  await send(
+    `${url}/fail`,
+    { method: "POST", body: String(reason ?? "") },
+    url,
+  );
 }

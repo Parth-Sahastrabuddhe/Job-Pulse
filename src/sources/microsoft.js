@@ -2,7 +2,8 @@ import {
   dedupeJobs,
   finalizeJob,
   isTargetRole,
-  fetchWithTimeout
+  fetchWithTimeout,
+  asCollectorError
 } from "./shared.js";
 
 const MICROSOFT_BASE_URL = "https://apply.careers.microsoft.com";
@@ -67,16 +68,18 @@ export async function collectMicrosoftJobs(_browserUnused, config, log) {
 
   try {
     const response = await fetchWithTimeout(apiUrl, {
-      headers: { accept: "application/json", "user-agent": "Mozilla/5.0" }
+      headers: { accept: "application/json", "user-agent": "Mozilla/5.0" },
+      signal: config.signal,
     });
 
     if (!response.ok) {
       log(`Microsoft API returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
-    const rawJobs = data.data?.positions ?? [];
+    if (!Array.isArray(data?.data?.positions)) throw new Error("response did not contain a positions array");
+    const rawJobs = data.data.positions;
 
     const jobs = rawJobs
       .map((raw) => parseMicrosoftJob(raw, config))
@@ -86,6 +89,6 @@ export async function collectMicrosoftJobs(_browserUnused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Microsoft API error: ${error.message}`);
-    return [];
+    throw asCollectorError("microsoft", error);
   }
 }

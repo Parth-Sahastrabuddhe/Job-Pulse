@@ -80,10 +80,15 @@ describe("filterJobForUser — failing cases", () => {
     expect(result.reason).toBe("director_blocked");
   });
 
-  it("drops AVP for entry/mid profile (banking regression)", () => {
-    const result = filterJobForUser(makeJob({ title: "AVP Software Engineer" }), makeProfile());
-    expect(result.pass).toBe(false);
-    expect(result.reason).toBe("seniority_mismatch");
+  it("uses company-aware bank levels when deriving seniority", () => {
+    const bankJob = makeJob({ sourceKey: "citi", title: "AVP Software Engineer" });
+    expect(filterJobForUser(bankJob, makeProfile()).pass).toBe(true);
+
+    const genericJob = makeJob({ sourceKey: "stripe", title: "AVP Software Engineer" });
+    expect(filterJobForUser(genericJob, makeProfile())).toMatchObject({
+      pass: false,
+      reason: "seniority_mismatch",
+    });
   });
 
   it("drops empty title", () => {

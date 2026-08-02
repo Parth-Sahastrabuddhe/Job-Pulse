@@ -1,0 +1,25 @@
+{
+  "name": "jobpulse-core",
+  "version": "0.1.0",
+  "description": "Delivery-agnostic job collection and processing pipeline",
+  "license": "MIT",
+  "type": "module",
+  "private": false,
+  "engines": {
+    "node": ">=20.19 <26"
+  },
+  "exports": {
+    ".": "./src/pipeline.js"
+  },
+  "scripts": {
+    "start": "node src/core-cli.js",
+    "check": "node --check src/core-cli.js && node --check src/pipeline.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "playwright": "^1.62.1"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  }
+}

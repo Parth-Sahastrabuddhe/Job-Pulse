@@ -1,6 +1,6 @@
 /**
  * probe-company.js: run one parameterized ATS collector and report what it
- * returns. Used by the add-company automation for pre-push verification (this
+ * returns. Used for manual company-integration verification (this
  * box) and post-deploy verification (EC2). Network reads only, no DB access.
  *
  * Usage: node scripts/probe-company.js <companyKey>

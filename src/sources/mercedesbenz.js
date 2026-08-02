@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseMercedesBenzJob(raw) {
   const desc = raw.MatchedObjectDescriptor;
@@ -41,7 +41,7 @@ function parseMercedesBenzJob(raw) {
   });
 }
 
-async function fetchPage(apiUrl, offset) {
+async function fetchPage(apiUrl, offset, signal) {
   const response = await fetchWithTimeout(apiUrl, {
     method: "POST",
     headers: {
@@ -53,11 +53,14 @@ async function fetchPage(apiUrl, offset) {
       criteria: {},
       parameters: { offset },
       languageCodes: ["en"]
-    })
+    }),
+    signal,
   });
-  if (!response.ok) return [];
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
-  return data?.SearchResult?.SearchResultItems || [];
+  const items = data?.SearchResult?.SearchResultItems;
+  if (!Array.isArray(items)) throw new Error("response did not contain search result items");
+  return items;
 }
 
 export async function collectMercedesBenzJobs(_unused, config, log) {
@@ -68,7 +71,7 @@ export async function collectMercedesBenzJobs(_unused, config, log) {
 
     const allRaw = [];
     for (let page = 0; page < PAGES; page++) {
-      const items = await fetchPage(apiUrl, page * PAGE_SIZE);
+      const items = await fetchPage(apiUrl, page * PAGE_SIZE, config.signal);
       allRaw.push(...items);
       if (items.length < PAGE_SIZE) break;
     }
@@ -81,6 +84,6 @@ export async function collectMercedesBenzJobs(_unused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Mercedes-Benz API error: ${error.message}`);
-    return [];
+    throw asCollectorError("mercedesbenz", error);
   }
 }

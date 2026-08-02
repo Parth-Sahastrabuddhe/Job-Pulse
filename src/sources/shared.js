@@ -121,10 +121,44 @@ export function normalizeUrl(baseUrl, rawUrl) {
   }
 }
 
+/**
+ * Canonical form used only when an ATS does not expose a stable posting ID.
+ * Identity never includes mutable title/location/date metadata when a stable ID
+ * or URL exists.
+ */
+export function canonicalizeJobUrl(rawUrl) {
+  try {
+    const url = new URL(normalizeWhitespace(rawUrl));
+    if (url.protocol !== "https:") return "";
+    url.hash = "";
+    url.hostname = url.hostname.toLowerCase();
+
+    for (const name of [...url.searchParams.keys()]) {
+      if (/^(?:utm_.+|ref|referrer|source|src|tracking|gh_src)$/i.test(name)) {
+        url.searchParams.delete(name);
+      }
+    }
+    url.searchParams.sort();
+    if (url.pathname !== "/") url.pathname = url.pathname.replace(/\/+$/, "");
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function jobIdentity(sourceKey, id, url, title, location) {
+  if (sourceKey && id) return `id|${sourceKey}|${id}`;
+  const canonicalUrl = canonicalizeJobUrl(url);
+  if (sourceKey && canonicalUrl) return `url|${sourceKey}|${canonicalUrl}`;
+  return ["meta", sourceKey, normalizeForMatch(title), normalizeForMatch(location)]
+    .filter(Boolean)
+    .join("|");
+}
+
 export function finalizeJob(job) {
   const normalizedJob = {
-    sourceKey: job.sourceKey,
-    sourceLabel: job.sourceLabel,
+    sourceKey: normalizeWhitespace(job.sourceKey ?? ""),
+    sourceLabel: normalizeWhitespace(job.sourceLabel ?? ""),
     id: normalizeWhitespace(job.id ?? ""),
     title: normalizeWhitespace(job.title ?? ""),
     location: normalizeWhitespace(job.location ?? ""),
@@ -135,15 +169,13 @@ export function finalizeJob(job) {
     countryCode: normalizeCountryCode(job.countryCode ?? "") || inferCountryCodeFromLocation(job.location ?? "")
   };
 
-  const identity = [
+  const identity = jobIdentity(
     normalizedJob.sourceKey,
     normalizedJob.id,
     normalizedJob.url,
-    normalizeForMatch(normalizedJob.title),
-    normalizeForMatch(normalizedJob.location)
-  ]
-    .filter(Boolean)
-    .join("|");
+    normalizedJob.title,
+    normalizedJob.location
+  );
 
   return {
     ...normalizedJob,
@@ -155,17 +187,81 @@ export function finalizeJob(job) {
 }
 
 export function dedupeJobs(jobs) {
-  const uniqueJobs = new Map();
-
+  // First collapse the strongest identity: source + stable ATS ID.
+  const bySourceId = new Map();
+  const withoutStableId = [];
   for (const job of jobs) {
-    const key = job.key || job.url || `${job.sourceKey}:${job.id}:${job.title}`;
+    const sourceKey = normalizeWhitespace(job?.sourceKey);
+    const id = normalizeWhitespace(job?.id);
+    if (!sourceKey || !id) {
+      withoutStableId.push(job);
+      continue;
+    }
+    const identity = `${sourceKey}\0${id}`;
+    bySourceId.set(identity, bySourceId.has(identity)
+      ? mergeRicherJob(bySourceId.get(identity), job)
+      : job);
+  }
 
-    if (!uniqueJobs.has(key)) {
-      uniqueJobs.set(key, job);
+  // Then collapse canonical URLs, including URL-only observations that later
+  // acquire a stable ID. A stable-ID record always owns the resulting key.
+  const byUrl = new Map();
+  const byFallbackKey = new Map();
+  const output = [];
+  for (const job of [...bySourceId.values(), ...withoutStableId]) {
+    const canonicalUrl = canonicalizeJobUrl(job?.url);
+    if (!canonicalUrl) {
+      const fallbackKey = normalizeWhitespace(job?.key);
+      if (fallbackKey && byFallbackKey.has(fallbackKey)) {
+        const index = byFallbackKey.get(fallbackKey);
+        output[index] = mergeRicherJob(output[index], job);
+        continue;
+      }
+      if (fallbackKey) byFallbackKey.set(fallbackKey, output.length);
+      output.push(job);
+      continue;
+    }
+    const existingIndex = byUrl.get(canonicalUrl);
+    if (existingIndex === undefined) {
+      byUrl.set(canonicalUrl, output.length);
+      output.push(job);
+      continue;
+    }
+    output[existingIndex] = mergeRicherJob(output[existingIndex], job);
+  }
+  return output;
+}
+
+function valueRichness(value) {
+  if (value === undefined || value === null || value === "") return 0;
+  if (Array.isArray(value)) return value.length;
+  if (typeof value === "string") return normalizeWhitespace(value).length;
+  if (typeof value === "object") return Object.keys(value).length;
+  return 1;
+}
+
+function mergeRicherJob(left, right) {
+  const leftStable = Boolean(normalizeWhitespace(left?.sourceKey) && normalizeWhitespace(left?.id));
+  const rightStable = Boolean(normalizeWhitespace(right?.sourceKey) && normalizeWhitespace(right?.id));
+  const primary = !leftStable && rightStable ? right : left;
+  const secondary = primary === left ? right : left;
+  const merged = { ...secondary, ...primary };
+
+  for (const key of new Set([...Object.keys(left || {}), ...Object.keys(right || {})])) {
+    if (key === "key" || key === "sourceKey" || key === "id") continue;
+    const primaryValue = primary?.[key];
+    const secondaryValue = secondary?.[key];
+    if (Array.isArray(primaryValue) && Array.isArray(secondaryValue)) {
+      merged[key] = [...new Set([...primaryValue, ...secondaryValue])];
+    } else if (valueRichness(secondaryValue) > valueRichness(primaryValue)) {
+      merged[key] = secondaryValue;
     }
   }
 
-  return [...uniqueJobs.values()];
+  // The deterministic stable-ID key wins if one observation has it. Otherwise
+  // preserve the first record's already-issued key.
+  merged.key = leftStable ? left.key : rightStable ? right.key : left.key || right.key;
+  return merged;
 }
 
 export function splitLines(value) {
@@ -430,14 +526,185 @@ export function delay(ms) {
   });
 }
 
-export function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+export class CollectorError extends Error {
+  constructor(sourceKey, cause) {
+    const message = cause instanceof Error ? cause.message : String(cause || "unknown collector failure");
+    super(`${sourceKey}: ${message}`, cause instanceof Error ? { cause } : undefined);
+    this.name = "CollectorError";
+    this.code = "COLLECTOR_FAILED";
+    this.sourceKey = sourceKey;
+    if (cause instanceof Error && !this.cause) this.cause = cause;
+  }
+}
+
+export function asCollectorError(sourceKey, error) {
+  if (error?.name === "AbortError" || ["ABORT_ERR", "COLLECTOR_TIMEOUT"].includes(error?.code)) return error;
+  if (error instanceof CollectorError) return error;
+  return new CollectorError(sourceKey, error);
+}
+
+// Ashby's largest current board is roughly 11 MiB, so keep a bounded margin
+// without allowing an endpoint to stream indefinitely.
+const DEFAULT_FETCH_MAX_BODY_BYTES = 16 * 1024 * 1024;
+const MAX_FETCH_MAX_BODY_BYTES = 64 * 1024 * 1024;
+
+function configuredFetchBodyLimit(options) {
+  const requested = Number(options.maxResponseBytes ?? process.env.FETCH_MAX_BODY_BYTES);
+  return Number.isSafeInteger(requested) && requested > 0
+    ? Math.min(requested, MAX_FETCH_MAX_BODY_BYTES)
+    : DEFAULT_FETCH_MAX_BODY_BYTES;
+}
+
+class CappedFetchResponse {
+  constructor(response, controller, timer, maxBytes, detachExternalAbort) {
+    this._response = response;
+    this._controller = controller;
+    this._timer = timer;
+    this._maxBytes = maxBytes;
+    this._detachExternalAbort = detachExternalAbort;
+    this._bufferPromise = null;
+    this._finished = false;
+
+    if ([204, 205].includes(response.status)) {
+      this._discard();
+    } else if (!response.ok) {
+      // Most collectors ignore error bodies, while Gemini reads a bounded
+      // snippet for diagnostics. Start buffering immediately so an ignored
+      // error cannot retain its timer, but preserve the buffered body for a
+      // later text()/json() call. The internal deadline still bounds a stalled
+      // body; the parent listener can be detached once response headers exist.
+      this._detachExternalAbort?.();
+      this._detachExternalAbort = null;
+      this._readBuffer().catch(() => {});
+    }
+  }
+
+  get ok() { return this._response.ok; }
+  get status() { return this._response.status; }
+  get statusText() { return this._response.statusText; }
+  get headers() { return this._response.headers; }
+  get url() { return this._response.url; }
+  get redirected() { return this._response.redirected; }
+  get bodyUsed() { return this._response.bodyUsed; }
+
+  _finish() {
+    if (this._finished) return;
+    this._finished = true;
+    clearTimeout(this._timer);
+    this._detachExternalAbort?.();
+  }
+
+  _discard() {
+    this._finish();
+    const cancellation = this._response.body?.cancel?.();
+    cancellation?.catch?.(() => {});
+  }
+
+  async _readBuffer() {
+    if (this._bufferPromise) return this._bufferPromise;
+    this._bufferPromise = (async () => {
+      const declared = Number(this.headers?.get?.("content-length"));
+      if (Number.isFinite(declared) && declared > this._maxBytes) {
+        this._controller.abort();
+        throw new Error(`Response body exceeds ${this._maxBytes} bytes`);
+      }
+
+      if (!this._response.body?.getReader) {
+        // Test doubles and older runtimes may not expose a stream. Preserve
+        // their response methods, then enforce the cap on the resulting value.
+        if (typeof this._response.text === "function") {
+          const text = await this._response.text();
+          const buffer = Buffer.from(text);
+          if (buffer.byteLength > this._maxBytes) throw new Error(`Response body exceeds ${this._maxBytes} bytes`);
+          return buffer;
+        }
+        throw new Error("Response body is unavailable");
+      }
+
+      const reader = this._response.body.getReader();
+      const chunks = [];
+      let total = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          total += value.byteLength;
+          if (total > this._maxBytes) {
+            this._controller.abort();
+            throw new Error(`Response body exceeds ${this._maxBytes} bytes`);
+          }
+          chunks.push(Buffer.from(value));
+        }
+        return Buffer.concat(chunks, total);
+      } finally {
+        reader.releaseLock?.();
+      }
+    })().finally(() => this._finish());
+    return this._bufferPromise;
+  }
+
+  async text() {
+    return (await this._readBuffer()).toString("utf8");
+  }
+
+  async json() {
+    // Preserve lightweight test doubles that only implement json(). Production
+    // fetch Responses always expose a stream and take the capped path above.
+    if (!this._response.body?.getReader && typeof this._response.json === "function") {
+      try {
+        const value = await this._response.json();
+        if (Buffer.byteLength(JSON.stringify(value)) > this._maxBytes) {
+          throw new Error(`Response body exceeds ${this._maxBytes} bytes`);
+        }
+        return value;
+      } finally {
+        this._finish();
+      }
+    }
+    return JSON.parse(await this.text());
+  }
+
+  async arrayBuffer() {
+    const buffer = await this._readBuffer();
+    return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+  }
+}
+
+export async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   // The timer must remain armed across the body read (resp.json() / resp.text()),
   // not only the headers — otherwise a server that streams headers fast and then
   // stalls the body will hang the caller forever. unref() so a pending timer
   // doesn't keep the event loop alive after the response is consumed.
   const controller = new AbortController();
+  const externalSignal = options.signal;
+  const onExternalAbort = () => controller.abort(externalSignal.reason);
+  if (externalSignal?.aborted) controller.abort(externalSignal.reason);
+  else externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   if (typeof timer.unref === "function") timer.unref();
-  return fetch(url, { ...options, signal: controller.signal });
+  const { maxResponseBytes: _ignoredLimit, ...fetchOptions } = options;
+  try {
+    // Source endpoints are expected to be canonical. Refusing implicit
+    // redirects prevents a compromised ATS from bouncing a trusted fixed URL
+    // into an internal service; arbitrary job-page redirects use safeFetch,
+    // which validates every hop explicitly.
+    const response = await fetch(url, {
+      ...fetchOptions,
+      // This security control is intentionally after caller options so a
+      // collector cannot accidentally (or deliberately) override it.
+      redirect: "error",
+      signal: controller.signal,
+    });
+    return new CappedFetchResponse(
+      response,
+      controller,
+      timer,
+      configuredFetchBodyLimit(options),
+      () => externalSignal?.removeEventListener("abort", onExternalAbort)
+    );
+  } catch (error) {
+    clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
+    throw error;
+  }
 }
-

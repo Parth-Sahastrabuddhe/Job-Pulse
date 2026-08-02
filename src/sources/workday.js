@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function isSalesforceSwe(title) {
   const t = title.trim();
@@ -95,11 +95,12 @@ const WORKDAY_MAX_RESULTS = 1500;
 const facetCache = new Map();
 const FACET_RETRY_MS = 60 * 60 * 1000;
 
-async function fetchWorkdayPage(apiUrl, body) {
+async function fetchWorkdayPage(apiUrl, body, signal) {
   const response = await fetchWithTimeout(apiUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal,
   });
   if (!response.ok) {
     const err = new Error(`status ${response.status}`);
@@ -142,8 +143,8 @@ function findCountryFacet(facets, descriptorRe, citySegRe) {
 // Discover US and CA facets in one facets call. The CA city segment uses
 // CAN/Canada (not bare "CA") to avoid pulling in California city facets like
 // "Mountain View, CA, US".
-async function discoverFacets(apiUrl) {
-  const data = await fetchWorkdayPage(apiUrl, { appliedFacets: {}, limit: 1, offset: 0, searchText: "" });
+async function discoverFacets(apiUrl, signal) {
+  const data = await fetchWorkdayPage(apiUrl, { appliedFacets: {}, limit: 1, offset: 0, searchText: "" }, signal);
   const facets = data.facets || [];
   return {
     us: findCountryFacet(facets, /^united states/i, /(?:^|,\s*)(?:US|United States)(?:\s*,|\s*$)/i),
@@ -153,7 +154,7 @@ async function discoverFacets(apiUrl) {
 
 export async function collectWorkdayJobs(_unused, config, log, companyKey) {
   const companyConfig = config[companyKey];
-  if (!companyConfig) return [];
+  if (!companyConfig) throw asCollectorError(companyKey, new Error("missing company configuration"));
 
   const searchText = companyConfig.searchText || "software engineer";
 
@@ -171,7 +172,8 @@ export async function collectWorkdayJobs(_unused, config, log, companyKey) {
     const appliedFacets = facet ? { [facet.param]: facet.ids } : {};
     const firstPage = await fetchWorkdayPage(companyConfig.apiUrl, {
       appliedFacets, limit: WORKDAY_PAGE_SIZE, offset: 0, searchText
-    });
+    }, config.signal);
+    if (!Array.isArray(firstPage?.jobPostings)) throw new Error("response did not contain jobPostings");
     const total = Math.min(firstPage.total ?? 0, WORKDAY_MAX_RESULTS);
     const rawJobs = [...(firstPage.jobPostings ?? [])];
     if (total > WORKDAY_PAGE_SIZE) {
@@ -183,10 +185,13 @@ export async function collectWorkdayJobs(_unused, config, log, companyKey) {
           batch.map((o) =>
             fetchWorkdayPage(companyConfig.apiUrl, {
               appliedFacets, limit: WORKDAY_PAGE_SIZE, offset: o, searchText
-            }).catch(() => ({ jobPostings: [] }))
+            }, config.signal)
           )
         );
-        for (const p of pages) rawJobs.push(...(p.jobPostings ?? []));
+        for (const p of pages) {
+          if (!Array.isArray(p?.jobPostings)) throw new Error("page did not contain jobPostings");
+          rawJobs.push(...p.jobPostings);
+        }
       }
     }
     return rawJobs.map((raw) => parseWorkdayJob(raw, companyConfig, tag)).filter(Boolean);
@@ -198,7 +203,7 @@ export async function collectWorkdayJobs(_unused, config, log, companyKey) {
       cachedFacets?.failedAt && (Date.now() - cachedFacets.failedAt) >= FACET_RETRY_MS;
     if (!cachedFacets || retryFailedDiscovery) {
       try {
-        const facets = await discoverFacets(companyConfig.apiUrl);
+        const facets = await discoverFacets(companyConfig.apiUrl, config.signal);
         facetCache.set(companyKey, facets);
         log(`${companyConfig.sourceLabel}: facets US=${facets.us ? facets.us.ids.length : 0} CA=${facets.ca ? facets.ca.ids.length : 0}`);
       } catch (e) {
@@ -239,6 +244,6 @@ export async function collectWorkdayJobs(_unused, config, log, companyKey) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`${companyConfig.sourceLabel} API error: ${error.message}`);
-    return [];
+    throw asCollectorError(companyKey, error);
   }
 }

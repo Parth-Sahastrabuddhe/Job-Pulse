@@ -3,6 +3,13 @@
 const MAX_MESSAGE_LENGTH = 3900;
 const MAX_RETRIES = 3;
 
+class UncertainDeliveryError extends Error {
+  constructor(message, cause) {
+    super(message, cause ? { cause } : undefined);
+    this.name = "UncertainDeliveryError";
+  }
+}
+
 function formatJob(job) {
   const parts = [`[${job.sourceLabel}] ${job.title}`];
 
@@ -19,44 +26,49 @@ function formatJob(job) {
   return `- ${parts.join(" | ")}\n${job.url}`;
 }
 
-function chunkMessages(jobs, heading) {
+export function chunkMessages(jobs, heading) {
   const chunks = [];
-  let current = heading;
+  let current = { text: heading, jobs: [] };
 
   for (const job of jobs) {
     const block = `\n\n${formatJob(job)}`;
 
-    if ((current + block).length > MAX_MESSAGE_LENGTH) {
+    if ((current.text + block).length > MAX_MESSAGE_LENGTH && current.jobs.length > 0) {
       chunks.push(current);
-      current = heading + block;
-      continue;
+      current = { text: heading, jobs: [] };
     }
 
-    current += block;
+    const remaining = MAX_MESSAGE_LENGTH - current.text.length;
+    current.text += block.length > remaining
+      ? `${block.slice(0, Math.max(0, remaining - 1))}…`
+      : block;
+    current.jobs.push(job);
   }
 
-  if (current.trim()) {
+  if (current.jobs.length > 0) {
     chunks.push(current);
   }
 
   return chunks;
 }
 
-export async function sendTelegramNotification(botToken, chatId, jobs, options = {}) {
-  if (!botToken || !chatId || jobs.length === 0) {
-    return;
+async function responseError(response) {
+  try {
+    return (await response.text()).slice(0, 200);
+  } catch {
+    return "unreadable response";
   }
+}
 
-  const messages = chunkMessages(jobs, `New software engineering jobs: ${jobs.length}`);
+async function postChunk(botToken, chatId, text, options) {
+  const fetchFn = options.fetchFn || fetchWithTimeout;
+  const delayFn = options.delayFn || delay;
+  const maxRetries = Number.isInteger(options.maxRetries) ? Math.max(0, options.maxRetries) : MAX_RETRIES;
 
-  for (const text of messages) {
-    if (options.dryRun) {
-      console.log(`[dry-run][telegram]\n${text}`);
-      continue;
-    }
-
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      const response = await fetchWithTimeout(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let response;
+    try {
+      response = await fetchFn(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -65,19 +77,71 @@ export async function sendTelegramNotification(botToken, chatId, jobs, options =
           disable_web_page_preview: false
         })
       }, 10000);
+    } catch (error) {
+      throw new UncertainDeliveryError(
+        `Telegram delivery outcome is uncertain: ${error?.message || error}`,
+        error,
+      );
+    }
 
-      if (response.ok) break;
+    if (response.ok) return;
 
-      const retryable = response.status === 429 || response.status >= 500;
-      if (!retryable || attempt === MAX_RETRIES) {
-        const body = await response.text();
-        throw new Error(`Telegram notification failed with status ${response.status}: ${body.slice(0, 200)}`);
+    const body = await responseError(response);
+    const error = new Error(`Telegram notification failed with status ${response.status}: ${body}`);
+
+    if (response.status === 429 && attempt < maxRetries) {
+      const retryAfterHeader = Number.parseFloat(response.headers?.get?.("retry-after") || "");
+      const delayMs = Number.isFinite(retryAfterHeader)
+        ? Math.min(Math.max(retryAfterHeader * 1000, 0), 10000)
+        : 1000 * 2 ** attempt;
+      console.error(`[telegram] HTTP 429, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+      await delayFn(delayMs);
+      continue;
+    }
+
+    if (response.status >= 500) {
+      throw new UncertainDeliveryError(error.message, error);
+    }
+    throw error;
+  }
+}
+
+export async function sendTelegramNotification(botToken, chatId, jobs, options = {}) {
+  const result = { deliveredJobs: [], failedJobs: [], uncertainJobs: [], errors: [] };
+  if (!botToken || !chatId || jobs.length === 0) {
+    result.failedJobs.push(...jobs);
+    return result;
+  }
+
+  const messages = chunkMessages(jobs, `New software engineering jobs: ${jobs.length}`);
+
+  for (const chunk of messages) {
+    if (options.dryRun) {
+      console.log(`[dry-run][telegram]\n${chunk.text}`);
+      result.deliveredJobs.push(...chunk.jobs);
+      continue;
+    }
+
+    try {
+      await postChunk(botToken, chatId, chunk.text, options);
+    } catch (error) {
+      if (error instanceof UncertainDeliveryError) {
+        result.uncertainJobs.push(...chunk.jobs);
+      } else {
+        result.failedJobs.push(...chunk.jobs);
       }
+      result.errors.push(error);
+      continue;
+    }
 
-      const retryAfter = response.headers.get("retry-after");
-      const delayMs = retryAfter ? Math.min(parseInt(retryAfter, 10) * 1000 || 1000, 10000) : 1000 * 2 ** attempt;
-      console.error(`[telegram] HTTP ${response.status}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
-      await delay(delayMs);
+    try {
+      if (options.onChunkDelivered) await options.onChunkDelivered(chunk.jobs);
+      result.deliveredJobs.push(...chunk.jobs);
+    } catch (error) {
+      result.uncertainJobs.push(...chunk.jobs);
+      result.errors.push(error);
     }
   }
+
+  return result;
 }

@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 const META_CAREERS_URL = "https://www.metacareers.com";
 const META_GRAPHQL_URL = "https://www.metacareers.com/graphql";
@@ -38,10 +38,12 @@ function noteSuccess() {
 
 // Attempts are >= 15 min apart, so a cached token would expire before its
 // next use anyway — fetch a fresh one per attempt.
-async function getLsdToken() {
+async function getLsdToken(signal) {
   const response = await fetchWithTimeout(META_CAREERS_URL, {
-    headers: { "user-agent": "Mozilla/5.0" }
+    headers: { "user-agent": "Mozilla/5.0" },
+    signal,
   });
+  if (!response.ok) throw new Error(`LSD token request returned HTTP ${response.status}`);
   const html = await response.text();
 
   const match = html.match(/"LSD",\[\],\{"token":"([^"]+)"\}/);
@@ -116,7 +118,7 @@ export async function collectMetaJobs(_unused, config, log) {
       }
     });
 
-    const lsdToken = await getLsdToken();
+    const lsdToken = await getLsdToken(config.signal);
 
     const body = new URLSearchParams({
       lsd: lsdToken,
@@ -132,22 +134,30 @@ export async function collectMetaJobs(_unused, config, log) {
         "x-fb-lsd": lsdToken,
         "user-agent": "Mozilla/5.0"
       },
-      body: body.toString()
+      body: body.toString(),
+      signal: config.signal,
     });
 
     if (!response.ok) {
-      const waitMin = noteFailure();
-      log(`Meta API returned status ${response.status}; next attempt in ${waitMin} min`);
-      return [];
+      if (response.status === 429) {
+        const waitMin = noteFailure();
+        log(`Meta API returned status ${response.status}; next attempt in ${waitMin} min`);
+        return [];
+      }
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
     const rawJobs = data?.data?.job_search_with_featured_jobs?.all_jobs;
     if (!Array.isArray(rawJobs)) {
       const waitMin = noteFailure();
-      const why = data?.errors?.[0]?.message || "missing all_jobs payload";
-      log(`Meta API soft-failure (${why}); next attempt in ${waitMin} min`);
-      return [];
+      const providerError = data?.errors?.[0];
+      const why = providerError?.message || "missing all_jobs payload";
+      if (providerError?.code === 1675004 || /rate limit|throttl/i.test(why)) {
+        log(`Meta API throttled (${why}); next attempt in ${waitMin} min`);
+        return [];
+      }
+      throw new Error(`unparseable Meta response: ${why}`);
     }
 
     noteSuccess();
@@ -160,6 +170,6 @@ export async function collectMetaJobs(_unused, config, log) {
   } catch (error) {
     const waitMin = noteFailure();
     log(`Meta API error: ${error.message}; next attempt in ${waitMin} min`);
-    return [];
+    throw asCollectorError("meta", error);
   }
 }

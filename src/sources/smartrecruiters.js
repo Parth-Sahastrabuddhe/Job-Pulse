@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseSmartRecruitersJob(raw, companyConfig) {
   const title = raw.name?.trim();
@@ -42,7 +42,7 @@ function parseSmartRecruitersJob(raw, companyConfig) {
 
 export async function collectSmartRecruitersJobs(_unused, config, log, companyKey) {
   const companyConfig = config[companyKey];
-  if (!companyConfig) return [];
+  if (!companyConfig) throw asCollectorError(companyKey, new Error("missing company configuration"));
 
   try {
     const apiUrl = `https://api.smartrecruiters.com/v1/companies/${companyConfig.companySlug}/postings?q=software+engineer&limit=100`;
@@ -51,16 +51,18 @@ export async function collectSmartRecruitersJobs(_unused, config, log, companyKe
       headers: {
         "accept": "application/json",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      }
+      },
+      signal: config.signal,
     });
 
     if (!response.ok) {
       log(`${companyConfig.sourceLabel} API returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
-    const rawJobs = data.content || [];
+    if (!Array.isArray(data?.content)) throw new Error("response did not contain a content array");
+    const rawJobs = data.content;
 
     const jobs = rawJobs
       .map((raw) => parseSmartRecruitersJob(raw, companyConfig))
@@ -74,6 +76,6 @@ export async function collectSmartRecruitersJobs(_unused, config, log, companyKe
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`${companyConfig.sourceLabel} API error: ${error.message}`);
-    return [];
+    throw asCollectorError(companyKey, error);
   }
 }

@@ -155,9 +155,12 @@ describe("collectMetaJobs", () => {
     expect(fetchMock).toHaveBeenCalledTimes(8);
   });
 
-  it("treats HTTP errors like rate limits and backs off", async () => {
+  it("surfaces HTTP failures as typed collector errors and backs off", async () => {
     queueFetch(pageResponse(), graphqlHttpError(500));
-    expect(await collectMetaJobs(null, CONFIG, log)).toEqual([]);
+    await expect(collectMetaJobs(null, CONFIG, log)).rejects.toMatchObject({
+      code: "COLLECTOR_FAILED",
+      sourceKey: "meta",
+    });
     expect(logs.some((l) => l.includes("500"))).toBe(true);
 
     atMinutes(14);
@@ -165,9 +168,12 @@ describe("collectMetaJobs", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("backs off when the LSD token cannot be extracted", async () => {
+  it("surfaces an invalid LSD page as a typed collector error and backs off", async () => {
     queueFetch(pageResponse("<html>no token here</html>"));
-    expect(await collectMetaJobs(null, CONFIG, log)).toEqual([]);
+    await expect(collectMetaJobs(null, CONFIG, log)).rejects.toMatchObject({
+      code: "COLLECTOR_FAILED",
+      sourceKey: "meta",
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(logs.some((l) => l.includes("LSD token"))).toBe(true);
 

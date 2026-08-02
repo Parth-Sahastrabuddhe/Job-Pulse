@@ -14,7 +14,7 @@ Real-time multi-user job aggregation platform. Monitors 185+ companies across 8 
 - Per-user filters: role, seniority tier, location, experience level, H1B sponsorship requirement
 - Delivery modes: realtime DM or digest, with user-configurable quiet hours and timezone
 - Job DMs include a rich embed (title, company, location, posted date) with interactive buttons &mdash; **Applied**, **Skip**, **Save**, **Fit Check**
-- On-demand AI Fit Check per job: scores your stored resume against the job description with a bring-your-own LLM key (Gemini, OpenAI, Anthropic, Groq, OpenRouter, or any OpenAI-compatible endpoint incl. self-hosted models); keys are AES-256-GCM encrypted at rest and results are cached per user
+- On-demand AI Fit Check per job: scores your stored resume against the job description with a bring-your-own LLM key (Gemini, OpenAI, Anthropic, Groq, OpenRouter, or an OpenAI-compatible endpoint exposed through public HTTPS); keys are AES-256-GCM encrypted at rest and results are cached per user
 - Slash commands: `/search <keywords>` for cross-company keyword search, `/company <name>` for per-company browsing
 - Saved-job expiry reminders
 
@@ -128,12 +128,35 @@ node src/multi-user.js
 
 Production runs both under `pm2` on AWS EC2 with auto-restart. The web dashboard (`web/`) is a standalone Next.js app; see `web/README.md` for that piece.
 
+## Open-core release boundary
+
+Do not make this operational repository public: it also contains the private
+web, delivery, and deployment applications. Build a clean public repository
+from the fail-closed allowlist instead:
+
+```bash
+npm run open-core:check
+npm run open-core:export -- /path/to/new-empty-jobpulse-core-repo
+```
+
+The exporter follows the public pipeline's local import graph, rejects every
+JavaScript source that is not on the exact public allowlist (as well as dynamic
+or CommonJS loaders that could bypass that graph), scans the selected files for
+common credential forms, and refuses to overwrite a non-empty destination. The
+generated core is runnable on its own and contains the collectors,
+normalization/filtering, liveness and description-processing stages, tests, and
+a delivery-agnostic CLI.
+
+The personal tracker belongs in a separate private companion repository and
+must use a private Sheet/service-account configuration. It is not a submodule
+or hidden feature flag in the public core.
+
 ---
 
 ## Roadmap
 
 - Full per-user resume tailoring (the multi-user Fit Check shipped July 2026; tailored resume generation is next)
-- More ATS integrations from the community-submitted `/add` queue
+- More ATS integrations from manually reviewed community suggestions
 - Mobile-responsive dashboard polish
 - Public demo instance with rate-limited sign-up
 

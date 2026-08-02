@@ -135,17 +135,17 @@ describe("seen_jobs in-memory cache", () => {
 
     upsertJobs([job()], "2026-01-01T00:00:00.000Z");
 
-    // External writer (e.g. sync-sheet) adds a row with a different URL.
+    // A second collector process adds a row with a different URL.
     db.prepare(
       `INSERT INTO seen_jobs (key, source_key, source_label, id, title, url, first_seen_at, last_seen_at)
-       VALUES ('sheet:external:row-9', 'sheet:external', 'External', 'row-9', 'External Role',
+       VALUES ('external:row-9', 'external', 'External', 'row-9', 'External Role',
                'https://external.example/x', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
     ).run();
 
     // Force cache reload to simulate TTL expiry.
     _invalidateSeenJobsCache();
 
-    const filtered = getNewJobs([{ key: "sheet:external:row-9", sourceKey: "sheet:external", id: "row-9" }]);
+    const filtered = getNewJobs([{ key: "external:row-9", sourceKey: "external", id: "row-9" }]);
     expect(filtered).toHaveLength(0);
   });
 

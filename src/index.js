@@ -1,50 +1,28 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { getConfig, PROJECT_ROOT } from "./config.js";
+import { pathToFileURL } from "node:url";
+import { getConfig, PROJECT_ROOT } from "./private-config.js";
 import { sendDiscordBotNotification, startDiscordBot, stopDiscordBot, isDiscordBotConnected } from "./discord-bot.js";
-import { fetchJobDescription, jobDirId, saveJobData } from "./job-description.js";
 import { sendDiscordNotification } from "./notifiers/discord.js";
 import { sendTelegramNotification } from "./notifiers/telegram.js";
-import { collectAmazonJobs } from "./sources/amazon.js";
-import { collectGoogleJobs } from "./sources/google.js";
-import { collectGreenhouseJobs } from "./sources/greenhouse.js";
-import { collectLeverJobs } from "./sources/lever.js";
-import { collectMetaJobs } from "./sources/meta.js";
-import { collectMicrosoftJobs } from "./sources/microsoft.js";
-import { collectPcsxJobs } from "./sources/pcsx.js";
-import { dedupeJobs, delay, jobIsFresh, jobMatchesCountryFilter } from "./sources/shared.js";
-import { COMPANIES } from "./companies.js";
+import { delay, jobIsFresh, jobMatchesCountryFilter } from "./sources/shared.js";
 import { filterJobForUser } from "./filter.js";
 import { PERSONAL_PROFILE } from "./personal-profile.js";
-import { collectWorkdayJobs } from "./sources/workday.js";
-import { collectAshbyJobs } from "./sources/ashby.js";
-import { collectOracleJobs } from "./sources/oracle.js";
-import { collectLinkedInJobs } from "./sources/linkedin.js";
-import { collectJPMorganJobs } from "./sources/jpmorgan.js";
-import { collectIntuitJobs } from "./sources/intuit.js";
-import { collectSmartRecruitersJobs } from "./sources/smartrecruiters.js";
-import { collectBloombergJobs } from "./sources/bloomberg.js";
-import { collectGoldmanSachsJobs } from "./sources/goldmansachs.js";
-import { collectAppleJobs } from "./sources/apple.js";
-import { collectUberJobs } from "./sources/uber.js";
-import { collectConfluentJobs } from "./sources/confluent.js";
-import { collectFordJobs } from "./sources/ford.js";
-import { collectCitiJobs } from "./sources/citi.js";
-import { collectMercedesBenzJobs } from "./sources/mercedesbenz.js";
-import { collectHexawareJobs } from "./sources/hexaware.js";
-import { collectExlJobs } from "./sources/exl.js";
-import { collectDynatraceJobs } from "./sources/dynatrace.js";
 import {
   initDb, closeDb, migrateFromJson,
-  getNewJobs, getUnnotifiedJobs, upsertJobs, pruneState, hasSeenJobs, expireSavedJobPosts,
-  updateJobLegitimacy, recordExternalDelivery
+  getUnnotifiedJobs, upsertJobs, pruneState, hasSeenJobs, expireSavedJobPosts,
+  updateJobLegitimacy, recordExternalDelivery, getRepostCount,
+  claimPersonalDelivery, releasePersonalDeliveryClaim
 } from "./state.js";
-import { checkJobDescription, extractExperienceTiers, pickTierYearsForUser } from "./jd-filter.js";
-import { checkLegitimacy } from "./legitimacy.js";
-import { isJobUrlLive } from "./liveness.js";
 import { ping, pingFail } from "./heartbeat.js";
+import {
+  allWindowCollectorsFailed,
+  collectorFailureReason,
+  createCollectorHealthWindow,
+} from "./collector-health.js";
 import { shouldRunScheduledPlaywrightSource } from "./playwright-guard.js";
+import { allCollectorsFailed, buildCollectorRegistry, collectBatch, inspectJobs } from "./pipeline.js";
 
 function timestamp() {
   return new Date().toISOString();
@@ -59,87 +37,46 @@ function isSqliteBusy(error) {
     /database is locked|SQLITE_BUSY/i.test(String(error?.message || ""));
 }
 
-async function backoffAfterDbBusy(config, label, error) {
+async function backoffAfterDbBusy(config, label, error, { notify = true } = {}) {
   const backoffMs = Math.max(0, Number(config.dbBusyBackoffMs) || 0);
   log(`[${label}] Database busy: ${error.message}. Backing off ${backoffMs}ms.`);
-  void pingFail(config.heartbeat.micro, `${label}: ${error.message}`);
+  if (notify) void pingFail(config.heartbeat.micro, `${label}: ${error.message}`);
   if (backoffMs > 0) await delay(backoffMs);
 }
 
-// --- Company Registry ---
-// Each entry: { key, collector, collectorArgs, lane }
-// lane: "fast" (every batch), "normal" (batched rotation), "slow" (separate timer)
-// collector: function reference or { fn, args } for parameterized collectors
-
-function buildRegistry(config) {
-  const registry = [];
-
-  // Helper: standalone collector (fn signature: fn(browser, config, log))
-  const solo = (key, fn, lane, options = {}) => {
-    registry.push({ key, collect: (cfg) => fn(null, cfg, log), lane, ...options });
-  };
-
-  // Helper: parameterized collector (fn signature: fn(browser, config, log, companyKey))
-  const param = (key, fn, lane) => {
-    registry.push({ key, collect: (cfg) => fn(null, cfg, log, key), lane });
-  };
-
-  // Fast lane — checked every batch cycle
-  solo("microsoft", collectMicrosoftJobs, "fast");
-  solo("amazon", collectAmazonJobs, "fast");
-
-  // Normal lane — standalone collectors
-  solo("google", collectGoogleJobs, "normal");
-  solo("meta", collectMetaJobs, "normal");
-  solo("goldmansachs", collectGoldmanSachsJobs, "normal");
-  solo("oracle", collectOracleJobs, "normal");
-  solo("jpmorgan", collectJPMorganJobs, "normal");
-  solo("ford", collectFordJobs, "normal");
-  solo("citi", collectCitiJobs, "normal");
-  solo("mercedesbenz", collectMercedesBenzJobs, "normal");
-  solo("hexaware", collectHexawareJobs, "normal");
-  solo("exl", collectExlJobs, "normal");
-  solo("dynatrace", collectDynatraceJobs, "normal");
-
-  // Slow lane — Playwright/HTML scrapers (run sequentially, less frequently)
-  solo("apple", collectAppleJobs, "slow");
-  solo("uber", collectUberJobs, "slow", { usesPlaywright: true });
-  solo("confluent", collectConfluentJobs, "slow", { usesPlaywright: true });
-  solo("linkedin", collectLinkedInJobs, "slow");
-  solo("intuit", collectIntuitJobs, "slow");
-  solo("bloomberg", collectBloombergJobs, "slow");
-
-  // Normal lane — parameterized ATS collectors (derived from central registry)
-  const atsCollectors = {
-    workday: collectWorkdayJobs,
-    greenhouse: collectGreenhouseJobs,
-    pcsx: collectPcsxJobs,
-    lever: collectLeverJobs,
-    ashby: collectAshbyJobs,
-    smartrecruiters: collectSmartRecruitersJobs
-  };
-
-  for (const company of COMPANIES) {
-    if (company.ats !== "solo" && atsCollectors[company.ats]) {
-      param(company.key, atsCollectors[company.ats], company.lane);
-    }
+function pingCollectionHealth(config, collection, label) {
+  if (!collection || collection.totalCount <= 0) return Promise.resolve();
+  if (allWindowCollectorsFailed(collection)) {
+    return pingFail(
+      config.heartbeat.micro,
+      collectorFailureReason(collection, label),
+    );
   }
+  return ping(config.heartbeat.micro);
+}
 
-  // Override lane for any companies in config.fastTrackCompanies
-  for (const entry of registry) {
-    if (config.fastTrackCompanies.includes(entry.key) && entry.lane !== "fast") {
-      entry.lane = "fast";
-    }
-  }
-
-  return registry;
+function logCollectionFailures(collection, label) {
+  if (!collection || collection.errorCount <= 0) return;
+  const keys = (collection.errors || [])
+    .map((failure) => String(failure?.key || "").trim())
+    .filter(Boolean)
+    .slice(0, 12);
+  const suffix = keys.length > 0 ? `: ${keys.join(", ")}` : "";
+  log(`[${label}] ${collection.errorCount}/${collection.totalCount} collector attempts failed${suffix}`);
 }
 
 // --- Notifications ---
 
-async function sendNotifications(config, jobs, filteredResults, options = {}) {
-  let notified = false;
-
+export async function sendNotifications(config, jobs, filteredResults, options = {}) {
+  const adapters = {
+    isDiscordBotConnected,
+    sendDiscordBotNotification,
+    sendDiscordNotification,
+    sendTelegramNotification,
+    ...options.deliveryAdapters,
+  };
+  const notifierOptions = { ...options };
+  delete notifierOptions.deliveryAdapters;
   const warningsMap = new Map();
   if (filteredResults) {
     for (const { job, warnings } of filteredResults) {
@@ -149,125 +86,162 @@ async function sendNotifications(config, jobs, filteredResults, options = {}) {
     }
   }
 
-  // Discord bot is the primary channel, but only when it's actually connected.
-  // A failed startup or a later disconnect must fall through to the webhook rather
-  // than throw every cycle and silently deliver nothing (heartbeats stay green).
   const botConfigured = config.notifications.discordBotToken && config.notifications.discordChannelId;
-  let botDelivered = false;
-  if (botConfigured && isDiscordBotConnected()) {
-    try {
-      await sendDiscordBotNotification(jobs, warningsMap, options);
-      botDelivered = true;
-      notified = true;
-    } catch (error) {
-      log(`[notify] Discord bot send failed (${error.message}); falling back to webhook if configured.`);
-    }
-  } else if (botConfigured) {
+  const botAvailable = Boolean(botConfigured && adapters.isDiscordBotConnected());
+  if (botConfigured && !botAvailable) {
     log("[notify] Discord bot not connected; using webhook fallback if configured.");
   }
-
-  // Webhook fallback, used when the bot path is unavailable or failed.
-  // Each notifier is individually try/caught: a deterministic notifier throw
-  // (e.g. deleted webhook → 404) used to propagate up and freeze the batch
-  // rotation on the same batch every cycle.
-  if (!botDelivered && config.notifications.discordWebhookUrl) {
-    try {
-      await sendDiscordNotification(config.notifications.discordWebhookUrl, jobs, options);
-      notified = true;
-    } catch (error) {
-      log(`[notify] Webhook send failed: ${error.message}`);
-    }
-  }
-
-  // Telegram is dormant (not required). Code kept for future re-enable:
-  // set TELEGRAM_ENABLED=1 plus the token/chat env vars to turn it back on.
   const telegramEnabled = process.env.TELEGRAM_ENABLED === "1";
-  if (telegramEnabled && config.notifications.telegramBotToken && config.notifications.telegramChatId) {
-    try {
-      await sendTelegramNotification(
-        config.notifications.telegramBotToken,
-        config.notifications.telegramChatId,
-        jobs,
-        options
-      );
-      notified = true;
-    } catch (error) {
-      log(`[notify] Telegram send failed: ${error.message}`);
+  const telegramAvailable = Boolean(
+    telegramEnabled &&
+    config.notifications.telegramBotToken &&
+    config.notifications.telegramChatId
+  );
+  const summary = { delivered: [], uncertain: [], failed: [], alreadyClaimed: [] };
+
+  function hasOutcome(result, field, job) {
+    return Boolean(result?.[field]?.some((candidate) => candidate.key === job.key));
+  }
+
+  function logOutcomeErrors(label, result) {
+    for (const error of result?.errors || []) {
+      log(`[notify] ${label}: ${error.message}`);
     }
   }
 
-  // Dedupe ledger: the Discord-bot path records job_posts per successful send (with
-  // the real message_id, needed for button/status updates). Webhook/telegram-only
-  // delivery records nothing, so getUnnotifiedJobs would re-admit these jobs every
-  // cycle. Record a ledger row here for any job delivered via a non-bot path.
-  if (notified && !botDelivered && !options.dryRun) {
-    for (const job of jobs) {
+  // Claim and deliver one job at a time. Claiming an entire batch up front
+  // strands the unsent tail if the process exits midway. The persistent
+  // sentinel also resolves concurrent collector processes atomically.
+  for (const job of jobs) {
+    let claimToken = null;
+    let claimed = options.dryRun;
+    if (!options.dryRun) {
       try {
-        recordExternalDelivery(job.key, config.notifications.discordChannelId);
+        claimToken = claimPersonalDelivery(job.key, config.notifications.discordChannelId);
+        claimed = Boolean(claimToken);
       } catch (error) {
-        log(`[notify] Ledger write failed for ${job.key}: ${error.message}`);
+        log(`[notify] Could not claim ${job.key}: ${error.message}`);
+        summary.failed.push(job);
+        continue;
+      }
+    }
+    if (!claimed) {
+      summary.alreadyClaimed.push(job);
+      continue;
+    }
+
+    let delivered = false;
+    let uncertain = false;
+
+    // Discord bot is primary because a successful post stores its real message
+    // id for the personal Saved/Applied controls.
+    if (botAvailable) {
+      try {
+        const result = await adapters.sendDiscordBotNotification([job], warningsMap, {
+          ...notifierOptions,
+          claimTokens: new Map([[job.key, claimToken]]),
+        });
+        delivered = hasOutcome(result, "deliveredJobs", job);
+        uncertain = hasOutcome(result, "uncertainJobs", job);
+        logOutcomeErrors("Discord bot", result);
+      } catch (error) {
+        // Formatting/channel lookup failures happen before channel.send and are
+        // therefore known failures that may safely use the fallback.
+        log(`[notify] Discord bot: ${error.message}`);
+      }
+    }
+
+    // A known bot failure falls through to the webhook. The per-chunk callback
+    // commits the ledger immediately; if that commit fails, the notifier marks
+    // the result uncertain and the durable claim prevents a duplicate retry.
+    if (!delivered && !uncertain && config.notifications.discordWebhookUrl) {
+      try {
+        const result = await adapters.sendDiscordNotification(
+          config.notifications.discordWebhookUrl,
+          [job],
+          {
+            ...notifierOptions,
+            async onChunkDelivered(deliveredJobs) {
+              if (options.dryRun) return;
+              for (const deliveredJob of deliveredJobs) {
+                const finalized = recordExternalDelivery(
+                  deliveredJob.key,
+                  config.notifications.discordChannelId,
+                  claimToken,
+                );
+                if (!finalized) throw new Error(`Delivery claim ownership was lost for ${deliveredJob.key}`);
+              }
+            },
+          }
+        );
+        delivered = hasOutcome(result, "deliveredJobs", job);
+        uncertain = hasOutcome(result, "uncertainJobs", job);
+        logOutcomeErrors("Discord webhook", result);
+      } catch (error) {
+        log(`[notify] Discord webhook: ${error.message}`);
+      }
+    }
+
+    // Telegram is intentionally a dormant fallback, not a second mirrored
+    // channel. A shared single-channel ledger cannot safely retry one mirror
+    // without duplicating another.
+    if (!delivered && !uncertain && telegramAvailable) {
+      try {
+        const result = await adapters.sendTelegramNotification(
+          config.notifications.telegramBotToken,
+          config.notifications.telegramChatId,
+          [job],
+          {
+            ...notifierOptions,
+            async onChunkDelivered(deliveredJobs) {
+              if (options.dryRun) return;
+              for (const deliveredJob of deliveredJobs) {
+                const finalized = recordExternalDelivery(deliveredJob.key, "telegram", claimToken);
+                if (!finalized) throw new Error(`Delivery claim ownership was lost for ${deliveredJob.key}`);
+              }
+            },
+          }
+        );
+        delivered = hasOutcome(result, "deliveredJobs", job);
+        uncertain = hasOutcome(result, "uncertainJobs", job);
+        logOutcomeErrors("Telegram", result);
+      } catch (error) {
+        log(`[notify] Telegram: ${error.message}`);
+      }
+    }
+
+    if (delivered) {
+      summary.delivered.push(job);
+    } else if (uncertain) {
+      summary.uncertain.push(job);
+    } else {
+      summary.failed.push(job);
+      if (!options.dryRun) {
+        try {
+          const released = releasePersonalDeliveryClaim(job.key, claimToken);
+          if (!released) log(`[notify] Claim for ${job.key} was retained because ownership changed.`);
+        } catch (error) {
+          log(`[notify] Failed to release claim for ${job.key}: ${error.message}`);
+        }
       }
     }
   }
 
-  return notified;
+  return summary;
 }
 
 // --- Description Fetching & Filtering ---
 
 async function fetchDescriptionsAndFilter(jobs) {
-  const results = [];
-  const CONCURRENCY = 5;
-  for (let i = 0; i < jobs.length; i += CONCURRENCY) {
-    const batch = jobs.slice(i, i + CONCURRENCY);
-    const batchResults = await Promise.all(batch.map(async (job) => {
-      // Check if the job URL is still live before processing
-      const live = await isJobUrlLive(job.url);
-      if (!live) {
-        log(`[liveness] Dead link: ${job.sourceLabel} — ${job.title} (${job.url})`);
-        return null;
-      }
-
-      const dirId = jobDirId(job);
-      let description = null;
-      try {
-        description = await fetchJobDescription(job);
-        await saveJobData(job, description || "");
-      } catch (error) {
-        log(`Failed to fetch description for ${dirId}: ${error.message}`);
-      }
-      const rawWarnings = checkJobDescription(description);
-
-      // Strip the generic experience warning — we'll add an education-aware
-      // one below that picks the tier matching PERSONAL_PROFILE.education_level
-      const warnings = rawWarnings.filter((w) => !/^\d+\+ years required/.test(w.text));
-
-      if (description) {
-        const tierInfo = extractExperienceTiers(description);
-        const yearsForUser = pickTierYearsForUser(
-          tierInfo.tiers,
-          tierInfo.fallbackMax,
-          PERSONAL_PROFILE.education_level
-        );
-        if (yearsForUser >= 5) {
-          warnings.push({ text: `${yearsForUser}+ years required`, severity: "soft" });
-        }
-      }
-
-      let legitimacy;
-      try {
-        legitimacy = checkLegitimacy(job, description);
-        updateJobLegitimacy(job.key, legitimacy.tier, JSON.stringify(legitimacy.signals));
-      } catch (err) {
-        log(`[legitimacy] Error for ${job.key}: ${err.message}`);
-        legitimacy = { tier: "high_confidence", topSignal: null, signals: [] };
-      }
-
-      return { job, warnings, legitimacy };
-    }));
-    results.push(...batchResults.filter(Boolean));
-  }
-  return results;
+  return inspectJobs(jobs, {
+    profile: PERSONAL_PROFILE,
+    logger: log,
+    persistDescriptions: true,
+    getRepostCount,
+    recordLegitimacy(job, legitimacy) {
+      updateJobLegitimacy(job.key, legitimacy.tier, JSON.stringify(legitimacy.signals));
+    },
+  });
 }
 
 // --- Process batch results: dedup, filter, notify, upsert ---
@@ -285,18 +259,20 @@ async function processBatchResults(config, flags, jobs, batchLabel) {
     return;
   }
 
+  // Canonicalize/remap persisted jobs before consulting the notification
+  // ledger. A source can change title, location, or URL for the same posting;
+  // state.upsertJobs migrates legacy mutable keys to the stable incoming key.
+  // Looking at job_posts first would misclassify that edit as a new job.
+  if (!flags.dryRun) {
+    upsertJobs(filtered, now);
+  }
+
   const newJobs = getUnnotifiedJobs(filtered);
   const freshJobs = newJobs.filter((job) => jobIsFresh(job, now, config));
   const staleJobs = newJobs.filter((job) => !jobIsFresh(job, now, config));
 
   if (staleJobs.length > 0) {
     log(`[${batchLabel}] Suppressed ${staleJobs.length} stale jobs.`);
-  }
-
-  // Upsert BEFORE notifying — prevents duplicate notifications if the next batch
-  // cycle runs before notifications finish sending
-  if (!flags.dryRun) {
-    upsertJobs(filtered, now);
   }
 
   if (freshJobs.length > 0) {
@@ -323,40 +299,27 @@ async function processBatchResults(config, flags, jobs, batchLabel) {
   }
 }
 
-// --- Batch Collection ---
-
-async function collectBatch(config, entries) {
-  const COLLECTOR_TIMEOUT_MS = 30_000;
-  let errorCount = 0;
-  const results = await Promise.all(
-    entries.map(async (entry) => {
-      let timer;
-      try {
-        return await Promise.race([
-          entry.collect(config),
-          new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error('Collector timed out after 30s')), COLLECTOR_TIMEOUT_MS);
-          }),
-        ]);
-      } catch (error) {
-        errorCount += 1;
-        log(`[${entry.key}] Collection error: ${error.message}`);
-        return [];
-      } finally {
-        clearTimeout(timer);
-      }
-    })
-  );
-  return {
-    jobs: dedupeJobs(results.flat()),
-    totalCount: entries.length,
-    errorCount,
-  };
-}
-
 // --- Main Loop: Rolling Window with Batching ---
 
-async function runBatchLoop(config, flags, registry) {
+export async function runBatchLoop(config, flags, registry, runtimeOptions = {}) {
+  const services = {
+    collectBatch,
+    delay,
+    expireSavedJobPosts,
+    hasSeenJobs,
+    ping,
+    pingFail,
+    processBatchResults,
+    pruneState,
+    upsertJobs,
+    ...(runtimeOptions.services || {}),
+  };
+  const maxCycles = runtimeOptions.maxCycles ?? Number.POSITIVE_INFINITY;
+  if (!(maxCycles === Number.POSITIVE_INFINITY ||
+      (Number.isInteger(maxCycles) && maxCycles > 0))) {
+    throw new TypeError("maxCycles must be a positive integer");
+  }
+
   const fastEntries = registry.filter((e) => e.lane === "fast");
   const normalEntries = registry.filter((e) => e.lane === "normal");
   const slowEntries = registry.filter((e) => e.lane === "slow");
@@ -378,24 +341,36 @@ async function runBatchLoop(config, flags, registry) {
   log(`Slow lane (${slowCycleMs / 1000}s interval): ${slowEntries.map((e) => e.key).join(", ")}`);
 
   // Initial prune
-  pruneState(config.retentionDays);
+  services.pruneState(config.retentionDays);
 
   // Seed mode: run everything once
   if (flags.seedOnly) {
     log("Seed-only mode. Collecting all sources...");
-    const { jobs: allJobs } = await collectBatch(config, [...fastEntries, ...normalEntries, ...slowEntries]);
+    const seedResult = await services.collectBatch(config, [...fastEntries, ...normalEntries, ...slowEntries], { logger: log });
+    const allJobs = seedResult.jobs;
+    if (allJobs.length === 0 || seedResult.errorCount === seedResult.totalCount) {
+      throw new Error(`Seed aborted: collected no jobs (${seedResult.errorCount}/${seedResult.totalCount} collectors failed)`);
+    }
     log(`Collected ${allJobs.length} total candidate jobs for seeding.`);
-    await processBatchResults(config, flags, allJobs, "seed");
+    await services.processBatchResults(config, flags, allJobs, "seed");
     return;
   }
 
   // First-run detection
-  if (!hasSeenJobs() && !flags.notifyExisting) {
+  if (!services.hasSeenJobs() && !flags.notifyExisting) {
     log("First run detected. Seeding all sources without notifications...");
-    const { jobs: allJobs } = await collectBatch(config, [...fastEntries, ...normalEntries, ...slowEntries]);
+    const seedResult = await services.collectBatch(config, [...fastEntries, ...normalEntries, ...slowEntries], { logger: log });
+    const allJobs = seedResult.jobs;
+    if (allJobs.length === 0 || seedResult.errorCount === seedResult.totalCount) {
+      await services.pingFail(config.heartbeat.micro, `initial seed failed: ${seedResult.errorCount}/${seedResult.totalCount} collectors failed and no jobs were collected`);
+      // Exit instead of entering the notification loop with an empty baseline.
+      // A process supervisor can retry safely; otherwise the first recovered
+      // scrape would alert the entire corpus as if every posting were new.
+      throw new Error("Initial seed failed; refusing to start notification rotation without a baseline");
+    }
     log(`Seeded ${allJobs.length} jobs.`);
     if (!flags.dryRun) {
-      upsertJobs(allJobs.filter((j) => jobMatchesCountryFilter(j, config.countryFilter)), timestamp());
+      services.upsertJobs(allJobs.filter((j) => jobMatchesCountryFilter(j, config.countryFilter)), timestamp());
     }
     if (!flags.watch) return;
     log("Seeding complete. Starting batch rotation...");
@@ -407,6 +382,14 @@ async function runBatchLoop(config, flags, registry) {
   const lastPlaywrightSourceRuns = new Map();
   let rotationCount = 0;
   let lastSavedExpiry = 0;
+  const normalRotationHealth = createCollectorHealthWindow();
+  let fastCollectorsUnhealthy = false;
+  let fastCollectorFailureMessage = "";
+  let normalCollectorsUnhealthy = false;
+  let normalCollectorFailureMessage = "";
+  let slowCollectorsUnhealthy = false;
+  let slowCollectorFailureMessage = "";
+  let completedCycles = 0;
   // pruneState does unindexed-ish range scans + a synchronous fs sweep; the
   // retention boundary only moves once a day, so run it hourly rather than on
   // every ~minute rotation. (The initial prune already ran above at startup.)
@@ -420,36 +403,51 @@ async function runBatchLoop(config, flags, registry) {
 
   async function finishRotation() {
     rotationCount++;
+    const collection = normalRotationHealth.take();
+    let maintenanceError = null;
+
     if (Date.now() - lastPruneAt >= PRUNE_INTERVAL_MS) {
-      lastPruneAt = Date.now();
       try {
-        pruneState(config.retentionDays);
+        services.pruneState(config.retentionDays);
+        lastPruneAt = Date.now();
       } catch (error) {
+        maintenanceError = `prune: ${error.message}`;
         if (isSqliteBusy(error)) {
-          await backoffAfterDbBusy(config, "prune", error);
+          await backoffAfterDbBusy(config, "prune", error, { notify: false });
         } else {
-          throw error;
+          log(`[prune] Error: ${error.message}`);
         }
       }
     }
+    logCollectionFailures(collection, "normal rotation");
     if (rotationCount % 10 === 0) {
       log(`Completed ${rotationCount} full rotations.`);
     }
+    return { collection, maintenanceError };
   }
 
   while (true) {
     const cycleStart = Date.now();
+    let cycleFailureReason = null;
 
     try {
       // --- Fast lane: runs on its own short interval ---
       if (fastEntries.length > 0 && (lastFastRun === 0 || (Date.now() - lastFastRun) >= fastTrackIntervalMs)) {
         lastFastRun = Date.now();
         try {
-          const { jobs: fastJobs } = await collectBatch(config, fastEntries);
-          await processBatchResults(config, flags, fastJobs, "fast");
+          const fastResult = await services.collectBatch(config, fastEntries, { logger: log });
+          logCollectionFailures(fastResult, "fast lane");
+          if (fastResult.totalCount > 0) {
+            fastCollectorsUnhealthy = allWindowCollectorsFailed(fastResult);
+            fastCollectorFailureMessage = fastCollectorsUnhealthy
+              ? collectorFailureReason(fastResult, "fast lane")
+              : "";
+          }
+          await services.processBatchResults(config, flags, fastResult.jobs, "fast");
         } catch (fastError) {
+          cycleFailureReason ||= `fast lane: ${fastError.message}`;
           if (isSqliteBusy(fastError)) {
-            await backoffAfterDbBusy(config, "fast lane", fastError);
+            await backoffAfterDbBusy(config, "fast lane", fastError, { notify: false });
           } else {
             log(`[fast lane] Error: ${fastError.message}`);
           }
@@ -460,31 +458,52 @@ async function runBatchLoop(config, flags, registry) {
       if (batches.length > 0) {
         const currentBatch = batches[batchIndex];
         const batchLabel = `batch ${batchIndex + 1}/${totalBatches}`;
+        let batchResult = null;
         try {
           log(`[${batchLabel}] Running ${currentBatch.length} companies: ${currentBatch.map((e) => e.key).join(", ")}`);
-          const batchResult = await collectBatch(config, currentBatch);
-          await processBatchResults(config, flags, batchResult.jobs, batchLabel);
-
-          if (batchResult.totalCount > 0 && batchResult.errorCount === batchResult.totalCount) {
-            void pingFail(config.heartbeat.micro, `all ${batchResult.totalCount} collectors in ${batchLabel} failed`);
-          } else {
-            void ping(config.heartbeat.micro);
-          }
-
-          if (advanceBatchIndex()) {
-            await finishRotation();
-          }
+          batchResult = await services.collectBatch(config, currentBatch, { logger: log });
+          normalRotationHealth.record(batchResult);
+          logCollectionFailures(batchResult, batchLabel);
+          await services.processBatchResults(config, flags, batchResult.jobs, batchLabel);
         } catch (batchError) {
+          if (!batchResult) {
+            normalRotationHealth.record({
+              totalCount: currentBatch.length,
+              errorCount: currentBatch.length,
+              errors: currentBatch.map((entry) => ({ key: entry.key, error: batchError })),
+            });
+          }
+          cycleFailureReason ||= `${batchLabel}: ${batchError.message}`;
           // Advance rotation on EVERY error. Previously only SQLITE_BUSY
           // advanced; any other persistent per-batch failure kept batchIndex
           // frozen, silently starving all later batches while the heartbeat
           // stayed green on the fast lane.
-          advanceBatchIndex();
           if (isSqliteBusy(batchError)) {
-            await backoffAfterDbBusy(config, batchLabel, batchError);
+            await backoffAfterDbBusy(config, batchLabel, batchError, { notify: false });
           } else {
             log(`[${batchLabel}] Error: ${batchError.message}`);
-            void pingFail(config.heartbeat.micro, `${batchLabel}: ${batchError.message}`);
+          }
+        }
+
+        // Advance exactly once even when collection or processing fails. If the
+        // final batch errors, still close/reset the window and run rotation
+        // maintenance instead of carrying stale counts into the next rotation.
+        if (advanceBatchIndex()) {
+          const completion = await finishRotation();
+          if (completion.maintenanceError) {
+            cycleFailureReason ||= completion.maintenanceError;
+          }
+          if (completion.collection.totalCount > 0) {
+            if (allWindowCollectorsFailed(completion.collection)) {
+              normalCollectorsUnhealthy = true;
+              normalCollectorFailureMessage = collectorFailureReason(
+                completion.collection,
+                "normal rotation",
+              );
+            } else {
+              normalCollectorsUnhealthy = false;
+              normalCollectorFailureMessage = "";
+            }
           }
         }
       }
@@ -493,6 +512,7 @@ async function runBatchLoop(config, flags, registry) {
       if (slowEntries.length > 0 && (Date.now() - lastSlowRun) >= slowCycleMs) {
         log(`Running slow lane (${slowEntries.length} sources)...`);
         // Run slow entries sequentially with a 60-second timeout each
+        const slowHealth = createCollectorHealthWindow();
         for (const entry of slowEntries) {
           if (entry.usesPlaywright) {
             const schedule = shouldRunScheduledPlaywrightSource(config);
@@ -509,40 +529,54 @@ async function runBatchLoop(config, flags, registry) {
             lastPlaywrightSourceRuns.set(entry.key, Date.now());
           }
 
-          let slowTimer;
+          let entryResult = null;
           try {
             const entryConfig = entry.usesPlaywright
               ? { ...config, maxPostAgeMinutes: config.nightlyPlaywrightMaxPostAgeMinutes }
               : config;
-            const jobs = await Promise.race([
-              entry.collect(entryConfig),
-              new Promise((_, reject) => {
-                slowTimer = setTimeout(() => reject(new Error("Timeout after 60s")), 60000);
-              })
-            ]);
-            clearTimeout(slowTimer);
-            await processBatchResults(entryConfig, flags, jobs, `slow:${entry.key}`);
+            entryResult = await services.collectBatch(entryConfig, [entry], {
+              logger: log,
+              timeoutMs: 60_000,
+            });
+            slowHealth.record(entryResult);
+            await services.processBatchResults(entryConfig, flags, entryResult.jobs, `slow:${entry.key}`);
           } catch (error) {
-            clearTimeout(slowTimer);
+            if (!entryResult) {
+              slowHealth.record({
+                totalCount: 1,
+                errorCount: 1,
+                errors: [{ key: entry.key, error }],
+              });
+            }
+            cycleFailureReason ||= `slow lane: ${error.message}`;
             if (isSqliteBusy(error)) {
-              await backoffAfterDbBusy(config, `slow:${entry.key}`, error);
+              await backoffAfterDbBusy(config, `slow:${entry.key}`, error, { notify: false });
             } else {
               log(`[slow:${entry.key}] Error: ${error.message}`);
             }
           }
+        }
+        const slowCollection = slowHealth.take();
+        logCollectionFailures(slowCollection, "slow lane");
+        if (slowCollection.totalCount > 0) {
+          slowCollectorsUnhealthy = allWindowCollectorsFailed(slowCollection);
+          slowCollectorFailureMessage = slowCollectorsUnhealthy
+            ? collectorFailureReason(slowCollection, "slow lane")
+            : "";
         }
         lastSlowRun = Date.now();
       }
 
       // Hourly: expire saved job_posts older than 7 days
       if (Date.now() - lastSavedExpiry >= 60 * 60 * 1000) {
-        lastSavedExpiry = Date.now();
         try {
-          const expired = expireSavedJobPosts();
+          const expired = services.expireSavedJobPosts();
+          lastSavedExpiry = Date.now();
           if (expired > 0) log(`Expired ${expired} saved job posts`);
         } catch (error) {
           if (isSqliteBusy(error)) {
-            await backoffAfterDbBusy(config, "saved-expiry", error);
+            cycleFailureReason ||= `saved-expiry: ${error.message}`;
+            await backoffAfterDbBusy(config, "saved-expiry", error, { notify: false });
           } else {
             throw error;
           }
@@ -550,15 +584,32 @@ async function runBatchLoop(config, flags, registry) {
       }
     } catch (cycleError) {
       log(`[cycle] Unhandled error: ${cycleError.message}`);
-      void pingFail(config.heartbeat.micro, cycleError.message);
+      cycleFailureReason ||= `cycle: ${cycleError.message}`;
     }
 
-    if (!flags.watch) break;
+    // Emit one ordered state transition per cycle. Individual source failures
+    // are logged; a complete fast/slow lane or full normal rotation outage
+    // stays red until that scheduling window next succeeds. Runtime/DB failures
+    // take precedence.
+    if (cycleFailureReason) {
+      await services.pingFail(config.heartbeat.micro, cycleFailureReason);
+    } else if (normalCollectorsUnhealthy) {
+      await services.pingFail(config.heartbeat.micro, normalCollectorFailureMessage);
+    } else if (fastCollectorsUnhealthy) {
+      await services.pingFail(config.heartbeat.micro, fastCollectorFailureMessage);
+    } else if (slowCollectorsUnhealthy) {
+      await services.pingFail(config.heartbeat.micro, slowCollectorFailureMessage);
+    } else {
+      await services.ping(config.heartbeat.micro);
+    }
+
+    completedCycles++;
+    if (!flags.watch || completedCycles >= maxCycles) break;
 
     // Wait before next batch
     const elapsed = Date.now() - cycleStart;
     const waitMs = Math.max(500, batchDelayMs - elapsed);
-    await delay(waitMs);
+    await services.delay(waitMs);
   }
 }
 
@@ -570,9 +621,14 @@ async function runOnce(config, flags, registry) {
   pruneState(config.retentionDays);
 
   log("Single run: collecting all sources...");
-  const { jobs: allJobs } = await collectBatch(config, allEntries);
-  log(`Collected ${allJobs.length} total candidate jobs.`);
-  await processBatchResults(config, flags, allJobs, "all");
+  const collection = await collectBatch(config, allEntries, { logger: log });
+  if (allCollectorsFailed(collection)) {
+    await pingCollectionHealth(config, collection, "single run");
+    throw new Error(`Single run failed: all ${collection.totalCount} collectors failed`);
+  }
+  log(`Collected ${collection.jobs.length} total candidate jobs.`);
+  await processBatchResults(config, flags, collection.jobs, "all");
+  await pingCollectionHealth(config, collection, "single run");
 }
 
 // --- Flags ---
@@ -849,7 +905,7 @@ async function main() {
   migrateFromJson(config.stateFile);
 
   // Build company registry
-  const registry = buildRegistry(config);
+  const registry = buildCollectorRegistry(config, log);
   const fastCount = registry.filter((e) => e.lane === "fast").length;
   const normalCount = registry.filter((e) => e.lane === "normal").length;
   const slowCount = registry.filter((e) => e.lane === "slow").length;
@@ -881,7 +937,10 @@ async function main() {
   closeDb();
 }
 
-main().catch((error) => {
-  console.error(`[${timestamp()}] ${error.message}`);
-  process.exitCode = 1;
-});
+const entrypoint = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : "";
+if (import.meta.url === entrypoint) {
+  main().catch((error) => {
+    console.error(`[${timestamp()}] ${error.message}`);
+    process.exitCode = 1;
+  });
+}

@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { resolveDbFile } from "../src/db-path.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
@@ -53,8 +54,8 @@ if (missing.length) {
   process.exit(1);
 }
 
-const dbPath = process.env.DB_PATH || process.env.DB_FILE || path.resolve(PROJECT_ROOT, "data/jobs.db");
-const db = new Database(dbPath);
+const dbPath = resolveDbFile();
+const db = new Database(dbPath, { fileMustExist: true });
 
 const PERM_VIEW_CHANNEL = 1n << 10n;
 const PERM_READ_HISTORY = 1n << 16n;

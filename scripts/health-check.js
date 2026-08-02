@@ -12,7 +12,6 @@ import Database from "better-sqlite3";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const DB_PATH = path.join(PROJECT_ROOT, "data", "jobs.db");
 const LOG_DIR = path.join(PROJECT_ROOT, "data", "health-logs");
 
 // Load .env so DISCORD_WEBHOOK_URL is available when run via cron
@@ -31,6 +30,9 @@ if (fs.existsSync(envFile)) {
     if (!(key in process.env)) process.env[key] = val;
   }
 }
+
+const { resolveDbFile } = await import("../src/db-path.js");
+const DB_PATH = resolveDbFile();
 
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
@@ -167,7 +169,10 @@ check("Country filter integrity", () => {
     FROM seen_jobs
     WHERE first_seen_at > datetime('now', '-24 hours')
     AND country_code = 'NON-US'
-    AND key IN (SELECT job_key FROM job_posts)
+    AND key IN (
+      SELECT job_key FROM job_posts
+       WHERE status != 'delivery_claimed'
+    )
   `).all();
 
   // Check 5b: Jobs tagged US but with clearly non-US location text (e.g. Visa India bug)
@@ -223,7 +228,7 @@ check("Notification ratio", () => {
     "SELECT COUNT(*) as cnt FROM seen_jobs WHERE first_seen_at > datetime('now', '-24 hours')"
   ).get();
   const notified24h = db.prepare(
-    "SELECT COUNT(*) as cnt FROM job_posts WHERE job_key IN (SELECT key FROM seen_jobs WHERE first_seen_at > datetime('now', '-24 hours'))"
+    "SELECT COUNT(*) as cnt FROM job_posts WHERE status != 'delivery_claimed' AND job_key IN (SELECT key FROM seen_jobs WHERE first_seen_at > datetime('now', '-24 hours'))"
   ).get();
 
   db.close();
@@ -235,7 +240,69 @@ check("Notification ratio", () => {
   };
 });
 
-// --- Check 8: Stale companies (no jobs in 7 days) ---
+// --- Check 8: Ambiguous personal delivery outcomes ---
+check("Unresolved personal deliveries", () => {
+  const db = new Database(DB_PATH, { readonly: true });
+  const columns = new Set(db.pragma("table_info(job_posts)").map((column) => column.name));
+  if (!columns.has("delivery_claimed_at")) {
+    db.close();
+    return { status: "skipped", reason: "delivery claim metadata has not been migrated yet" };
+  }
+
+  const unresolved = db.prepare(`
+    SELECT COUNT(*) AS cnt
+      FROM job_posts
+     WHERE status = 'delivery_claimed'
+  `).get().cnt;
+  const olderThanOneHour = db.prepare(`
+    SELECT COUNT(*) AS cnt
+     FROM job_posts
+     WHERE status = 'delivery_claimed'
+       AND (delivery_claimed_at IS NULL OR datetime(delivery_claimed_at) <= datetime('now', '-1 hour'))
+  `).get().cnt;
+  db.close();
+
+  if (unresolved > 0) {
+    report.warnings.push(`${unresolved} personal delivery outcome(s) need owner reconciliation`);
+  }
+  if (olderThanOneHour > 0) {
+    report.warnings.push(`${olderThanOneHour} unresolved personal delivery outcome(s) are older than one hour`);
+  }
+  return { unresolved, olderThanOneHour };
+});
+
+// --- Check 9: Multi-user sends with an unresolved remote outcome ---
+check("Multi-user delivery outcomes", () => {
+  const db = new Database(DB_PATH, { readonly: true });
+  const table = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'delivery_claims'"
+  ).get();
+  if (!table) {
+    db.close();
+    return { status: "skipped", reason: "delivery_claims has not been migrated yet" };
+  }
+
+  const counts = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN status IN ('sending', 'digest_sending')
+                         AND lease_until > ? THEN 1 ELSE 0 END), 0) AS inFlight,
+      COALESCE(SUM(CASE WHEN status IN ('sending', 'digest_sending')
+                         AND (lease_until IS NULL OR lease_until <= ?) THEN 1 ELSE 0 END), 0) AS staleInFlight,
+      COALESCE(SUM(CASE WHEN status = 'uncertain' THEN 1 ELSE 0 END), 0) AS uncertain
+      FROM delivery_claims
+  `).get(new Date().toISOString(), new Date().toISOString());
+  db.close();
+
+  if (counts.uncertain > 0) {
+    report.warnings.push(`${counts.uncertain} multi-user delivery outcome(s) are uncertain and suppressed from retry`);
+  }
+  if (counts.staleInFlight > 0) {
+    report.warnings.push(`${counts.staleInFlight} multi-user send(s) have an expired sending lease and need recovery`);
+  }
+  return counts;
+});
+
+// --- Check 10: Stale companies (no jobs in 7 days) ---
 check("Stale companies", () => {
   const db = new Database(DB_PATH, { readonly: true });
 

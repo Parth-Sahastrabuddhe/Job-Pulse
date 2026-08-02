@@ -7,10 +7,10 @@
  *   topSignal: string | null  — most significant signal message (shown in Discord)
  *   signals:   string[]       — all fired signal messages
  *
- * opts.getRepostCountFn — injectable for testing; defaults to state.js export
+ * opts.getRepostCountFn — injectable persistence lookup. The processing module
+ * remains storage-agnostic; callers that do not supply it simply omit the
+ * historical repost signal.
  */
-
-import { getRepostCount as _defaultGetRepostCount } from "./state.js";
 
 // Strip seniority/level words before repost title matching
 const SENIORITY_STRIP_RE = /\b(senior|sr\.?|junior|jr\.?|lead|staff|principal|distinguished)\b|\s+[IVX]+\s*$|\s+[IVX]+$/gi;
@@ -91,7 +91,7 @@ function signalEvergreen(description) {
   return null;
 }
 
-export function checkLegitimacy(job, description, { getRepostCountFn = _defaultGetRepostCount } = {}) {
+export function checkLegitimacy(job, description, { getRepostCountFn = () => 0 } = {}) {
   try {
     const rawSignals = {
       repost:    signalRepost(job, getRepostCountFn),

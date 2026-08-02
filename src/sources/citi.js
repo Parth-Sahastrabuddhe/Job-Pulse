@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseCitiJobs(html) {
   const jobs = [];
@@ -51,8 +51,12 @@ export async function collectCitiJobs(_unused, config, log) {
   try {
     const htmls = await Promise.all(urls.map((u) =>
       fetchWithTimeout(u, {
-        headers: { "accept": "text/html", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
-      }).then((r) => (r.ok ? r.text() : "")).catch(() => "")
+        headers: { "accept": "text/html", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        signal: config.signal,
+      }).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
     ));
 
     const jobs = htmls.flatMap((html) => parseCitiJobs(html));
@@ -61,6 +65,6 @@ export async function collectCitiJobs(_unused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Citi API error: ${error.message}`);
-    return [];
+    throw asCollectorError("citi", error);
   }
 }

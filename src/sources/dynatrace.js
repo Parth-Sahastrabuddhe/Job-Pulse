@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseDynatraceJob(result) {
   const raw = result.raw || {};
@@ -40,16 +40,18 @@ export async function collectDynatraceJobs(_unused, config, log) {
         "origin": "https://www.dynatrace.com",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
       },
-      body: JSON.stringify({ numberOfResults: 100 })
+      body: JSON.stringify({ numberOfResults: 100 }),
+      signal: config.signal,
     });
 
     if (!response.ok) {
       log(`Dynatrace API returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
-    const rawResults = data?.results || [];
+    if (!Array.isArray(data?.results)) throw new Error("response did not contain a results array");
+    const rawResults = data.results;
 
     const jobs = rawResults
       .map((r) => parseDynatraceJob(r))
@@ -59,6 +61,6 @@ export async function collectDynatraceJobs(_unused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Dynatrace API error: ${error.message}`);
-    return [];
+    throw asCollectorError("dynatrace", error);
   }
 }

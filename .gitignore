@@ -1,6 +1,8 @@
 node_modules/
 data/
 .env
+.env.*
+!.env.example
 *.corrupt.*
 *.migrated
 docs/
@@ -10,6 +12,8 @@ google-credentials.json
 CLAUDE.md
 .claude/
 web/AGENTS.md
+web/.env.local*
+!web/.env.local.example
 
 # Personal notes & scratch
 hackerrank-ai-interview-notes.md
@@ -22,6 +26,7 @@ interview-prep/
 schema-review.md
 Discord Posting.png
 .npmrc
+extension/
 
 # Non-project images at repo root
 autobot.jpg
@@ -29,8 +34,12 @@ micro-bot.png
 
 # Personal automation
 scripts/delete_arpit_rows.py
+scripts/sheet-stats.js
+scripts/debug-missing.js
 
 # Superpowers workspace
 .superpowers/
-# Automation result files (written by the add-company unattended session)
-.add-company-result.json
+
+# Local release-audit and private-companion migration notes
+audit-remaining-findings.md
+personal-tracker-private-migration.md

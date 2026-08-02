@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseHexawareJob(raw) {
   const title = raw.Title?.trim();
@@ -53,16 +53,19 @@ export async function collectHexawareJobs(_unused, config, log) {
         "accept": "application/json",
         "accept-encoding": "identity",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      }
+      },
+      signal: config.signal,
     });
 
     if (!response.ok) {
       log(`Hexaware API returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
-    const rawJobs = data?.items?.[0]?.requisitionList || [];
+    if (!Array.isArray(data?.items)) throw new Error("response did not contain an items array");
+    const rawJobs = data.items.length === 0 ? [] : data.items[0]?.requisitionList;
+    if (!Array.isArray(rawJobs)) throw new Error("response did not contain requisitions");
 
     const jobs = rawJobs
       .map((raw) => parseHexawareJob(raw))
@@ -72,6 +75,6 @@ export async function collectHexawareJobs(_unused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Hexaware API error: ${error.message}`);
-    return [];
+    throw asCollectorError("hexaware", error);
   }
 }

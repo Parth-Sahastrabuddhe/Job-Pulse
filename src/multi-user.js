@@ -17,18 +17,13 @@ import {
   ButtonBuilder,
   ButtonStyle,
 } from "discord.js";
-import crypto from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const execFileAsync = promisify(execFile);
 import { initDb, getDb, closeDb, cleanupExpiredOtps, withBusyRetry } from "./state.js";
 import {
   getActiveUsers,
-  getUserSeenJobKeys,
   getMuDeliveredJobKeys,
   markJobNotified,
   updateJobStatus,
@@ -49,6 +44,18 @@ import {
   getFitResult,
   saveFitResult,
   countFitChecksToday,
+  claimJobDelivery,
+  releaseJobDeliveryClaim,
+  beginJobDeliverySend,
+  finishJobDeliveryClaim,
+  finishJobDeliverySend,
+  claimQueuedJobDelivery,
+  releaseQueuedJobDeliveryClaim,
+  finishQueuedJobDeliveryClaim,
+  beginQueuedJobDeliverySend,
+  finishQueuedJobDeliverySend,
+  recoverExpiredDeliveryClaims,
+  findJobKeyByHash,
 } from "./multi-user-state.js";
 import { filterJobForUser } from "./filter.js";
 import { isJobUrlLive } from "./liveness.js";
@@ -59,19 +66,8 @@ import { fetchJobDescription, getJobDir, saveJobData } from "./job-description.j
 import { isFitConfigured, runUserFitCheck, formatFitReply, mapLlmErrorToMessage } from "./mu-fit-check.js";
 import { getDeliveryAction, shouldDeliverDigest, isInQuietHours } from "./mu-scheduler.js";
 import { sendJobDm, sendDigestDm, jobButtonHash, buildDmButtons } from "./mu-delivery.js";
-import { getConfig } from "./config.js";
+import { getConfig } from "./private-config.js";
 import { ping, pingFail } from "./heartbeat.js";
-import {
-  buildAddressSlashCommands,
-  handleAddAddressCommand,
-  handleAddressModalSubmit,
-  handleSearchAddressCommand,
-  handleAddressSelect,
-  handleAddressDeleteSelected,
-  ADDRESS_MODAL_ID,
-  ADDRESS_SEL_MENU_ID,
-  ADDRESS_DELSEL_PREFIX,
-} from "./address-book.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bootstrap
@@ -131,7 +127,7 @@ loadEnvFile();
 // DB
 // ─────────────────────────────────────────────────────────────────────────────
 
-initDb(path.join(PROJECT_ROOT, "data", "jobs.db"));
+initDb(getConfig().dbFile);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Discord client
@@ -174,47 +170,6 @@ const DEAD_LINK_ABANDON_AFTER = 3;
  * @param {number} userId
  * @returns {string|null}
  */
-// Cache hash -> job_key so repeated button clicks don't re-scan and re-hash the
-// tables on every click. The hash is a deterministic SHA1 prefix of the key, so
-// entries never go stale; the cache only grows to the number of distinct jobs
-// scanned (bounded by seen_jobs, which is pruned to the retention window).
-const _hashToKeyCache = new Map();
-
-function findJobKeyByHash(hash, userId) {
-  const cached = _hashToKeyCache.get(hash);
-  if (cached) return cached;
-
-  const db = getDb();
-
-  // Common path: the job is in the user's delivered set (bounded per user).
-  const rows = db
-    .prepare("SELECT job_key FROM user_seen_jobs WHERE user_id = ?")
-    .all(userId);
-  for (const row of rows) {
-    const h = jobButtonHash(row.job_key);
-    _hashToKeyCache.set(h, row.job_key);
-    if (h === hash) return row.job_key;
-  }
-
-  // Fallback: scan seen_jobs once, populate the cache for every key (so future
-  // clicks are O(1)), and auto-heal user_seen_jobs for the matched job.
-  const allKeys = db.prepare("SELECT key FROM seen_jobs").all();
-  for (const row of allKeys) {
-    const h = jobButtonHash(row.key);
-    _hashToKeyCache.set(h, row.key);
-    if (h === hash) {
-      try {
-        markJobNotified(userId, row.key);
-      } catch (err) {
-        console.error(`[multi-user] markJobNotified failed: ${err.message}`);
-      }
-      return row.key;
-    }
-  }
-
-  return null;
-}
-
 /**
  * Load the cached JD for a seen_jobs row, fetching and saving it when missing.
  * Returns null when no usable description can be obtained.
@@ -546,54 +501,6 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // ── /add-address slash command ─────────────────────────────────────────
-    if (interaction.isChatInputCommand() && interaction.commandName === "add-address") {
-      const profile = getUserProfile(interaction.user.id);
-      if (!profile) {
-        await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
-        return;
-      }
-      await handleAddAddressCommand(interaction);
-      return;
-    }
-
-    // ── /search-address slash command ──────────────────────────────────────
-    // Defer FIRST — getUserProfile can block up to 5s on SQLITE_BUSY when
-    // the poll/digest loops hold a write transaction. Deferring beats
-    // Discord's 3-second interaction-response window even under DB contention.
-    if (interaction.isChatInputCommand() && interaction.commandName === "search-address") {
-      await interaction.deferReply({ ephemeral: true });
-      const profile = getUserProfile(interaction.user.id);
-      if (!profile) {
-        await interaction.editReply({ content: "You don't have a profile yet. Please sign up first." });
-        return;
-      }
-      await handleSearchAddressCommand(interaction, profile, getDb());
-      return;
-    }
-
-    // ── /add-address modal submission ──────────────────────────────────────
-    if (interaction.isModalSubmit() && interaction.customId === ADDRESS_MODAL_ID) {
-      const profile = getUserProfile(interaction.user.id);
-      if (!profile) {
-        await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
-        return;
-      }
-      await handleAddressModalSubmit(interaction, profile, getDb());
-      return;
-    }
-
-    // ── /search-address multi-select dropdown interaction ──────────────────
-    if (interaction.isStringSelectMenu() && interaction.customId === ADDRESS_SEL_MENU_ID) {
-      const profile = getUserProfile(interaction.user.id);
-      if (!profile) {
-        await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
-        return;
-      }
-      await handleAddressSelect(interaction, profile);
-      return;
-    }
-
     // ── Button interactions ────────────────────────────────────────────────
     if (!interaction.isButton()) return;
 
@@ -605,17 +512,6 @@ client.on("interactionCreate", async (interaction) => {
 
     // Only handle mu_ prefixed buttons
     if (!action.startsWith("mu_")) return;
-
-    // ── mu_addr_delsel — delete multiple selected addresses ────────────────
-    if (action === ADDRESS_DELSEL_PREFIX) {
-      const profile = getUserProfile(interaction.user.id);
-      if (!profile) {
-        await interaction.reply({ content: "You don't have a profile yet. Please sign up first.", ephemeral: true });
-        return;
-      }
-      await handleAddressDeleteSelected(interaction, profile, payload, getDb());
-      return;
-    }
 
     // ── mu_applied (show confirmation) ─────────────────────────────────────
     if (action === "mu_applied") {
@@ -669,18 +565,6 @@ client.on("interactionCreate", async (interaction) => {
       const updatedButtons = buildDmButtons(hash, jobUrl, "applied", { fitCheck: isFeatureEnabled("mu_fit_check") });
       await interaction.editReply({ components: updatedButtons });
 
-      // Update Google Sheet in background — only for the sheet owner
-      if (row?.source_label && row?.title && profile.discord_id === ADMIN_DISCORD_ID) {
-        try {
-          const scriptPath = path.resolve(PROJECT_ROOT, "scripts", "add_application.py");
-          const isLinux = process.platform === "linux";
-          const pythonCmd = isLinux ? path.resolve(process.env.HOME, "venv", "bin", "python") : "python";
-          const tz = profile.quiet_hours_tz || "America/New_York";
-          await execFileAsync(pythonCmd, [scriptPath, row.source_label, row.title, jobUrl, tz]);
-        } catch (sheetErr) {
-          console.error(`[mu-applied] Sheet update failed: ${sheetErr.message}`);
-        }
-      }
       return;
     }
 
@@ -1112,6 +996,7 @@ function advanceMuCursor(db, nowIso, holdAtMs = null) {
     flushDmLog();
   } catch (err) {
     console.error(`[multi-user] dm_log flush before cursor persist failed: ${err.message}`);
+    return false;
   }
 
   const nowMs = Date.parse(nowIso);
@@ -1124,16 +1009,21 @@ function advanceMuCursor(db, nowIso, holdAtMs = null) {
   if (Number.isFinite(currentMs) && targetMs < currentMs) targetMs = currentMs;
 
   const trailed = new Date(targetMs).toISOString();
-  lastPollAt = trailed;
   try {
-    db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(trailed);
+    withBusyRetry(() =>
+      db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('mu_lastPollAt', ?)").run(trailed)
+    );
   } catch (err) {
     console.error(`[multi-user] Cursor persist failed: ${err.message}`);
+    return false;
   }
+  lastPollAt = trailed;
+  return true;
 }
 
 async function runPollCycle() {
   const db      = getDb();
+  recoverExpiredDeliveryClaims();
   const cutoff  = lastPollAt;
   const nowIso  = new Date().toISOString();
 
@@ -1257,11 +1147,13 @@ async function runPollCycle() {
     } catch (err) {
       console.error(`[multi-user] Setup error for user ${user.id}: ${err.message}`);
       safeLogError("multi-user-poll-user", `user=${user.id} ${err.message}`);
+      for (const job of freshJobs) holdCursorAt(job);
       continue;
     }
 
     if (profileInvalid) {
       safeLogError("filter-bad-profile", `user=${user.id}`);
+      for (const job of freshJobs) holdCursorAt(job);
       continue;
     }
 
@@ -1272,6 +1164,9 @@ async function runPollCycle() {
     // remaining jobs in this poll window — they would become permanently
     // invisible once lastPollAt advances past their first_seen_at.
     for (const job of matchedJobs) {
+      let claimed = false;
+      let claimToken = null;
+      let releaseClaimOnError = true;
       try {
         const liveKey = `${user.id}:${job.key}`;
 
@@ -1336,34 +1231,82 @@ async function runPollCycle() {
           dmOptions.notificationChannelId = channelOverride;
         }
 
+        claimToken = claimJobDelivery(user.id, job.key);
+        claimed = Boolean(claimToken);
+        if (!claimed) {
+          // Another instance owns the lease. Keep the shared cursor behind this
+          // row until that instance records a terminal outcome.
+          holdCursorAt(job);
+          continue;
+        }
+
         if (action === "send") {
+          dmOptions.onBeforeSend = () => {
+            const began = beginJobDeliverySend(user.id, job.key, claimToken);
+            if (began) releaseClaimOnError = false;
+            return began;
+          };
           const result = await sendJobDm(client, user.discord_id, job, user.first_name, dmOptions);
           if (result.ok) {
-            recordJobDelivery(user.id, job.key, "sent");
+            // Discord accepted the message. If the following ledger write
+            // fails, retain the lease rather than immediately risking a second
+            // send from another process.
+            releaseClaimOnError = false;
+            const finished = finishJobDeliverySend(user.id, job.key, claimToken, "sent");
+            claimed = false;
             transientRetryAt.delete(liveKey);
+            if (!finished) holdCursorAt(job);
           } else if (result.permanent) {
             // DMs closed / bot blocked / unknown user — retrying cannot help.
             // dm_closed dedups permanently so the job stops looping.
-            recordJobDelivery(user.id, job.key, "dm_closed");
+            releaseClaimOnError = false;
+            const finished = result.sendStarted
+              ? finishJobDeliverySend(user.id, job.key, claimToken, "dm_closed")
+              : finishJobDeliveryClaim(user.id, job.key, claimToken, "dm_closed");
+            claimed = false;
             transientRetryAt.delete(liveKey);
+            if (!finished) holdCursorAt(job);
             safeLogError("dm-closed", `user=${user.id} discord=${user.discord_id} job=${job.title} (${job.sourceLabel})`);
+          } else if (result.uncertain) {
+            releaseClaimOnError = false;
+            const finished = finishJobDeliverySend(user.id, job.key, claimToken, "uncertain");
+            claimed = false;
+            transientRetryAt.delete(liveKey);
+            if (!finished) holdCursorAt(job);
+            console.error(`[multi-user] DM outcome uncertain for ${user.discord_id} (user ${user.id}): ${job.title}`);
+            safeLogError("dm-uncertain", `user=${user.id} discord=${user.discord_id} job=${job.title} (${job.sourceLabel})`);
           } else {
-            // Transient failure: record it, space out retries, and hold the
-            // cursor so the job stays in the poll window instead of being
-            // dropped forever once the 60s margin passes.
-            recordJobDelivery(user.id, job.key, "failed");
-            transientRetryAt.set(liveKey, Date.now());
-            holdCursorAt(job);
-            console.error(`[multi-user] DM to ${user.discord_id} (user ${user.id}) failed transiently for ${job.title}`);
-            safeLogError("dm-failed", `user=${user.id} discord=${user.discord_id} job=${job.title} (${job.sourceLabel})`);
+            // An explicit Discord 4xx or a target/preparation failure proves no
+            // message was accepted, so this claim generation alone may retry.
+            releaseClaimOnError = true;
+            const released = result.sendStarted
+              ? finishJobDeliverySend(user.id, job.key, claimToken, "failed")
+              : finishJobDeliveryClaim(user.id, job.key, claimToken, "failed");
+            claimed = false;
+            if (released) {
+              transientRetryAt.set(liveKey, Date.now());
+              holdCursorAt(job);
+              console.error(`[multi-user] DM to ${user.discord_id} (user ${user.id}) was explicitly rejected for ${job.title}`);
+              safeLogError("dm-failed", `user=${user.id} discord=${user.discord_id} job=${job.title} (${job.sourceLabel})`);
+            } else holdCursorAt(job);
           }
         } else {
-          recordJobDelivery(user.id, job.key, "queued");
+          if (!finishJobDeliveryClaim(user.id, job.key, claimToken, "queued")) {
+            holdCursorAt(job);
+          }
+          claimed = false;
         }
 
         // Rate limit: 300ms between DMs
         await new Promise((resolve) => setTimeout(resolve, 300));
       } catch (err) {
+        if (claimed && releaseClaimOnError) {
+          try { releaseJobDeliveryClaim(user.id, job.key, claimToken); }
+          catch (releaseErr) {
+            console.error(`[multi-user] Failed to release delivery claim for ${job.key}: ${releaseErr.message}`);
+          }
+        }
+        holdCursorAt(job);
         console.error(`[multi-user] Error on job ${job.key} for user ${user.id}: ${err.message}`);
         safeLogError("multi-user-poll-job", `user=${user.id} job=${job.key} ${err.message}`);
       }
@@ -1411,8 +1354,12 @@ async function runDigestCycle() {
   const db   = getDb();
   const now  = new Date();
   const users = getActiveUsers();
+  recoverExpiredDeliveryClaims();
 
   for (const user of users) {
+    let batchClaims = [];
+    let activeQueueClaim = null;
+    let preserveClaimsOnError = false;
     try {
       const mode = user.notification_mode ?? "realtime";
       const tz   = user.quiet_hours_tz    ?? "America/New_York";
@@ -1445,12 +1392,31 @@ async function runDigestCycle() {
 
           if (queuedRows.length === 0) continue;
 
+          batchClaims = [];
+          for (const row of queuedRows) {
+            if (batchClaims.length >= 20) break;
+            const claimToken = claimQueuedJobDelivery(user.id, row.job_key);
+            if (claimToken) batchClaims.push({ jobKey: row.job_key, claimToken });
+          }
+          if (batchClaims.length === 0) continue;
+
           // Fetch full job rows
-          const jobKeys = queuedRows.map((r) => r.job_key);
+          const jobKeys = batchClaims.map((claim) => claim.jobKey);
           const placeholders = jobKeys.map(() => "?").join(",");
           const queuedJobs = db
             .prepare(`SELECT * FROM seen_jobs WHERE key IN (${placeholders})`)
             .all(...jobKeys);
+          const foundKeys = new Set(queuedJobs.map((job) => job.key));
+          for (const missingClaim of batchClaims.filter((claim) => !foundKeys.has(claim.jobKey))) {
+            finishQueuedJobDeliveryClaim(
+              user.id,
+              missingClaim.jobKey,
+              missingClaim.claimToken,
+              "dead_link"
+            );
+          }
+          batchClaims = batchClaims.filter((claim) => foundKeys.has(claim.jobKey));
+          if (batchClaims.length === 0) continue;
 
           const userTz = user.quiet_hours_tz || "America/New_York";
 
@@ -1480,34 +1446,76 @@ async function runDigestCycle() {
           if (digestChannelOverride) {
             digestOpts.notificationChannelId = digestChannelOverride;
           }
+          digestOpts.onBeforeSend = () => {
+            const began = beginQueuedJobDeliverySend(user.id, batchClaims);
+            if (began) preserveClaimsOnError = true;
+            return began;
+          };
           const digestResult = await sendDigestDm(
             client, user.discord_id, enrichedJobs, user.first_name, digestOpts
           );
 
-          // Only mark the jobs we actually delivered, and only if the digest was
-          // sent. Scoping to deliveredKeys (not a blanket status sweep) avoids
-          // marking jobs the poll loop queued *during* this digest, and leaves any
-          // overflow (>20) queued for the next digest. Refresh sent_at so the
-          // daily/weekly cadence check reads the real delivery time, not the
-          // original enqueue time (which would let the digest fire twice a day).
+          // The claim tokens scope every transition to this worker generation.
+          // Once the summary send starts, all selected jobs share one outcome:
+          // a lost/5xx response is uncertain for the whole batch and must never
+          // put any of those jobs back on the retry queue.
           if (digestResult.ok) {
-            digestAttempts.delete(user.id);
-            if (digestResult.deliveredKeys.length > 0) {
-              const sentAt = new Date().toISOString();
-              const ph = digestResult.deliveredKeys.map(() => "?").join(",");
-              withBusyRetry(() =>
-                db
-                  .prepare(
-                    `UPDATE dm_log SET status = 'sent', sent_at = ?
-                     WHERE user_id = ? AND status = 'queued' AND job_key IN (${ph})`
-                  )
-                  .run(sentAt, user.id, ...digestResult.deliveredKeys)
-              );
+            preserveClaimsOnError = true;
+            if (!finishQueuedJobDeliverySend(user.id, batchClaims, "sent")) {
+              throw new Error("Digest send completed but claim ownership changed");
             }
+            digestAttempts.delete(user.id);
+            batchClaims = [];
+            preserveClaimsOnError = false;
+          } else if (digestResult.uncertain) {
+            preserveClaimsOnError = true;
+            if (!finishQueuedJobDeliverySend(user.id, batchClaims, "uncertain")) {
+              throw new Error("Could not preserve uncertain digest claims");
+            }
+            batchClaims = [];
+            preserveClaimsOnError = false;
+            digestAttempts.delete(user.id);
+            console.error(`[multi-user] Digest outcome uncertain for user ${user.id}; batch will not retry.`);
+            safeLogError("digest-uncertain", `user=${user.id} jobs=${digestResult.attemptedKeys?.length ?? 0}`);
+          } else if (digestResult.permanent) {
+            preserveClaimsOnError = Boolean(digestResult.sendStarted);
+            if (digestResult.sendStarted) {
+              if (!finishQueuedJobDeliverySend(user.id, batchClaims, "dm_closed")) {
+                throw new Error("Could not finish permanently rejected digest claims");
+              }
+            } else {
+              for (const claim of batchClaims) {
+                finishQueuedJobDeliveryClaim(user.id, claim.jobKey, claim.claimToken, "dm_closed");
+              }
+            }
+            batchClaims = [];
+            preserveClaimsOnError = false;
+            digestAttempts.delete(user.id);
+            safeLogError("digest-dm-closed", `user=${user.id} discord=${user.discord_id}`);
           } else {
-            const prevCount = attempt && attempt.day === dayKey ? attempt.count : 0;
-            digestAttempts.set(user.id, { count: prevCount + 1, lastAt: Date.now(), day: dayKey });
-            console.log(`[multi-user] Digest send failed for user ${user.id}; attempt ${prevCount + 1}/${DIGEST_MAX_ATTEMPTS_PER_DAY} today.`);
+            // A target/preparation error, or an explicit Discord 4xx, proves
+            // that the digest was not accepted. Only this claim generation may
+            // release the batch for retry.
+            let released = false;
+            if (digestResult.sendStarted) {
+              preserveClaimsOnError = true;
+              released = finishQueuedJobDeliverySend(user.id, batchClaims, "queued");
+            } else {
+              for (const claim of batchClaims) {
+                released = releaseQueuedJobDeliveryClaim(
+                  user.id,
+                  claim.jobKey,
+                  claim.claimToken
+                ) || released;
+              }
+            }
+            batchClaims = [];
+            preserveClaimsOnError = false;
+            if (released) {
+              const prevCount = attempt && attempt.day === dayKey ? attempt.count : 0;
+              digestAttempts.set(user.id, { count: prevCount + 1, lastAt: Date.now(), day: dayKey });
+              console.log(`[multi-user] Digest send failed for user ${user.id}; attempt ${prevCount + 1}/${DIGEST_MAX_ATTEMPTS_PER_DAY} today.`);
+            }
           }
         }
         continue;
@@ -1537,8 +1545,20 @@ async function runDigestCycle() {
             .all(user.id);
 
           for (const row of queuedRows) {
+            const claimToken = claimQueuedJobDelivery(user.id, row.job_key);
+            if (!claimToken) continue;
+            activeQueueClaim = { jobKey: row.job_key, claimToken };
             const job = db.prepare("SELECT * FROM seen_jobs WHERE key = ?").get(row.job_key);
-            if (!job) continue;
+            if (!job) {
+              finishQueuedJobDeliveryClaim(
+                user.id,
+                row.job_key,
+                claimToken,
+                "dead_link"
+              );
+              activeQueueClaim = null;
+              continue;
+            }
 
             // Normalise the DB row into the shape sendJobDm expects.
             const normalisedJob = {
@@ -1560,35 +1580,68 @@ async function runDigestCycle() {
             if (flushChannelOverride) {
               flushOpts.notificationChannelId = flushChannelOverride;
             }
-            const result = await sendJobDm(client, user.discord_id, job, user.first_name, flushOpts);
+            flushOpts.onBeforeSend = () => {
+              const began = beginQueuedJobDeliverySend(user.id, [activeQueueClaim]);
+              if (began) preserveClaimsOnError = true;
+              return began;
+            };
+            const result = await sendJobDm(
+              client,
+              user.discord_id,
+              normalisedJob,
+              user.first_name,
+              flushOpts
+            );
             if (result.ok) {
+              preserveClaimsOnError = true;
+              if (!finishQueuedJobDeliverySend(user.id, [activeQueueClaim], "sent")) {
+                throw new Error("Queued DM completed but claim ownership changed");
+              }
               flushRetryAt.delete(user.id);
-              // Busy-retry the post-send write: a SQLITE_BUSY here after a
-              // successful DM would otherwise leave the row 'queued' and re-deliver
-              // it next cycle.
-              withBusyRetry(() =>
-                db
-                  .prepare(
-                    "UPDATE dm_log SET status = 'sent', sent_at = ? WHERE user_id = ? AND job_key = ? AND status = 'queued'"
-                  )
-                  .run(new Date().toISOString(), user.id, row.job_key)
-              );
+              activeQueueClaim = null;
+              preserveClaimsOnError = false;
             } else if (result.permanent) {
               // Retrying can't help this recipient (DMs closed / blocked).
               // Mark the row so it stops looping and skip the rest of the
               // user's queue for now.
-              withBusyRetry(() =>
-                db
-                  .prepare(
-                    "UPDATE dm_log SET status = 'dm_closed' WHERE user_id = ? AND job_key = ? AND status = 'queued'"
-                  )
-                  .run(user.id, row.job_key)
-              );
+              if (result.sendStarted) {
+                preserveClaimsOnError = true;
+                if (!finishQueuedJobDeliverySend(user.id, [activeQueueClaim], "dm_closed")) {
+                  throw new Error("Could not finish permanently rejected queued DM claim");
+                }
+              } else {
+                finishQueuedJobDeliveryClaim(
+                  user.id,
+                  row.job_key,
+                  claimToken,
+                  "dm_closed"
+                );
+              }
+              activeQueueClaim = null;
+              preserveClaimsOnError = false;
               flushRetryAt.set(user.id, Date.now());
               break;
+            } else if (result.uncertain) {
+              preserveClaimsOnError = true;
+              if (!finishQueuedJobDeliverySend(user.id, [activeQueueClaim], "uncertain")) {
+                throw new Error("Could not preserve uncertain queued DM claim");
+              }
+              activeQueueClaim = null;
+              preserveClaimsOnError = false;
+              flushRetryAt.delete(user.id);
+              safeLogError(
+                "queued-dm-uncertain",
+                `user=${user.id} discord=${user.discord_id} job=${row.job_key}`
+              );
+              break;
             } else {
-              // Transient failure: leave the row queued, back off this user.
-              flushRetryAt.set(user.id, Date.now());
+              // Explicit known failure: leave the row queued and back off.
+              const released = result.sendStarted
+                ? finishQueuedJobDeliverySend(user.id, [activeQueueClaim], "queued")
+                : releaseQueuedJobDeliveryClaim(user.id, row.job_key, claimToken);
+              activeQueueClaim = null;
+              preserveClaimsOnError = false;
+              if (released) flushRetryAt.set(user.id, Date.now());
               break;
             }
 
@@ -1597,6 +1650,20 @@ async function runDigestCycle() {
         }
       }
     } catch (err) {
+      if (!preserveClaimsOnError) {
+        for (const claim of batchClaims) {
+          try { releaseQueuedJobDeliveryClaim(user.id, claim.jobKey, claim.claimToken); } catch {}
+        }
+        if (activeQueueClaim) {
+          try {
+            releaseQueuedJobDeliveryClaim(
+              user.id,
+              activeQueueClaim.jobKey,
+              activeQueueClaim.claimToken
+            );
+          } catch {}
+        }
+      }
       console.error(`[multi-user] Digest error for user ${user.id}: ${err.message}`);
       safeLogError("multi-user-digest-user", `user=${user.id} ${err.message}`);
     }
@@ -1624,10 +1691,9 @@ client.once("ready", async () => {
         searchCommand.toJSON(),
         savedCommand.toJSON(),
         companyCommand.toJSON(),
-        ...buildAddressSlashCommands().map((c) => c.toJSON()),
       ],
     });
-    console.log("[multi-user] Slash commands registered: /search, /saved, /company, /add-address, /search-address.");
+    console.log("[multi-user] Slash commands registered: /search, /saved, /company.");
   } catch (err) {
     console.error(`[multi-user] Failed to register slash commands: ${err.message}`);
   }

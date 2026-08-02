@@ -11,20 +11,31 @@
 #    window; if the heartbeat is still stale inside the window, it escalates
 #    with a single CRITICAL DM instead of restart-thrashing.
 
-FLAG_FILE="/tmp/pm2-alert-sent"
-MU_RESTART_FLAG="/tmp/mu-watchdog-restarted-at"
-MU_ESCALATE_FLAG="/tmp/mu-watchdog-escalated"
+set -u
+umask 077
+
 MU_STALE_LIMIT="${MU_HEARTBEAT_STALE_SECONDS:-900}"        # 15 min
 MU_RESTART_BACKOFF="${MU_WATCHDOG_BACKOFF_SECONDS:-1800}"  # 30 min
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 HEARTBEAT_FILE="$PROJECT_DIR/data/mu-heartbeat"
+RUNTIME_DIR="$PROJECT_DIR/data/healthcheck-runtime"
+
+# Keep mutable watchdog state below the owner-controlled application data
+# directory. Predictable files in /tmp can be replaced with symlinks by another
+# local account and turn innocent touch/redirect operations into file clobbers.
+mkdir -p "$RUNTIME_DIR" || exit 1
+chmod 700 "$RUNTIME_DIR" || exit 1
+FLAG_FILE="$RUNTIME_DIR/pm2-alert-sent"
+MU_RESTART_FLAG="$RUNTIME_DIR/mu-watchdog-restarted-at"
+MU_ESCALATE_FLAG="$RUNTIME_DIR/mu-watchdog-escalated"
+LOCK_FILE="$RUNTIME_DIR/healthcheck.lock"
 
 # Resolve node_modules (discord.js) and any relative paths from the project root.
 cd "$PROJECT_DIR" || exit 1
 
 # Serialize runs: a hung `pm2 restart` must not pile up concurrent cron runs.
-exec 200>/tmp/jobpulse-healthcheck.lock
+exec 200>"$LOCK_FILE"
 flock -n 200 || exit 0
 
 notify_admin() {

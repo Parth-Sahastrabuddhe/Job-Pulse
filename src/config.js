@@ -49,9 +49,19 @@ function parseBoolean(value, fallback = false) {
   return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
 }
 
-function parseNumber(value, fallback) {
-  const parsed = Number.parseInt(String(value ?? ""), 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
+export function parseBoundedInteger(value, fallback, { name = "value", min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER } = {}) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return fallback;
+  }
+  const raw = String(value).trim();
+  if (!/^-?\d+$/.test(raw)) {
+    throw new Error(`${name} must be an integer`);
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${name} must be between ${min} and ${max}`);
+  }
+  return parsed;
 }
 
 function parseList(value, fallback) {
@@ -65,54 +75,28 @@ function parseList(value, fallback) {
     .filter(Boolean);
 }
 
-function resolveProjectPath(value, fallbackRelativePath) {
-  const candidate = value?.trim() || fallbackRelativePath;
-  return path.isAbsolute(candidate) ? candidate : path.resolve(PROJECT_ROOT, candidate);
-}
-
 loadEnvFile();
 
+/** Public scraper/processor configuration. Private adapters compose their own fields. */
 export function getConfig() {
   return {
     countryFilter: (process.env.COUNTRY_FILTER?.trim().toLowerCase() || "us"),
-    maxJobsPerSource: parseNumber(process.env.MAX_JOBS_PER_SOURCE, 60),
-    retentionDays: parseNumber(process.env.STATE_RETENTION_DAYS, 45),
-    batchSize: parseNumber(process.env.BATCH_SIZE, 20),
-    batchDelayMs: parseNumber(process.env.BATCH_DELAY_MS, 3000),
-    dbBusyBackoffMs: parseNumber(process.env.DB_BUSY_BACKOFF_MS, 10000),
-    slowCycleMinutes: parseNumber(process.env.SLOW_CYCLE_MINUTES, 5),
-    playwrightMinMemMb: parseNumber(process.env.PLAYWRIGHT_MIN_MEM_MB, 450),
+    maxJobsPerSource: parseBoundedInteger(process.env.MAX_JOBS_PER_SOURCE, 60, { name: "MAX_JOBS_PER_SOURCE", min: 1, max: 10000 }),
+    collectorConcurrency: parseBoundedInteger(process.env.COLLECTOR_CONCURRENCY, 10, { name: "COLLECTOR_CONCURRENCY", min: 1, max: 50 }),
+    batchSize: parseBoundedInteger(process.env.BATCH_SIZE, 20, { name: "BATCH_SIZE", min: 1, max: 500 }),
+    batchDelayMs: parseBoundedInteger(process.env.BATCH_DELAY_MS, 3000, { name: "BATCH_DELAY_MS", min: 0, max: 3600000 }),
+    slowCycleMinutes: parseBoundedInteger(process.env.SLOW_CYCLE_MINUTES, 5, { name: "SLOW_CYCLE_MINUTES", min: 1, max: 1440 }),
+    playwrightMinMemMb: parseBoundedInteger(process.env.PLAYWRIGHT_MIN_MEM_MB, 450, { name: "PLAYWRIGHT_MIN_MEM_MB", min: 128, max: 65536 }),
     playwrightSchedule: process.env.PLAYWRIGHT_SCHEDULE?.trim() || (process.env.NODE_ENV === "production" ? "night" : "always"),
     playwrightNightStart: process.env.PLAYWRIGHT_NIGHT_START?.trim() || "00:00",
     playwrightNightEnd: process.env.PLAYWRIGHT_NIGHT_END?.trim() || "06:00",
     playwrightTimezone: process.env.PLAYWRIGHT_TIMEZONE?.trim() || "America/New_York",
-    playwrightNightRunIntervalMinutes: parseNumber(process.env.PLAYWRIGHT_NIGHT_RUN_INTERVAL_MINUTES, 60),
-    nightlyPlaywrightMaxPostAgeMinutes: parseNumber(process.env.NIGHTLY_PLAYWRIGHT_MAX_POST_AGE_MINUTES, 1440),
+    playwrightNightRunIntervalMinutes: parseBoundedInteger(process.env.PLAYWRIGHT_NIGHT_RUN_INTERVAL_MINUTES, 60, { name: "PLAYWRIGHT_NIGHT_RUN_INTERVAL_MINUTES", min: 1, max: 1440 }),
+    nightlyPlaywrightMaxPostAgeMinutes: parseBoundedInteger(process.env.NIGHTLY_PLAYWRIGHT_MAX_POST_AGE_MINUTES, 1440, { name: "NIGHTLY_PLAYWRIGHT_MAX_POST_AGE_MINUTES", min: 1, max: 10080 }),
     fastTrackCompanies: parseList(process.env.FAST_TRACK_COMPANIES, ["microsoft", "amazon"]),
-    fastTrackIntervalSeconds: parseNumber(process.env.FAST_TRACK_INTERVAL_SECONDS, 60),
-    maxPostAgeMinutes: parseNumber(process.env.MAX_POST_AGE_MINUTES, 180),
-    maxDateOnlyAgeDays: parseNumber(process.env.MAX_DATE_ONLY_AGE_DAYS, 1),
-    maxNewJobsPerNotify: parseNumber(process.env.MAX_NEW_JOBS_PER_NOTIFY, 10),
-    stateFile: resolveProjectPath(process.env.STATE_FILE, "data/state.json"),
-    dbFile: resolveProjectPath(process.env.DB_FILE, "data/jobs.db"),
-    notifications: {
-      discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL?.trim() || "",
-      discordBotToken: process.env.DISCORD_BOT_TOKEN?.trim() || "",
-      discordChannelId: process.env.DISCORD_CHANNEL_ID?.trim() || "",
-      telegramBotToken: process.env.TELEGRAM_BOT_TOKEN?.trim() || "",
-      telegramChatId: process.env.TELEGRAM_CHAT_ID?.trim() || ""
-    },
-    heartbeat: {
-      micro: process.env.HEARTBEAT_URL_MICRO?.trim() || "",
-      mu: process.env.HEARTBEAT_URL_MU?.trim() || ""
-    },
-    applicant: {
-      name: process.env.APPLICANT_NAME?.trim() || "",
-      email: process.env.APPLICANT_EMAIL?.trim() || "",
-      phone: process.env.APPLICANT_PHONE?.trim() || "",
-      linkedin: process.env.APPLICANT_LINKEDIN?.trim() || "",
-      resumePath: resolveProjectPath(process.env.APPLICANT_RESUME_PATH, "resume/base.pdf"),
-    },
+    fastTrackIntervalSeconds: parseBoundedInteger(process.env.FAST_TRACK_INTERVAL_SECONDS, 60, { name: "FAST_TRACK_INTERVAL_SECONDS", min: 0, max: 86400 }),
+    maxPostAgeMinutes: parseBoundedInteger(process.env.MAX_POST_AGE_MINUTES, 180, { name: "MAX_POST_AGE_MINUTES", min: 1, max: 10080 }),
+    maxDateOnlyAgeDays: parseBoundedInteger(process.env.MAX_DATE_ONLY_AGE_DAYS, 1, { name: "MAX_DATE_ONLY_AGE_DAYS", min: 0, max: 365 }),
     amazon: {
       sourceKey: "amazon",
       sourceLabel: "Amazon",

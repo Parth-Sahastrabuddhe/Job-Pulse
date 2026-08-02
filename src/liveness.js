@@ -2,6 +2,7 @@
  * URL liveness checker for ghost job detection.
  * Determines whether a job posting URL is still active before sending notifications.
  */
+import { safeFetch } from "./ssrf-guard.js";
 
 const DEAD_TEXT_PATTERNS = [
   // Must end with a dead-status word: JD boilerplate like Boeing's "This
@@ -27,6 +28,7 @@ const BROWSER_USER_AGENT =
 
 const TIMEOUT_MS = 8000;
 const MAX_BODY_BYTES = 10 * 1024; // 10 KB
+const MAX_DOWNLOAD_BYTES = 512 * 1024;
 
 /**
  * Checks whether a job posting URL is still active.
@@ -34,23 +36,35 @@ const MAX_BODY_BYTES = 10 * 1024; // 10 KB
  * @param {string} url - The job posting URL to check.
  * @returns {Promise<boolean>} Resolves to true if the job is still live, false if it appears dead.
  */
-export async function isJobUrlLive(url) {
-  // No URL or non-HTTP URL → assume live
-  if (!url || typeof url !== 'string') return true;
-  if (!url.startsWith('http://') && !url.startsWith('https://')) return true;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+export async function isJobUrlLive(url, options = {}) {
+  // Malformed/non-web URLs are not deliverable job postings. Reject before any
+  // network operation rather than treating attacker-controlled schemes as live.
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && process.env.NODE_ENV !== "production")) {
+    return false;
+  }
 
   try {
-    const resp = await fetch(url, {
+    const fetchImpl = options.fetchImpl || safeFetch;
+    const resp = await fetchImpl(parsed.toString(), {
       method: 'GET',
       redirect: 'follow',
-      signal: controller.signal,
+      signal: options.signal,
       headers: {
         'User-Agent': BROWSER_USER_AGENT,
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
+    }, {
+      requireHttps: process.env.NODE_ENV === "production",
+      allowedContentTypes: ["text/html", "application/xhtml+xml", "application/xml", "text/plain"],
+      maxResponseBytes: MAX_DOWNLOAD_BYTES,
+      timeoutMs: TIMEOUT_MS,
+      maxRedirects: 4,
     });
 
     // HTTP 404 / 410 → dead
@@ -65,11 +79,22 @@ export async function isJobUrlLive(url) {
     if (bodyText && DEAD_TEXT_PATTERNS.some((pattern) => pattern.test(bodyText))) return false;
 
     return true;
-  } catch {
-    // Network error, timeout, or any transient failure → assume live
+  } catch (error) {
+    if (options.signal?.aborted) {
+      throw options.signal.reason instanceof Error ? options.signal.reason : error;
+    }
+    // Unsafe destinations and malformed redirects fail closed. Ordinary network
+    // outages remain fail-open so a transient ATS outage does not expire jobs.
+    const failClosedCodes = new Set([
+      "BLOCKED_URL",
+      "PEER_MISMATCH",
+      "REDIRECT_BLOCKED",
+      "TOO_MANY_REDIRECTS",
+      "INVALID_REDIRECT",
+      "UNEXPECTED_CONTENT_TYPE",
+    ]);
+    if (failClosedCodes.has(error?.code)) return false;
     return true;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

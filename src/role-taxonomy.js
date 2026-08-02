@@ -3,9 +3,8 @@
  * grouping, and the cross-company level rules engine.
  *
  * Dependency-free on purpose (companies.js is pure data) so collectors,
- * delivery code, scripts, and tests can all import it. The web dashboard
- * keeps a UI mirror of ROLE_SECTIONS in web/lib/role-taxonomy.js;
- * tests/role-taxonomy.test.js asserts the two stay identical.
+ * pipeline consumers, scripts, and tests can all import it. Private clients
+ * can project ROLE_SECTIONS into their own UI representation.
  *
  * Level equivalences follow levels.fyi's standard-levels model and company
  * ladder comparisons (banks: Analyst -> Associate -> VP as the IC track,

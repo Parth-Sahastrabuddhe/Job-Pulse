@@ -112,6 +112,19 @@ describe("dm_log write-behind buffer", () => {
     expect(_dmLogBufferSize()).toBe(1);
   });
 
+  it("deduplicates uncertain outcomes without adding them to the user tracker", () => {
+    const { db, userId } = makeDb();
+
+    expect(recordJobDelivery(userId, "source:ambiguous", "uncertain")).toBe(true);
+    expect(getMuDeliveredJobKeys(userId).has("source:ambiguous")).toBe(true);
+    flushDmLogSync();
+
+    expect(db.prepare("SELECT status FROM dm_log WHERE user_id = ? AND job_key = ?").get(userId, "source:ambiguous"))
+      .toEqual({ status: "uncertain" });
+    expect(db.prepare("SELECT COUNT(*) AS cnt FROM user_seen_jobs WHERE user_id = ?").get(userId).cnt)
+      .toBe(0);
+  });
+
   it("flushDmLogSync drains synchronously on shutdown", () => {
     const { db, userId } = makeDb();
 
@@ -126,7 +139,7 @@ describe("dm_log write-behind buffer", () => {
     expect(dmCount).toBe(5);
   });
 
-  it("restores buffer order when a large-batch flush fails and recovers on retry", () => {
+  it("isolates and drops buffered entries for a user deleted before flush", () => {
     // Use a high size threshold so size-triggered flush doesn't fire on
     // the way in — we want the buffer to hold all 25 entries simultaneously.
     process.env.DM_LOG_FLUSH_MAX_SIZE = "100";
@@ -135,29 +148,13 @@ describe("dm_log write-behind buffer", () => {
     for (let i = 0; i < 25; i++) recordJobDelivery(userId, `source:job-${i}`, "sent");
     expect(_dmLogBufferSize()).toBe(25);
 
-    // Force the transaction to fail via FK violation: delete the user so
-    // user_seen_jobs INSERT throws inside the tx. Atomic rollback, buffer
-    // gets unshifted back via _doFlush's catch.
+    // A stale user used to poison the entire transaction and keep every
+    // user's delivery records stuck in the buffer forever.
     db.prepare("DELETE FROM user_profiles WHERE id = ?").run(userId);
 
-    expect(() => flushDmLog()).toThrow();
-    expect(_dmLogBufferSize()).toBe(25);
-
-    // Restore the user and retry — the buffer should still be in original order.
-    db.prepare(
-      `INSERT INTO user_profiles
-        (id, discord_id, discord_username, first_name, email, created_at, updated_at)
-       VALUES (?, 'd1', 'u1', 'Alice', 'a@example.com', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`
-    ).run(userId);
-
-    const flushed = flushDmLog();
-    expect(flushed).toBe(25);
+    expect(() => flushDmLog()).not.toThrow();
     expect(_dmLogBufferSize()).toBe(0);
-
-    const rows = db.prepare("SELECT job_key FROM dm_log ORDER BY id").all();
-    expect(rows.map((r) => r.job_key)).toEqual(
-      Array.from({ length: 25 }, (_, i) => `source:job-${i}`)
-    );
+    expect(db.prepare("SELECT COUNT(*) AS cnt FROM dm_log").get().cnt).toBe(0);
   });
 
   it("tracks multiple users independently", () => {
@@ -177,5 +174,23 @@ describe("dm_log write-behind buffer", () => {
     flushDmLog();
     const rows = db.prepare("SELECT user_id, COUNT(*) as cnt FROM dm_log GROUP BY user_id ORDER BY user_id").all();
     expect(rows).toEqual([{ user_id: 1, cnt: 1 }, { user_id: 2, cnt: 1 }]);
+  });
+
+  it("flushes live users even when the same batch contains a deleted user", () => {
+    const { db } = makeDb();
+    db.prepare(
+      `INSERT INTO user_profiles
+        (discord_id, discord_username, first_name, email, created_at, updated_at)
+       VALUES ('d2', 'u2', 'Bob', 'b@example.com', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`
+    ).run();
+
+    recordJobDelivery(1, "source:stale", "sent");
+    recordJobDelivery(2, "source:live", "sent");
+    db.prepare("DELETE FROM user_profiles WHERE id = 1").run();
+
+    expect(flushDmLog()).toBe(1);
+    expect(db.prepare("SELECT user_id, job_key FROM dm_log").all()).toEqual([
+      { user_id: 2, job_key: "source:live" },
+    ]);
   });
 });

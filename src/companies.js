@@ -3,7 +3,7 @@
 //
 // Each entry: { key, label, ats, lane, urlPattern, board/slug }
 //   key:        sourceKey used in DB and throughout the pipeline
-//   label:      display name for Discord notifications
+//   label:      display name for downstream consumers
 //   ats:        "greenhouse" | "workday" | "lever" | "ashby" | "smartrecruiters" | "pcsx" | "solo"
 //   lane:       "fast" | "normal" | "slow"
 //   urlPattern: regex for Fit Check button URL matching (captures job ID)

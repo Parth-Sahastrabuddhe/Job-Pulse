@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, inferCountryCodeFromLocation, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, inferCountryCodeFromLocation, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 function parseLeverJob(raw, companyConfig) {
   const title = raw.text?.trim();
@@ -46,14 +46,14 @@ const leverBoardCache = new Map(); // companyKey -> { etag, jobs }
 
 export async function collectLeverJobs(_unused, config, log, companyKey) {
   const companyConfig = config[companyKey];
-  if (!companyConfig) return [];
+  if (!companyConfig) throw asCollectorError(companyKey, new Error("missing company configuration"));
 
   const cached = leverBoardCache.get(companyKey);
   try {
     const headers = { accept: "application/json" };
     if (cached?.etag) headers["if-none-match"] = cached.etag;
 
-    const response = await fetchWithTimeout(companyConfig.apiUrl, { headers });
+    const response = await fetchWithTimeout(companyConfig.apiUrl, { headers, signal: config.signal });
 
     if (response.status === 304 && cached) {
       return [...cached.jobs];
@@ -61,10 +61,11 @@ export async function collectLeverJobs(_unused, config, log, companyKey) {
 
     if (!response.ok) {
       log(`${companyConfig.sourceLabel} API returned status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const rawJobs = await response.json();
+    if (!Array.isArray(rawJobs)) throw new Error("response did not contain a postings array");
 
     const jobs = rawJobs
       .map((raw) => parseLeverJob(raw, companyConfig))
@@ -81,6 +82,6 @@ export async function collectLeverJobs(_unused, config, log, companyKey) {
     return result;
   } catch (error) {
     log(`${companyConfig.sourceLabel} API error: ${error.message}`);
-    return [];
+    throw asCollectorError(companyKey, error);
   }
 }

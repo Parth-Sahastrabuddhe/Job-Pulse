@@ -1,4 +1,4 @@
-import { dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
 
 const GOOGLE_RPC_URL =
   "https://www.google.com/about/careers/applications/_/HiringCportalFrontendUi/data/batchexecute";
@@ -97,19 +97,22 @@ export async function collectGoogleJobs(_unused, config, log) {
       fetchWithTimeout(endpoint, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded;charset=UTF-8", "user-agent": "Mozilla/5.0" },
-        body: buildRequestBody("\"Software Engineer\"", loc, true, 0)
-      }).then((r) => (r.ok ? r.text() : "")).catch(() => "")
+        body: buildRequestBody("\"Software Engineer\"", loc, true, 0),
+        signal: config.signal,
+      }).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
     ));
 
-    const rawJobs = texts.flatMap((text) => {
+    const parsedBatches = texts.map((text) => {
       const jobData = text ? parseResponse(text) : null;
-      return jobData && Array.isArray(jobData[0]) ? jobData[0] : [];
+      if (!jobData || !Array.isArray(jobData[0])) {
+        throw new Error("response contained no parseable job data");
+      }
+      return jobData[0];
     });
-
-    if (rawJobs.length === 0) {
-      log("Google API returned no parseable job data.");
-      return [];
-    }
+    const rawJobs = parsedBatches.flat();
 
     const jobs = rawJobs
       .map((raw) => parseGoogleJob(raw, config))
@@ -119,6 +122,6 @@ export async function collectGoogleJobs(_unused, config, log) {
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
   } catch (error) {
     log(`Google API error: ${error.message}`);
-    return [];
+    throw asCollectorError("google", error);
   }
 }
