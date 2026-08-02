@@ -937,8 +937,25 @@ async function main() {
   closeDb();
 }
 
-const entrypoint = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : "";
-if (import.meta.url === entrypoint) {
+export function isEntrypoint(moduleUrl, options = {}) {
+  const argvPath = options.argvPath ?? process.argv[1];
+  // PM2 starts a wrapper process and imports the configured script, so
+  // process.argv[1] is not guaranteed to identify this module. PM2 exposes the
+  // exact configured script as pm_exec_path; require an exact file-URL match so
+  // ordinary test/library imports still remain side-effect free.
+  const pmExecPath = options.pmExecPath ?? process.env.pm_exec_path;
+  return [argvPath, pmExecPath]
+    .filter(Boolean)
+    .some((candidate) => {
+      try {
+        return pathToFileURL(path.resolve(candidate)).href === moduleUrl;
+      } catch {
+        return false;
+      }
+    });
+}
+
+if (isEntrypoint(import.meta.url)) {
   main().catch((error) => {
     console.error(`[${timestamp()}] ${error.message}`);
     process.exitCode = 1;

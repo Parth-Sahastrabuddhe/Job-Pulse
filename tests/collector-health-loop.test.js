@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runBatchLoop } from "../src/index.js";
+import { isEntrypoint, runBatchLoop } from "../src/index.js";
 
 function config(overrides = {}) {
   return {
@@ -151,5 +151,37 @@ describe("batch-loop collector health", () => {
 
     expect(runtime.ping).toHaveBeenCalledOnce();
     expect(runtime.pingFail).not.toHaveBeenCalled();
+  });
+});
+
+describe("micro-bot entrypoint detection", () => {
+  const moduleUrl = "file:///srv/job-pulse/src/index.js";
+
+  it("starts when Node executes the module directly", () => {
+    expect(isEntrypoint(moduleUrl, {
+      argvPath: "/srv/job-pulse/src/index.js",
+      pmExecPath: "",
+    })).toBe(true);
+  });
+
+  it("starts when PM2 imports the configured script through its wrapper", () => {
+    expect(isEntrypoint(moduleUrl, {
+      argvPath: "/usr/lib/node_modules/pm2/lib/ProcessContainerFork.js",
+      pmExecPath: "/srv/job-pulse/src/index.js",
+    })).toBe(true);
+  });
+
+  it("does not start for an ordinary library or test import", () => {
+    expect(isEntrypoint(moduleUrl, {
+      argvPath: "/srv/job-pulse/tests/collector-health-loop.test.js",
+      pmExecPath: "",
+    })).toBe(false);
+  });
+
+  it("does not start for a different application managed by PM2", () => {
+    expect(isEntrypoint(moduleUrl, {
+      argvPath: "/usr/lib/node_modules/pm2/lib/ProcessContainerFork.js",
+      pmExecPath: "/srv/job-pulse/src/multi-user.js",
+    })).toBe(false);
   });
 });
