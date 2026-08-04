@@ -78,8 +78,15 @@ export function filterJobForUser(job, profile, options = {}) {
   //    (e.g. CA) skip it.
   if (profile.requires_sponsorship && jobCountry === "US") {
     const { sponsorLookup } = options;
-    if (sponsorLookup && !sponsorLookup(job.sourceKey)) {
-      return { pass: false, reason: "non_sponsor_company" };
+    if (sponsorLookup) {
+      // Three-valued: only a definite `false` rejects. `null`/`undefined` means
+      // the company has no h1b_sponsors row yet, which is a gap in our data, not
+      // a statement about the employer — rejecting on it silently zeroed out
+      // every sponsorship-requiring user against an un-seeded database.
+      const sponsors = sponsorLookup(job.sourceKey);
+      if (sponsors === false) {
+        return { pass: false, reason: "non_sponsor_company" };
+      }
     }
     // If sponsorLookup not provided, skip check (assume eligible).
   }

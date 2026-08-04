@@ -59,9 +59,33 @@ describe("open-core exporter filesystem boundary", () => {
 describe("open-core exporter JavaScript boundary", () => {
   it("preserves the exact current public export plan", async () => {
     const plan = await buildExportPlan();
-    expect(plan.size).toBe(58);
+    expect(plan.size).toBe(57);
     expect([...plan.keys()]).not.toContain("src/private-config.js");
     expect([...plan.keys()]).not.toContain("src/multi-user.js");
+    // The LinkedIn collector scrapes an undocumented guest endpoint. It stays
+    // private and is injected into the registry by src/index.js instead.
+    expect([...plan.keys()]).not.toContain("src/sources/linkedin.js");
+  });
+
+  it("detects side-effect-only imports so they cannot bypass the closure", () => {
+    // A single regex with an optional `... from ` group used to run forward past
+    // a bare `import "./x.js";` and capture the NEXT specifier instead, silently
+    // dropping the private module from the graph.
+    const shapes = [
+      ['import "./private-config.js";', ["./private-config.js"]],
+      ['import "./private-config.js";\nimport { x } from "./config.js";',
+        ["./private-config.js", "./config.js"]],
+      ['import a from "./a.js";\nimport "./secret-state.js";\nimport b from "./b.js";',
+        ["./a.js", "./secret-state.js", "./b.js"]],
+      ['import "./secret-state.js";\nimport fs from "node:fs";\nimport c from "./c.js";',
+        ["./secret-state.js", "./c.js"]],
+      ['export { x } from "./reexport.js";', ["./reexport.js"]],
+      ['import{a}from"./compact.js";', ["./compact.js"]],
+    ];
+
+    for (const [source, expected] of shapes) {
+      expect(localSpecifiers(source, "src/public.js").sort()).toEqual([...expected].sort());
+    }
   });
 
   it("rejects an imported JavaScript module missing from the exact allowlist", async () => {

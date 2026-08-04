@@ -365,7 +365,18 @@ export function detectSeniority(title, sourceKey = "") {
   // Director / Chief / MD: always blocked (also catches the banks'
   // Executive Director band via \bdirector\b).
   if (/\b(director|chief)\b/i.test(t)) return "director";
-  if (/\bMD\b/.test(t)) return "director";
+  // "Head of X" is an executive rung with no seniority word in it, so it used to
+  // fall through to the plain-SWE default and classify as entry_mid — meaning
+  // "Head of Software Engineering" was delivered to new grads. This is not
+  // SWE-specific: "Head of Data Engineering" and "Head of Mobile Engineering"
+  // reached anyone who selected those categories.
+  if (/\bhead\s+of\b|\bhead\s*,|\b(?:global|group|regional)\s+head\b/i.test(t)) return "director";
+  // Bare "MD" is the banks' Managing Director band, but it is also the postal
+  // abbreviation for Maryland, and several ATSs append the location to the
+  // title. Requiring bank context stops "Software Engineer - Bethesda, MD" from
+  // being silently dropped as an executive role. The spelled-out form stays
+  // universal via \bdirector\b above.
+  if (/\bMD\b/.test(t) && BANKING_COMPANIES.has(sourceKey)) return "director";
 
   // Staff / Principal (check before senior: most specific). "Staff
   // Accountant" / "Staff Auditor" are entry-band finance titles, not the

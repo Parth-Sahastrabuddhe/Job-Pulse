@@ -1,10 +1,13 @@
 import {
+  asCollectorError,
   dedupeJobs,
+  fetchWithTimeout,
   finalizeJob,
   isTargetRole,
   normalizeUrl,
-  fetchWithTimeout,
-  asCollectorError
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
 } from "./shared.js";
 
 const AMAZON_BASE_URL = "https://www.amazon.jobs";
@@ -29,7 +32,7 @@ function normalizeAmazonUrl(rawPath, fallbackId) {
 }
 
 function parseAmazonJob(raw, config) {
-  const title = raw.title?.trim();
+  const title = safeText(raw.title);
   if (!title || !isTargetRole(title)) {
     return null;
   }
@@ -48,17 +51,17 @@ function parseAmazonJob(raw, config) {
   let postedPrecision = "";
 
   if (updatedTime && !Number.isNaN(Date.parse(updatedTime))) {
-    postedAt = new Date(updatedTime).toISOString();
+    postedAt = toIsoOrEmpty(updatedTime);
     postedPrecision = "exact";
   } else if (postedText && !Number.isNaN(Date.parse(postedText))) {
-    postedAt = new Date(postedText).toISOString();
+    postedAt = toIsoOrEmpty(postedText);
     postedPrecision = /^\d{4}-\d{2}-\d{2}T/.test(postedText) ? "exact" : "date";
   }
 
   const location = raw.normalized_location ?? raw.location ?? "";
   // Amazon's country_code is ISO-3 (USA/CAN); normalize to the 2-letter codes
   // the gate and filter use. Unknown values pass through for inference downstream.
-  const rawCc = raw.country_code?.toUpperCase() ?? "";
+  const rawCc = safeText(raw.country_code).toUpperCase();
   const countryCode = rawCc === "USA" ? "US" : rawCc === "CAN" ? "CA" : rawCc;
 
   return finalizeJob({
@@ -93,9 +96,7 @@ export async function collectAmazonJobs(_browserUnused, config, log) {
     if (!Array.isArray(data?.jobs)) throw new Error("response did not contain a jobs array");
     const rawJobs = data.jobs;
 
-    const jobs = rawJobs
-      .map((raw) => parseAmazonJob(raw, config))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseAmazonJob(raw, config));
 
     log(`Amazon API returned ${rawJobs.length} results, ${jobs.length} matched keywords.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);

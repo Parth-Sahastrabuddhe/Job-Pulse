@@ -1,4 +1,13 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 function isSalesforceSwe(title) {
   const t = title.trim();
@@ -18,43 +27,60 @@ const TITLE_FILTERS = {
 };
 
 function parseRelativeDate(postedOn) {
-  if (!postedOn) return { postedText: "", postedAt: "", postedPrecision: "" };
+  const text = safeText(postedOn);
+  if (!text) return { postedText: "", postedAt: "", postedPrecision: "" };
 
-  const text = postedOn.trim();
   const now = Date.now();
-
+  // The offsets below are computed from scraped digits, so an absurd value
+  // ("Posted 99999999999999 Days Ago", or a tenant that changes its wording)
+  // produces a timestamp outside the ±8.64e15 ms Date range. toIsoOrEmpty
+  // degrades that to "" instead of throwing out of the surrounding .map().
   if (/today/i.test(text)) {
-    return { postedText: text, postedAt: new Date(now).toISOString(), postedPrecision: "date" };
+    return { postedText: text, postedAt: toIsoOrEmpty(now), postedPrecision: "date" };
   }
 
   if (/yesterday/i.test(text)) {
-    return { postedText: text, postedAt: new Date(now - 86400000).toISOString(), postedPrecision: "date" };
+    return { postedText: text, postedAt: toIsoOrEmpty(now - 86400000), postedPrecision: "date" };
   }
 
   const daysMatch = text.match(/(\d+)\+?\s*day/i);
   if (daysMatch) {
     const days = parseInt(daysMatch[1], 10);
-    return { postedText: text, postedAt: new Date(now - days * 86400000).toISOString(), postedPrecision: "date" };
+    return { postedText: text, postedAt: toIsoOrEmpty(now - days * 86400000), postedPrecision: "date" };
   }
 
   const hoursMatch = text.match(/(\d+)\s*hour/i);
   if (hoursMatch) {
     const hours = parseInt(hoursMatch[1], 10);
-    return { postedText: text, postedAt: new Date(now - hours * 3600000).toISOString(), postedPrecision: "exact" };
+    return { postedText: text, postedAt: toIsoOrEmpty(now - hours * 3600000), postedPrecision: "exact" };
   }
 
   return { postedText: text, postedAt: "", postedPrecision: "" };
 }
 
 function parseWorkdayJob(raw, companyConfig, countryTag) {
-  const title = raw.title?.trim();
+  const title = safeText(raw.title);
   const titleFilter = TITLE_FILTERS[companyConfig.sourceKey] || isTargetRole;
   if (!title || !titleFilter(title)) return null;
 
-  // bulletFields[0] is usually the requisition number, but some tenants omit
-  // it. Fall back to the stable req slug in externalPath so the id is never
-  // blank. (bulletFields[0] is kept first to preserve existing dedup keys.)
-  const id = raw.bulletFields?.[0] || raw.externalPath?.split("/").filter(Boolean).pop() || "";
+  // externalPath's trailing segment (".._JR1993284") is structurally unique per
+  // posting, so it leads. bulletFields is a tenant-configured DISPLAY column:
+  // it is usually the requisition number, but tenants also populate it with the
+  // posted date or the job family. The previous order only fell back when the
+  // field was ABSENT, never when it was present-but-not-an-id, so such a tenant
+  // gave every posting the same dedup key. That collapsed the whole tenant to a
+  // single job, and because mergeRicherJob merges field-by-field the survivor
+  // could carry one posting's title on another's URL. A volatile value
+  // ("Posted 5 Days Ago") did the opposite and re-alerted the corpus daily.
+  const reqSlug = safeText(raw.externalPath).split("/").filter(Boolean).pop() || "";
+  const bulletId = safeText(raw.bulletFields?.[0]);
+  const looksLikeRequisitionId = /^[A-Za-z]{0,5}[-_ ]?\d{3,}$/.test(bulletId);
+  const id = reqSlug || (looksLikeRequisitionId ? bulletId : "");
+
+  // A posting with neither a req slug nor an id-shaped bullet field has no
+  // stable identity. finalizeJob would fall through to the canonical URL, which
+  // is also degenerate here, so distinct jobs would merge. Drop it instead.
+  if (!id || !raw.externalPath) return null;
   const location = raw.locationsText || raw.bulletFields?.[1] || "";
   // When a country facet was applied, Workday has already server-side-restricted
   // the corpus to that country, so multi-location postings ("4 Locations") whose
@@ -194,7 +220,7 @@ export async function collectWorkdayJobs(_unused, config, log, companyKey) {
         }
       }
     }
-    return rawJobs.map((raw) => parseWorkdayJob(raw, companyConfig, tag)).filter(Boolean);
+    return parseRowsSafely(rawJobs, (raw) => parseWorkdayJob(raw, companyConfig, tag));
   }
 
   try {

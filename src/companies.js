@@ -19,7 +19,14 @@ export const COMPANIES = [
   { key: "google", label: "Google", ats: "solo", lane: "normal", urlPattern: /google\.com\/about\/careers\/applications\/jobs\/results\/(\d+)/i },
   { key: "meta", label: "Meta", ats: "solo", lane: "normal", urlPattern: /metacareers\.com\/jobs\/(\d+)/i },
   { key: "goldmansachs", label: "Goldman Sachs", ats: "solo", lane: "normal", banking: true, urlPattern: /higher\.gs\.com\/roles\/(\d+)/i },
-  { key: "oracle", label: "Oracle", ats: "solo", lane: "normal", urlPattern: /oraclecloud\.com\/.*?job\/(\d+)/i },
+  // Anchored to Oracle's own careers host, which is what src/sources/oracle.js
+  // actually emits. The previous pattern was the bare host suffix
+  // `oraclecloud\.com`, and because extractJobFromMessage returns the FIRST
+  // match in declaration order it swallowed every other Oracle-HCM tenant below
+  // (JPMorgan, Ford, Hexaware, EXL) — those URLs resolved to sourceKey "oracle"
+  // and were sent to Oracle's own description fetcher — while genuine
+  // careers.oracle.com links matched nothing at all.
+  { key: "oracle", label: "Oracle", ats: "solo", lane: "normal", urlPattern: /careers\.oracle\.com\/.*?job\/(\d+)/i },
   { key: "jpmorgan", label: "JPMorgan Chase", ats: "solo", lane: "normal", banking: true, urlPattern: /jpmc\.fa\.oraclecloud\.com\/.*?job\/(\d+)/i },
   { key: "ford", label: "Ford Motor", ats: "solo", lane: "normal", urlPattern: /efds\.fa\.em5\.oraclecloud\.com\/.*?job\/(\d+)/i },
   { key: "citi", label: "Citi", ats: "solo", lane: "normal", banking: true, urlPattern: /jobs\.citi\.com\/job\/[^/]+\/[^/]+\/287\/(\d+)/i },

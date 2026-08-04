@@ -1,4 +1,12 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+} from "./shared.js";
 
 function inferCountry(locations) {
   if (!Array.isArray(locations)) return "";
@@ -16,12 +24,12 @@ function inferCountry(locations) {
 }
 
 function parseAppleJob(raw) {
-  const title = raw.postingTitle?.trim();
+  const title = safeText(raw.postingTitle);
   if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.id || raw.positionId || "");
   const locations = raw.locations || [];
-  const locationNames = locations.map((l) => l.name).filter(Boolean);
+  const locationNames = parseRowsSafely(locations, (l) => l.name);
   const location = locationNames.join(" | ");
   const countryCode = inferCountry(locations);
 
@@ -128,9 +136,7 @@ export async function collectAppleJobs(_unused, config, log) {
       }
     }
 
-    const jobs = allRaw
-      .map((raw) => parseAppleJob(raw))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(allRaw, (raw) => parseAppleJob(raw));
 
     // Apple concatenates several relevance-ordered term searches; sort by postedAt
     // DESC so the maxJobsPerSource cap keeps the freshest across all terms instead

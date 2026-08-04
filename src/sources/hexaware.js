@@ -1,7 +1,16 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 function parseHexawareJob(raw) {
-  const title = raw.Title?.trim();
+  const title = safeText(raw.Title);
   if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.Id || "");
@@ -16,7 +25,7 @@ function parseHexawareJob(raw) {
   let postedAt = "";
   let postedPrecision = "";
   if (raw.PostedDate) {
-    postedAt = new Date(raw.PostedDate).toISOString();
+    postedAt = toIsoOrEmpty(raw.PostedDate);
     postedPrecision = "day";
   }
 
@@ -67,9 +76,7 @@ export async function collectHexawareJobs(_unused, config, log) {
     const rawJobs = data.items.length === 0 ? [] : data.items[0]?.requisitionList;
     if (!Array.isArray(rawJobs)) throw new Error("response did not contain requisitions");
 
-    const jobs = rawJobs
-      .map((raw) => parseHexawareJob(raw))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseHexawareJob(raw));
 
     log(`Hexaware API returned ${rawJobs.length} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);

@@ -1,4 +1,11 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+} from "./shared.js";
 
 function parseDynatraceJob(result) {
   const raw = result.raw || {};
@@ -53,9 +60,7 @@ export async function collectDynatraceJobs(_unused, config, log) {
     if (!Array.isArray(data?.results)) throw new Error("response did not contain a results array");
     const rawResults = data.results;
 
-    const jobs = rawResults
-      .map((r) => parseDynatraceJob(r))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawResults, (r) => parseDynatraceJob(r));
 
     log(`Dynatrace API returned ${rawResults.length} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);

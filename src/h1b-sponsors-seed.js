@@ -11,8 +11,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { initDb, closeDb } from "./state.js";
+import { resolveDbFile } from "./db-path.js";
 import { upsertH1bSponsor } from "./multi-user-state.js";
 import { COMPANIES } from "./companies.js";
 import { resolveCompanyStats } from "./h1b-matching.js";
@@ -36,7 +37,12 @@ function loadLcaSeed() {
 }
 
 function seed() {
-  initDb("data/jobs.db");
+  // resolveDbFile() honours DB_FILE and resolves against PROJECT_ROOT. The old
+  // hardcoded "data/jobs.db" was relative to the CWD, so running this from
+  // anywhere but the repo root silently CREATED a new empty database, seeded 189
+  // rows into it, printed success, and left the real one untouched. This is a
+  // quarterly manual procedure, which is exactly where a silent success hides.
+  initDb(resolveDbFile());
   const { meta, employers } = loadLcaSeed();
 
   let withStats = 0;
@@ -57,4 +63,10 @@ function seed() {
   closeDb();
 }
 
-seed();
+// Entrypoint guard: seed() opens and writes a database, so importing this module
+// for any reason (a test, a tooling scan) must not do that as a side effect.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  seed();
+}
+
+export { seed };

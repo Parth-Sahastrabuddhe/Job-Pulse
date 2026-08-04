@@ -1,9 +1,12 @@
 import {
+  asCollectorError,
   dedupeJobs,
+  fetchWithTimeout,
   finalizeJob,
   isTargetRole,
-  fetchWithTimeout,
-  asCollectorError
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
 } from "./shared.js";
 
 const MICROSOFT_BASE_URL = "https://apply.careers.microsoft.com";
@@ -25,7 +28,7 @@ export function parseRetryAfterMs(value, nowMs = Date.now()) {
 }
 
 function parseMicrosoftJob(raw, config) {
-  const title = raw.name?.trim();
+  const title = safeText(raw.name);
   if (!title || !isTargetRole(title)) {
     return null;
   }
@@ -40,7 +43,7 @@ function parseMicrosoftJob(raw, config) {
 
   if (raw.postedTs && Number.isFinite(raw.postedTs)) {
     const ms = raw.postedTs > 1_000_000_000_000 ? raw.postedTs : raw.postedTs * 1000;
-    postedAt = new Date(ms).toISOString();
+    postedAt = toIsoOrEmpty(ms);
     // Eightfold/PCSX postedTs is the start-of-day UTC timestamp, not an exact
     // post time (same API family as pcsx.js). "exact" made every Microsoft job
     // look stale outside 00:00–03:00 UTC; "date" routes it through the
@@ -99,9 +102,7 @@ export async function collectMicrosoftJobs(_browserUnused, config, log) {
     if (!Array.isArray(data?.data?.positions)) throw new Error("response did not contain a positions array");
     const rawJobs = data.data.positions;
 
-    const jobs = rawJobs
-      .map((raw) => parseMicrosoftJob(raw, config))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseMicrosoftJob(raw, config));
 
     log(`Microsoft API returned ${rawJobs.length} results, ${jobs.length} matched keywords.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);

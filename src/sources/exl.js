@@ -1,4 +1,13 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 // EXL Service runs on Oracle Cloud HCM (same Fusion SaaS pod family as Hexaware).
 // Unlike Hexaware, EXL's board is ~64% India and US is a minority, so we apply the
@@ -11,7 +20,7 @@ const SITE = "CX_2";
 const US_LOCATION_ID = "300000000467584";
 
 function parseExlJob(raw) {
-  const title = raw.Title?.trim();
+  const title = safeText(raw.Title);
   if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.Id || "");
@@ -27,7 +36,7 @@ function parseExlJob(raw) {
   let postedAt = "";
   let postedPrecision = "";
   if (raw.PostedDate) {
-    postedAt = new Date(raw.PostedDate).toISOString();
+    postedAt = toIsoOrEmpty(raw.PostedDate);
     postedPrecision = "day";
   }
 
@@ -76,9 +85,7 @@ export async function collectExlJobs(_unused, config, log) {
     const rawJobs = data.items.length === 0 ? [] : data.items[0]?.requisitionList;
     if (!Array.isArray(rawJobs)) throw new Error("response did not contain requisitions");
 
-    const jobs = rawJobs
-      .map((raw) => parseExlJob(raw))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseExlJob(raw));
 
     log(`EXL API returned ${rawJobs.length} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);

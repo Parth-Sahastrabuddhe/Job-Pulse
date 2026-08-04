@@ -1,4 +1,14 @@
-import { asCollectorError, dedupeJobs, detectSeniority, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  detectSeniority,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 const GS_GRAPHQL_URL = "https://api-higher.gs.com/gateway/api/v1/graphql";
 
@@ -34,14 +44,14 @@ const GET_ROLES_QUERY = `query GetRoles($searchQueryInput: RoleSearchQueryInput!
 const ELEVATED_LEVELS = new Set(["senior", "staff", "director"]);
 
 function parseGSJob(raw) {
-  let title = raw.jobTitle?.trim();
+  let title = safeText(raw.jobTitle);
   if (!title || !isTargetRole(title)) return null;
 
   // Fold an ELEVATING corporate title into the job title so downstream
   // seniority detection sees it. Non-elevating corp titles (Analyst,
   // Associate) are left off because they add no seniority signal. Job keys are
   // based on the stable source ID, so this display metadata cannot re-key them.
-  const corpTitle = raw.corporateTitle?.trim() || "";
+  const corpTitle = safeText(raw.corporateTitle);
   if (corpTitle && ELEVATED_LEVELS.has(detectSeniority(corpTitle))
       && !ELEVATED_LEVELS.has(detectSeniority(title))) {
     title = `${title} - ${corpTitle}`;
@@ -66,7 +76,7 @@ function parseGSJob(raw) {
   let postedAt = "";
   let postedPrecision = "";
   if (raw.lastPostedDate && !Number.isNaN(Date.parse(raw.lastPostedDate))) {
-    postedAt = new Date(raw.lastPostedDate).toISOString();
+    postedAt = toIsoOrEmpty(raw.lastPostedDate);
     postedPrecision = "exact";
   }
 
@@ -124,9 +134,7 @@ export async function collectGoldmanSachsJobs(_unused, config, log) {
 
     if (!Array.isArray(roleSearch.items)) throw new Error("roleSearch did not contain an items array");
     const rawJobs = roleSearch.items;
-    const jobs = rawJobs
-      .map((raw) => parseGSJob(raw))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseGSJob(raw));
 
     log(`Goldman Sachs API returned ${rawJobs.length} results (${roleSearch.totalCount} total), ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);

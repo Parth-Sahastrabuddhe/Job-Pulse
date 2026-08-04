@@ -6,6 +6,11 @@ const DEFAULT_NIGHT_START = "00:00";
 const DEFAULT_NIGHT_END = "06:00";
 const DEFAULT_TIMEZONE = "America/New_York";
 const DEFAULT_MAX_CONCURRENT = 1;
+// Upper bound on how long browser.close() may take before we SIGKILL the
+// browser process and reclaim its launch slot. Generous enough for an orderly
+// shutdown on a loaded box, short enough that a wedged browser cannot stall a
+// collection cycle.
+const CLOSE_TIMEOUT_MS = 15_000;
 
 let activeLaunchReservations = 0;
 const launchQueue = [];
@@ -228,8 +233,28 @@ export async function launchChromiumWithGuard(chromium, launchOptions = {}, conf
   };
   const originalClose = browser.close.bind(browser);
   browser.close = async (...args) => {
+    // The launch slot is released only from here (or from "disconnected"), and
+    // the default concurrency is 1, so awaiting close() with no deadline meant a
+    // single browser that stopped answering the close RPC — the normal outcome
+    // of memory starvation — permanently blocked EVERY later Playwright launch
+    // in this process. Collectors that pass no AbortSignal then queued forever
+    // rather than failing, so the batch loop stopped with pm2 still reporting
+    // "online". Bound the wait and escalate to SIGKILL; release the slot either
+    // way, because a slot we cannot reclaim is worse than a stray process.
     try {
-      return await originalClose(...args);
+      await Promise.race([
+        originalClose(...args),
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error("browser.close timed out")), CLOSE_TIMEOUT_MS).unref();
+        }),
+      ]);
+    } catch (error) {
+      try {
+        browser.process?.()?.kill("SIGKILL");
+      } catch {
+        // Nothing else to try; the finally below still frees the slot.
+      }
+      throw error;
     } finally {
       cleanup();
     }

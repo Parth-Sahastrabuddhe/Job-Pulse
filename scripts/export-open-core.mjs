@@ -34,7 +34,38 @@ const SECRET_PATTERNS = [
   /\bAIza[0-9A-Za-z_-]{35}\b/,
   /\b(?:ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_]{20,}\b/,
   /\bxox[baprs]-[0-9A-Za-z-]{10,}\b/,
-  /\b[MNO][A-Za-z0-9_-]{23}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}\b/,
+  // Discord bot token. The first segment is base64 of the bot's user id: 24
+  // chars for a legacy 18-digit snowflake, 26 for a current 19-digit one. The
+  // original {23} matched only the legacy width, so a real present-day token
+  // would not have been caught.
+  /\b[MNO][A-Za-z0-9_-]{23,27}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}\b/,
+  // Provider API keys this project actually handles (per-user LLM config):
+  // OpenAI sk- / sk-proj-, Anthropic sk-ant-, OpenRouter sk-or-v1-, Groq gsk_.
+  /\bsk-[A-Za-z0-9_-]{20,}\b/,
+  /\bgsk_[A-Za-z0-9]{20,}\b/,
+  // Credentials embedded in a URL, e.g. postgres://user:password@host/db
+  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/i,
+  // Healthchecks.io ping URLs (HEARTBEAT_URL_MICRO / _MU)
+  /\bhc-ping\.com\/[0-9a-f-]{16,}/i,
+  // JSON Web Token
+  /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\./,
+  // A long hex or base64 blob sitting next to a secret-ish name. Deliberately
+  // contextual: a bare 64-hex pattern false-positives on test digests.
+  /(?:secret|token|password|passwd|api[_-]?key|access[_-]?key)[^\n]{0,32}?["'\s:=]+[A-Za-z0-9/+_-]{32,}/i,
+];
+// Operator identifiers that must never reach the public tree. This script is
+// private (it appears in no manifest section), so listing concrete values here
+// is safe and makes the scan exact instead of heuristic.
+const PII_PATTERNS = [
+  /\b1038422401874145372\b/,                        // owner Discord user id
+  /\b3\.138\.62\.29\b/,                             // production EC2 public IP
+  /(?:^|[\s"'`(=:,[])\/home\/[a-z0-9._-]+\//i,      // absolute POSIX home path
+  /[A-Za-z]:\\{1,2}Users\\{1,2}[A-Za-z0-9._-]+/,    // absolute Windows user path
+  /\b(?:csgrad|luanty)\b/i,                         // operator account handles
+  /\bjobpulse(?:-key)?\.pem\b/i,                    // production SSH key filenames
+  // Personal mailbox providers only, so placeholder addresses such as the
+  // x@y.com fixture and anything @example.com stay allowed.
+  /\b[A-Za-z0-9._%+-]+@(?:gmail|googlemail|outlook|hotmail|yahoo|proton|protonmail|icloud)\.[a-z.]{2,}\b/i,
 ];
 const JAVASCRIPT_FILE = /\.[cm]?js$/i;
 const LOADER_TRIVIA = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r?\n|$))*`;
@@ -160,10 +191,20 @@ export function localSpecifiers(source, label = "public source") {
   }
 
   const specs = [];
-  const staticImport = /\b(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g;
+  // Two independent scans, deliberately not one regex with an optional
+  // `(?:...\s+from\s+)?` group. That group is greedy and `[\s\S]*?` crosses
+  // newlines, so starting at a bare `import "./private.js";` the engine runs
+  // forward to the next ` from ` and captures THAT specifier instead, silently
+  // dropping "./private.js". A side-effect-only import of a private module was
+  // therefore invisible to the closure and `--check` passed on a broken export.
+  const sideEffectImport = /\bimport\s*(["'])([^"'\r\n]+)\1/g;
+  const fromSpecifier = /\bfrom\s*(["'])([^"'\r\n]+)\1/g;
   let match;
-  while ((match = staticImport.exec(source))) {
-    if (match[1].startsWith(".")) specs.push(match[1]);
+  for (const pattern of [sideEffectImport, fromSpecifier]) {
+    pattern.lastIndex = 0;
+    while ((match = pattern.exec(source))) {
+      if (match[2].startsWith(".")) specs.push(match[2]);
+    }
   }
 
   DYNAMIC_IMPORT_CALL.lastIndex = 0;
@@ -218,6 +259,28 @@ export async function dependencyClosure(
   return included;
 }
 
+/**
+ * Force an explicit public/private decision for every collector on disk.
+ *
+ * The closure walks outward from the entrypoints, so a new src/sources/*.js that
+ * nothing imports yet is simply absent from the export rather than flagged, and
+ * `--check` passes. That silence is the wrong default for the one directory
+ * where new files land most often.
+ */
+async function assertCollectorsAreClassified(allowedJavaScript, forbidden) {
+  const sourcesDir = path.join(PROJECT_ROOT, "src", "sources");
+  const entries = await fs.readdir(sourcesDir, { withFileTypes: true });
+  const unclassified = entries
+    .filter((entry) => entry.isFile() && isJavaScriptFile(entry.name))
+    .map((entry) => `src/sources/${entry.name}`)
+    .filter((file) => !allowedJavaScript.has(file) && !forbidden.has(file));
+  if (unclassified.length > 0) {
+    throw new Error(
+      `Collectors are neither allowlisted nor forbidden, so they would be silently omitted: ${unclassified.join(", ")}`,
+    );
+  }
+}
+
 async function assertReleaseMetadata() {
   const pkg = JSON.parse((await readRepoFile("open-core/package.json")).toString("utf8"));
   if (pkg.private !== false) throw new Error("Public package template must set private=false");
@@ -269,6 +332,8 @@ export async function buildExportPlan() {
     }
   }
 
+  await assertCollectorsAreClassified(allowedJavaScript, forbidden);
+
   const entrypoints = manifest.entrypoints.map((file) => assertSafeRelative(file, "entrypoint"));
   for (const entrypoint of entrypoints) {
     if (!isJavaScriptFile(entrypoint) || !allowedJavaScript.has(entrypoint)) {
@@ -298,6 +363,9 @@ export async function buildExportPlan() {
     const text = contents.toString("utf8");
     for (const pattern of SECRET_PATTERNS) {
       if (pattern.test(text)) throw new Error(`Potential secret in public export source: ${from}`);
+    }
+    for (const pattern of PII_PATTERNS) {
+      if (pattern.test(text)) throw new Error(`Personal data in public export source: ${from}`);
     }
     assertSafeRelative(to, "planned destination");
   }

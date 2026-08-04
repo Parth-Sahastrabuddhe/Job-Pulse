@@ -1,4 +1,11 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 function parseLinkedInCards(html) {
   const jobs = [];
@@ -22,7 +29,7 @@ function parseLinkedInCards(html) {
     let postedAt = "";
     let postedPrecision = "";
     if (postedDate) {
-      postedAt = new Date(postedDate).toISOString();
+      postedAt = toIsoOrEmpty(postedDate);
       // Guest cards expose a date-only datetime (e.g. "2026-06-03"), which parses to
       // UTC midnight. Marking it "exact" makes the 180-min freshness gate treat the
       // job as stale for ~21h/day, so treat date-only values as "date" precision.

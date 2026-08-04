@@ -1,7 +1,16 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 function parseAshbyJob(raw, companyConfig) {
-  const title = raw.title?.trim();
+  const title = safeText(raw.title);
   if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.id || "");
@@ -12,10 +21,10 @@ function parseAshbyJob(raw, companyConfig) {
   let postedPrecision = "";
 
   if (raw.publishedAt) {
-    postedAt = new Date(raw.publishedAt).toISOString();
+    postedAt = toIsoOrEmpty(raw.publishedAt);
     postedPrecision = "exact";
   } else if (raw.updatedAt) {
-    postedAt = new Date(raw.updatedAt).toISOString();
+    postedAt = toIsoOrEmpty(raw.updatedAt);
     postedPrecision = "exact";
   }
 
@@ -65,7 +74,7 @@ export async function collectAshbyJobs(_unused, config, log, companyKey) {
     if (!Array.isArray(data?.jobs)) throw new Error("response did not contain a jobs array");
     const rawJobs = data.jobs;
 
-    const jobs = rawJobs.map((raw) => parseAshbyJob(raw, companyConfig)).filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseAshbyJob(raw, companyConfig));
 
     // Board API orders by relevance, not date. Sort by postedAt DESC so the
     // maxJobsPerSource cap keeps the freshest postings rather than truncating them.

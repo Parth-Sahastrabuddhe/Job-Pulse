@@ -23,6 +23,15 @@ import {
 } from "./collector-health.js";
 import { shouldRunScheduledPlaywrightSource } from "./playwright-guard.js";
 import { allCollectorsFailed, buildCollectorRegistry, collectBatch, inspectJobs } from "./pipeline.js";
+import { collectLinkedInJobs } from "./sources/linkedin.js";
+
+// Collectors the public core deliberately does not bundle. src/sources/linkedin.js
+// scrapes an undocumented guest endpoint, which is not something we are willing to
+// ship under MIT for anyone to clone and run, so it is excluded from the open-core
+// manifest and injected here instead. See open-core/manifest.json.
+const PRIVATE_COLLECTORS = [
+  { key: "linkedin", collect: collectLinkedInJobs, lane: "slow" },
+];
 
 function timestamp() {
   return new Date().toISOString();
@@ -944,26 +953,29 @@ async function main() {
     pingFail(heartbeatUrl(), `unhandledRejection: ${reason?.message ?? reason}`).finally(() => process.exit(1));
   });
 
-  if (flags.watch && !acquireLock()) {
+  // The lock is unconditional, not --watch-only. `npm start`, `npm run run-once`
+  // and `npm run seed` all run the full pipeline: they write to the same SQLite
+  // file the supervised process owns and they open a second Discord gateway
+  // session on the same bot token. Gating mutual exclusion on --watch meant the
+  // one invocation that is supervised was the only one that took the lock.
+  if (!acquireLock()) {
     console.error(`[${timestamp()}] Another bot instance is already running. Exiting.`);
     process.exitCode = 1;
     return;
   }
 
-  if (flags.watch) {
-    try {
-      writePidFile();
-    } catch (err) {
-      releaseLock();
-      console.error(`[${timestamp()}] Failed to write PID file: ${err.message}`);
-      process.exitCode = 1;
-      return;
-    }
-    const cleanup = () => { releasePidFile(); releaseLock(); };
-    process.on("exit", cleanup);
-    process.on("SIGINT", () => { stopDiscordBot(); closeDb(); cleanup(); process.exit(0); });
-    process.on("SIGTERM", () => { stopDiscordBot(); closeDb(); cleanup(); process.exit(0); });
+  try {
+    writePidFile();
+  } catch (err) {
+    releaseLock();
+    console.error(`[${timestamp()}] Failed to write PID file: ${err.message}`);
+    process.exitCode = 1;
+    return;
   }
+  const cleanup = () => { releasePidFile(); releaseLock(); };
+  process.on("exit", cleanup);
+  process.on("SIGINT", () => { stopDiscordBot(); closeDb(); cleanup(); process.exit(0); });
+  process.on("SIGTERM", () => { stopDiscordBot(); closeDb(); cleanup(); process.exit(0); });
 
   const config = getConfig();
 
@@ -976,7 +988,7 @@ async function main() {
   migrateFromJson(config.stateFile);
 
   // Build company registry
-  const registry = buildCollectorRegistry(config, log);
+  const registry = buildCollectorRegistry(config, log, { extraCollectors: PRIVATE_COLLECTORS });
   const fastCount = registry.filter((e) => e.lane === "fast").length;
   const normalCount = registry.filter((e) => e.lane === "normal").length;
   const slowCount = registry.filter((e) => e.lane === "slow").length;
@@ -998,14 +1010,21 @@ async function main() {
     log("No Discord or Telegram configuration found. The bot will log results locally only.");
   }
 
-  if (flags.watch) {
-    await runBatchLoop(config, flags, registry);
-  } else {
-    await runOnce(config, flags, registry);
+  // stopDiscordBot() must run on the failure path too. runBatchLoop deliberately
+  // throws when the initial seed collects nothing, and the Discord client's socket
+  // and heartbeat timers keep the event loop alive, so without this finally the
+  // process stayed resident forever with exitCode set — PM2 reported "online"
+  // while nothing was collecting.
+  try {
+    if (flags.watch) {
+      await runBatchLoop(config, flags, registry);
+    } else {
+      await runOnce(config, flags, registry);
+    }
+  } finally {
+    stopDiscordBot();
+    closeDb();
   }
-
-  stopDiscordBot();
-  closeDb();
 }
 
 export function isEntrypoint(moduleUrl, options = {}) {
@@ -1030,5 +1049,9 @@ if (isEntrypoint(import.meta.url)) {
   main().catch((error) => {
     console.error(`[${timestamp()}] ${error.message}`);
     process.exitCode = 1;
+    // Backstop: main()'s finally releases the Discord client and the DB, but a
+    // stray timer or socket from a partially-initialised subsystem can still keep
+    // the loop alive. A failed start must exit so the supervisor can restart it.
+    setTimeout(() => process.exit(1), 2000).unref();
   });
 }

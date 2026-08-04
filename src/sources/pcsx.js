@@ -1,7 +1,16 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 function parsePcsxJob(raw, companyConfig) {
-  const title = raw.name?.trim();
+  const title = safeText(raw.name);
   if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.id ?? raw.displayJobId ?? "");
@@ -16,7 +25,7 @@ function parsePcsxJob(raw, companyConfig) {
 
   if (raw.postedTs && Number.isFinite(raw.postedTs)) {
     const ms = raw.postedTs > 1_000_000_000_000 ? raw.postedTs : raw.postedTs * 1000;
-    postedAt = new Date(ms).toISOString();
+    postedAt = toIsoOrEmpty(ms);
     // Eightfold/PCSX postedTs is the start-of-day UTC timestamp, not an
     // exact post time. Mark as "date" so the freshness gate uses the
     // day-granular path (maxDateOnlyAgeDays) instead of the minute one.
@@ -99,9 +108,7 @@ export async function collectPcsxJobs(_unused, config, log, companyKey) {
       }
     }
 
-    const jobs = rawJobs
-      .map((raw) => parsePcsxJob(raw, companyConfig))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parsePcsxJob(raw, companyConfig));
 
     // Server-side ordering is relevance, not date. Sort by postedAt DESC so the
     // maxJobsPerSource cap preserves the freshest postings.

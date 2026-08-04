@@ -1,4 +1,12 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 const GOOGLE_RPC_URL =
   "https://www.google.com/about/careers/applications/_/HiringCportalFrontendUi/data/batchexecute";
@@ -52,7 +60,7 @@ function parseGoogleJob(raw, config) {
 
   // Locations: raw[9] is array of [display_name, [address], city, zip, state, country_code]
   const locations = Array.isArray(raw[9])
-    ? raw[9].map((loc) => (Array.isArray(loc) ? loc[0] : "")).filter(Boolean)
+    ? parseRowsSafely(raw[9], (loc) => (Array.isArray(loc) ? loc[0] : ""))
     : [];
   const location = locations.join(" | ");
 
@@ -68,7 +76,7 @@ function parseGoogleJob(raw, config) {
   let postedPrecision = "";
   if (Array.isArray(raw[12]) && typeof raw[12][0] === "number") {
     const ms = raw[12][0] * 1000 + Math.floor((raw[12][1] || 0) / 1_000_000);
-    postedAt = new Date(ms).toISOString();
+    postedAt = toIsoOrEmpty(ms);
     postedPrecision = "exact";
   }
 
@@ -114,9 +122,7 @@ export async function collectGoogleJobs(_unused, config, log) {
     });
     const rawJobs = parsedBatches.flat();
 
-    const jobs = rawJobs
-      .map((raw) => parseGoogleJob(raw, config))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseGoogleJob(raw, config));
 
     log(`Google API returned ${rawJobs.length} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);

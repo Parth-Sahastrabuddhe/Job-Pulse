@@ -16,7 +16,6 @@ import { collectPcsxJobs } from "./sources/pcsx.js";
 import { collectWorkdayJobs } from "./sources/workday.js";
 import { collectAshbyJobs } from "./sources/ashby.js";
 import { collectOracleJobs } from "./sources/oracle.js";
-import { collectLinkedInJobs } from "./sources/linkedin.js";
 import { collectJPMorganJobs } from "./sources/jpmorgan.js";
 import { collectIntuitJobs } from "./sources/intuit.js";
 import { collectSmartRecruitersJobs } from "./sources/smartrecruiters.js";
@@ -57,8 +56,17 @@ const MAX_COLLECTOR_CONCURRENCY = 50;
 
 function noop() {}
 
-/** Build the canonical collector registry used by both public and private runtimes. */
-export function buildCollectorRegistry(config = {}, logger = noop) {
+/**
+ * Build the canonical collector registry used by both public and private runtimes.
+ *
+ * `options.extraCollectors` is the extension point for collectors this module
+ * deliberately does not import. Anything excluded from the open-core manifest
+ * must be injected here by the runtime that owns it, so the public import graph
+ * never reaches it and the exporter's closure check stays meaningful. Each entry
+ * is `{ key, collect, lane, options }` where `collect` has the standard
+ * `(browser, config, logger)` collector signature.
+ */
+export function buildCollectorRegistry(config = {}, logger = noop, options = {}) {
   const registry = [];
 
   const solo = (key, fn, lane, options = {}) => {
@@ -95,7 +103,6 @@ export function buildCollectorRegistry(config = {}, logger = noop) {
   solo("apple", collectAppleJobs, "slow");
   solo("uber", collectUberJobs, "slow", { usesPlaywright: true });
   solo("confluent", collectConfluentJobs, "slow", { usesPlaywright: true });
-  solo("linkedin", collectLinkedInJobs, "slow");
   solo("intuit", collectIntuitJobs, "slow");
   solo("bloomberg", collectBloombergJobs, "slow");
 
@@ -112,6 +119,21 @@ export function buildCollectorRegistry(config = {}, logger = noop) {
     if (company.ats !== "solo" && atsCollectors[company.ats]) {
       parameterized(company.key, atsCollectors[company.ats], company.lane);
     }
+  }
+
+  const registeredKeys = new Set(registry.map((entry) => entry.key));
+  for (const extra of options.extraCollectors || []) {
+    if (!extra || typeof extra.key !== "string" || !extra.key) {
+      throw new Error("extraCollectors entries require a non-empty string key");
+    }
+    if (typeof extra.collect !== "function") {
+      throw new Error(`extraCollectors entry ${extra.key} requires a collect function`);
+    }
+    if (registeredKeys.has(extra.key)) {
+      throw new Error(`extraCollectors entry duplicates a built-in collector: ${extra.key}`);
+    }
+    registeredKeys.add(extra.key);
+    solo(extra.key, extra.collect, extra.lane || "slow", extra.options || {});
   }
 
   const fastTrack = new Set(config.fastTrackCompanies || []);

@@ -31,7 +31,6 @@
     "src/sources/intuit.js",
     "src/sources/jpmorgan.js",
     "src/sources/lever.js",
-    "src/sources/linkedin.js",
     "src/sources/mercedesbenz.js",
     "src/sources/meta.js",
     "src/sources/microsoft.js",
@@ -80,7 +79,6 @@
     { "from": "tests/fixtures/title-labels.json", "to": "tests/fixtures/title-labels.json" }
   ],
   "forbiddenDependencies": [
-    "src/address-book.js",
     "src/auto-apply.js",
     "src/collector-health.js",
     "src/discord-bot.js",
@@ -94,6 +92,7 @@
     "src/notifiers/discord.js",
     "src/notifiers/telegram.js",
     "src/personal-profile.js",
+    "src/sources/linkedin.js",
     "src/private-config.js",
     "src/state.js",
     "src/tailor.js"

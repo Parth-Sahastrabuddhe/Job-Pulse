@@ -33,8 +33,14 @@ function oracleHcmHostForSource(sourceKey) {
 }
 
 function throwIfAborted(error, signal) {
-  if (!signal?.aborted && error?.name !== "AbortError" && error?.code !== "ABORT_ERR") return;
-  if (signal?.reason instanceof Error) throw signal.reason;
+  // Rethrow ONLY for genuine external cancellation. fetchWithTimeout aborts its
+  // own controller when its deadline fires, which produces an error named
+  // "AbortError" even though nobody cancelled us. Treating that as cancellation
+  // meant a single slow board threw straight out of fetchJobDescription, so the
+  // remaining fetcher branches and the universal HTML fallback never ran and the
+  // caller saw "could not fetch" for a description the fallback would have got.
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
   throw error;
 }
 

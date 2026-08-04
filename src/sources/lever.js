@@ -1,7 +1,17 @@
-import { asCollectorError, dedupeJobs, finalizeJob, inferCountryCodeFromLocation, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  inferCountryCodeFromLocation,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 function parseLeverJob(raw, companyConfig) {
-  const title = raw.text?.trim();
+  const title = safeText(raw.text);
   if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.id || "");
@@ -18,7 +28,7 @@ function parseLeverJob(raw, companyConfig) {
   let postedPrecision = "";
 
   if (raw.createdAt) {
-    postedAt = new Date(raw.createdAt).toISOString();
+    postedAt = toIsoOrEmpty(raw.createdAt);
     postedPrecision = "exact";
   }
 
@@ -67,9 +77,7 @@ export async function collectLeverJobs(_unused, config, log, companyKey) {
     const rawJobs = await response.json();
     if (!Array.isArray(rawJobs)) throw new Error("response did not contain a postings array");
 
-    const jobs = rawJobs
-      .map((raw) => parseLeverJob(raw, companyConfig))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseLeverJob(raw, companyConfig));
 
     // Board API orders by relevance, not date. Sort by postedAt DESC so the
     // maxJobsPerSource cap keeps the freshest postings rather than truncating them.

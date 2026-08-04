@@ -38,6 +38,72 @@ export function normalizeForMatch(value) {
     .trim();
 }
 
+/**
+ * Convert an upstream timestamp to ISO-8601, or "" when it is unusable.
+ *
+ * `new Date(x).toISOString()` throws RangeError on anything unparseable or out
+ * of range, and collectors call it inside `.map()` over remote rows. One bad
+ * row therefore aborted the whole source's harvest for that cycle: the throw
+ * escaped the map, hit the collector's outer catch, and the company reported
+ * zero jobs until upstream fixed their data. Always prefer this helper.
+ */
+export function toIsoOrEmpty(value) {
+  if (value === null || value === undefined || value === "") return "";
+  let ms;
+  if (typeof value === "number") ms = value;
+  else if (value instanceof Date) ms = value.getTime();
+  else if (typeof value === "string") ms = Date.parse(value);
+  else return "";
+  // Number.isFinite rejects NaN and ±Infinity; the range check rejects values
+  // outside what Date can represent, which is what actually throws.
+  if (!Number.isFinite(ms) || Math.abs(ms) > 8.64e15) return "";
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Map upstream rows to jobs, dropping any single row that fails to parse.
+ *
+ * Collectors parse inside `.map()`, so any throw escapes the map, hits the
+ * collector's outer catch and costs the ENTIRE source its harvest for that
+ * cycle. That is the wrong blast radius: one poisoned row out of 400 should
+ * cost one row. Field-level guards (toIsoOrEmpty, safeText) close the two
+ * shapes we have actually seen; this closes the class, including `null` rows
+ * and whatever an ATS invents next.
+ */
+export function parseRowsSafely(rows, parse, onRowError) {
+  if (!Array.isArray(rows)) return [];
+  const jobs = [];
+  for (const row of rows) {
+    let job;
+    try {
+      job = parse(row);
+    } catch (error) {
+      onRowError?.(error, row);
+      continue;
+    }
+    if (job) jobs.push(job);
+  }
+  return jobs;
+}
+
+/**
+ * Coerce an upstream field to a trimmed string.
+ *
+ * `raw.title?.trim()` guards null and undefined but NOT type: an ATS that emits
+ * a numeric title throws "raw.title?.trim is not a function", with the same
+ * whole-source blast radius as an unparseable date.
+ */
+export function safeText(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
+}
+
 export function normalizeCountryCode(value) {
   const normalized = normalizeForMatch(value);
 

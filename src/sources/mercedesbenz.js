@@ -1,10 +1,19 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 function parseMercedesBenzJob(raw) {
   const desc = raw.MatchedObjectDescriptor;
   if (!desc) return null;
 
-  const title = desc.PositionTitle?.trim();
+  const title = safeText(desc.PositionTitle);
   if (!title || !isTargetRole(title)) return null;
 
   const id = String(desc.ID || "");
@@ -23,7 +32,7 @@ function parseMercedesBenzJob(raw) {
   let postedAt = "";
   let postedPrecision = "";
   if (desc.PublicationStartDate) {
-    postedAt = new Date(desc.PublicationStartDate).toISOString();
+    postedAt = toIsoOrEmpty(desc.PublicationStartDate);
     postedPrecision = "day";
   }
 
@@ -76,9 +85,7 @@ export async function collectMercedesBenzJobs(_unused, config, log) {
       if (items.length < PAGE_SIZE) break;
     }
 
-    const jobs = allRaw
-      .map((raw) => parseMercedesBenzJob(raw))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(allRaw, (raw) => parseMercedesBenzJob(raw));
 
     log(`Mercedes-Benz API returned ${allRaw.length} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);

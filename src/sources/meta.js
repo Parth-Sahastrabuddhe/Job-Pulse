@@ -1,4 +1,12 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  inferCountryCodeFromLocation,
+  isTargetRole,
+  parseRowsSafely,
+} from "./shared.js";
 
 const META_CAREERS_URL = "https://www.metacareers.com";
 const META_GRAPHQL_URL = "https://www.metacareers.com/graphql";
@@ -65,15 +73,17 @@ function parseMetaJob(raw, config) {
   const locations = Array.isArray(raw.locations) ? [...raw.locations].sort() : [];
   const location = locations.join(" | ");
 
-  // City, STATE (US) vs City, PROVINCE (CA) detection.
-  const US_STATES = /\b(AL|AK|AZ|AR|CA|CO|CT|DC|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY)\b/;
-  const CA_PROVINCES = /\b(ON|BC|QC|AB|MB|SK|NS|NB|NL|PE|YT|NT|NU)\b/;
-  const hasUsLocation = locations.some((l) =>
-    /\bUnited States\b/i.test(l) || /\bRemote, US\b/i.test(l) || US_STATES.test(l)
-  );
-  const hasCaLocation = locations.some((l) =>
-    /\bCanada\b/i.test(l) || CA_PROVINCES.test(l)
-  );
+  // Country detection is delegated to shared.js rather than reimplemented here.
+  // The previous local US_STATES regex was an un-anchored two-letter match, so
+  // the state codes DE, IN and IL collided with Germany, India and Israel and
+  // stamped countryCode "US" on Meta's Berlin, Bengaluru/Hyderabad/Gurgaon and
+  // Tel Aviv postings — which then sailed through the US-only country gate into
+  // users' DMs. shared.js carries the disambiguation (FOREIGN_CITY_COUNTRY_PAIRS)
+  // that closes exactly this class, and keeping one implementation means a future
+  // country (India is planned) only has to be taught in one place.
+  const countryCodes = locations.map((l) => inferCountryCodeFromLocation(l));
+  const hasUsLocation = countryCodes.includes("US");
+  const hasCaLocation = countryCodes.includes("CA");
 
   // Drop jobs with neither a US nor a CA location.
   if (!hasUsLocation && !hasCaLocation) {
@@ -161,9 +171,7 @@ export async function collectMetaJobs(_unused, config, log) {
     }
 
     noteSuccess();
-    const jobs = rawJobs
-      .map((raw) => parseMetaJob(raw, config))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseMetaJob(raw, config));
 
     log(`Meta API returned ${rawJobs.length} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);

@@ -387,13 +387,23 @@ export function expireSavedJobs() {
 
 /**
  * Check whether a company key is a known H1B sponsor.
- * @returns {boolean}
+ *
+ * Three-valued on purpose: true = known sponsor, false = known non-sponsor,
+ * null = no evidence either way. The previous boolean collapsed "we have never
+ * seeded this company" into "this company does not sponsor", which is the
+ * filter's only rejecting branch. So an un-seeded database — a fresh install, or
+ * any company added by /add between quarterly reseeds — silently matched ZERO
+ * jobs for every sponsorship-requiring user, with no log and no alert. Absence
+ * of evidence must not read as evidence of absence for a gate this consequential.
+ *
+ * @returns {boolean|null}
  */
 export function isH1bSponsor(companyKey) {
   const row = getDb()
     .prepare("SELECT sponsors_h1b FROM h1b_sponsors WHERE company_key = ?")
     .get(companyKey);
-  return row ? Boolean(row.sponsors_h1b) : false;
+  if (!row) return null;
+  return Boolean(row.sponsors_h1b);
 }
 
 /**

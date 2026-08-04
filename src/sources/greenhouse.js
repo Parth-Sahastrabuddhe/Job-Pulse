@@ -1,4 +1,13 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 function slugifyTitle(title) {
   return title
@@ -8,7 +17,7 @@ function slugifyTitle(title) {
 }
 
 function parseGreenhouseJob(raw, companyConfig) {
-  const title = raw.title?.trim();
+  const title = safeText(raw.title);
   if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.id || "");
@@ -20,7 +29,7 @@ function parseGreenhouseJob(raw, companyConfig) {
   const postedText = "";
 
   if (raw.updated_at) {
-    postedAt = new Date(raw.updated_at).toISOString();
+    postedAt = toIsoOrEmpty(raw.updated_at);
     postedPrecision = "exact";
   }
 
@@ -66,7 +75,7 @@ export async function collectGreenhouseJobs(_unused, config, log, companyKey) {
     if (!Array.isArray(data?.jobs)) throw new Error("response did not contain a jobs array");
     const rawJobs = data.jobs;
 
-    const jobs = rawJobs.map((raw) => parseGreenhouseJob(raw, companyConfig)).filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseGreenhouseJob(raw, companyConfig));
 
     // Board API orders by relevance/department, not date. Sort by postedAt DESC so
     // the maxJobsPerSource cap keeps the freshest postings rather than truncating them.

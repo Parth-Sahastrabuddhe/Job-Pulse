@@ -1,7 +1,16 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 function parseSmartRecruitersJob(raw, companyConfig) {
-  const title = raw.name?.trim();
+  const title = safeText(raw.name);
   if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.uuid || raw.id || "");
@@ -22,7 +31,7 @@ function parseSmartRecruitersJob(raw, companyConfig) {
   let postedAt = "";
   let postedPrecision = "";
   if (raw.releasedDate) {
-    postedAt = new Date(raw.releasedDate).toISOString();
+    postedAt = toIsoOrEmpty(raw.releasedDate);
     postedPrecision = "exact";
   }
 
@@ -64,9 +73,7 @@ export async function collectSmartRecruitersJobs(_unused, config, log, companyKe
     if (!Array.isArray(data?.content)) throw new Error("response did not contain a content array");
     const rawJobs = data.content;
 
-    const jobs = rawJobs
-      .map((raw) => parseSmartRecruitersJob(raw, companyConfig))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseSmartRecruitersJob(raw, companyConfig));
 
     // API ordering is not date-based. Sort by postedAt DESC so the
     // maxJobsPerSource cap keeps the freshest postings (same as lever.js).

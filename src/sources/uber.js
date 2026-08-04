@@ -1,9 +1,17 @@
 import { chromium } from "playwright";
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
+} from "./shared.js";
 import { launchChromiumWithGuard, newRestrictedPage } from "../playwright-guard.js";
 
 function parseUberJob(raw) {
-  const title = raw.title?.trim();
+  const title = safeText(raw.title);
   if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.id || "");
@@ -20,7 +28,7 @@ function parseUberJob(raw) {
   let postedAt = "";
   let postedPrecision = "";
   if (raw.creationDate) {
-    postedAt = new Date(raw.creationDate).toISOString();
+    postedAt = toIsoOrEmpty(raw.creationDate);
     postedPrecision = "exact";
   }
 
@@ -72,9 +80,7 @@ export async function collectUberJobs(_unused, config, log) {
     }
 
     const rawJobs = jobsData.data.results;
-    const jobs = rawJobs
-      .map((raw) => parseUberJob(raw))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseUberJob(raw));
 
     const total = jobsData.data.totalResults?.low || rawJobs.length;
     log(`Uber returned ${rawJobs.length} results (${total} total), ${jobs.length} matched filters.`);

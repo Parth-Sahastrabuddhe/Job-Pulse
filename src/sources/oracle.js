@@ -1,7 +1,16 @@
-import { asCollectorError, dedupeJobs, finalizeJob, isTargetRole, fetchWithTimeout } from "./shared.js";
+import {
+  asCollectorError,
+  dedupeJobs,
+  fetchWithTimeout,
+  finalizeJob,
+  isTargetRole,
+  parseRowsSafely,
+  safeText,
+  toIsoOrEmpty,
+} from "./shared.js";
 
 function parseOracleJob(raw) {
-  const title = raw.Title?.trim();
+  const title = safeText(raw.Title);
   if (!title || !isTargetRole(title)) return null;
 
   const id = String(raw.Id || "");
@@ -15,7 +24,7 @@ function parseOracleJob(raw) {
   let postedPrecision = "";
   if (raw.PostedDate) {
     // PostedDate is like "2026-03-20"
-    postedAt = new Date(raw.PostedDate).toISOString();
+    postedAt = toIsoOrEmpty(raw.PostedDate);
     postedPrecision = "day";
   }
 
@@ -77,9 +86,7 @@ export async function collectOracleJobs(_unused, config, log) {
       if (!Array.isArray(data.items[0]?.requisitionList)) throw new Error("response did not contain requisitions");
       return data.items[0].requisitionList;
     });
-    const jobs = rawJobs
-      .map((raw) => parseOracleJob(raw))
-      .filter(Boolean);
+    const jobs = parseRowsSafely(rawJobs, (raw) => parseOracleJob(raw));
 
     log(`Oracle API returned ${rawJobs.length} results, ${jobs.length} matched filters.`);
     return dedupeJobs(jobs).slice(0, config.maxJobsPerSource);
