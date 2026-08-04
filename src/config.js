@@ -193,7 +193,8 @@ export function getConfig() {
     quora: {
       sourceKey: "quora",
       sourceLabel: "Quora",
-      apiUrl: "https://api.lever.co/v0/postings/quora?mode=json"
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/quora",
+      boardSlug: "quora"
     },
     // Greenhouse companies
     stripe: {
@@ -633,8 +634,8 @@ export function getConfig() {
     thumbtack: {
       sourceKey: "thumbtack",
       sourceLabel: "Thumbtack",
-      apiUrl: "https://boards-api.greenhouse.io/v1/boards/thumbtack/jobs",
-      jobUrlBase: "https://boards.greenhouse.io/thumbtack/jobs/"
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/thumbtack",
+      boardSlug: "thumbtack"
     },
     hackerrank: {
       sourceKey: "hackerrank",
@@ -742,7 +743,8 @@ export function getConfig() {
     attentive: {
       sourceKey: "attentive",
       sourceLabel: "Attentive",
-      apiUrl: "https://api.lever.co/v0/postings/attentive?mode=json"
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/attentive/jobs",
+      jobUrlBase: "https://boards.greenhouse.io/attentive/jobs/"
     },
     jumpcloud: {
       sourceKey: "jumpcloud",
@@ -1073,8 +1075,8 @@ export function getConfig() {
     redpanda: {
       sourceKey: "redpanda",
       sourceLabel: "Redpanda",
-      apiUrl: "https://boards-api.greenhouse.io/v1/boards/redpandadata/jobs",
-      jobUrlBase: "https://boards.greenhouse.io/redpandadata/jobs/"
+      apiUrl: "https://api.ashbyhq.com/posting-api/job-board/redpanda-data",
+      boardSlug: "redpanda-data"
     },
     sambanova: {
       sourceKey: "sambanova",

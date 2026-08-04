@@ -1106,21 +1106,47 @@ export function upsertJobs(jobs, seenAt) {
       let legacyAltKeys = [];
       const sourceKey = String(job.sourceKey || "").trim();
       const sourceId = String(job.id || "").trim();
+      // Both lookups run. They are deliberately NOT alternatives.
+      //
+      // The (source_key, id) lookup only finds a prior row when the collector
+      // still derives the SAME id for that posting. The moment a collector
+      // changes which upstream field it uses as the id — a legitimate fix when
+      // the old field turns out to be unstable — every posting re-keys, the
+      // source/id probe matches nothing, and with the URL probe behind an
+      // `else if` it never ran. The old rows stayed orphaned, the jobs looked
+      // brand new, and the freshness window's worth of them was re-delivered.
+      // That happened on 2026-08-04 when the Workday id moved from
+      // bulletFields[0] to the externalPath requisition slug: ~790 postings
+      // re-keyed and re-alerted. The canonical URL does not change across an
+      // id-shape change, so consulting it as well absorbs the migration
+      // silently and records the alias. Order matters only for first_seen_at,
+      // which takes the earliest of whatever is found.
+      const seenAltKeys = new Set();
+      const collectAltKeys = (rows) => {
+        for (const row of rows) {
+          if (row.key !== job.key && !seenAltKeys.has(row.key)) {
+            seenAltKeys.add(row.key);
+            legacyAltKeys.push(row.key);
+          }
+        }
+      };
+
       if (sourceKey && sourceId) {
         // The cache index intentionally stores one key per source/id, but a
         // legacy database can contain several mutable hashes for that same ATS
         // posting. Always reconcile the complete DB set; otherwise whichever
         // row happened to populate the cache index last could hide the rest.
-        legacyAltKeys = db.prepare(`
+        collectAltKeys(db.prepare(`
           SELECT key FROM seen_jobs
            WHERE source_key = ? AND id = ? AND key != ?
            ORDER BY first_seen_at ASC
-        `).all(sourceKey, sourceId, job.key).map((row) => row.key);
-      } else if (job.url) {
-        legacyAltKeys = db.prepare(`
+        `).all(sourceKey, sourceId, job.key));
+      }
+      if (job.url) {
+        collectAltKeys(db.prepare(`
           SELECT key FROM seen_jobs WHERE url = ? AND key != ?
           ORDER BY first_seen_at ASC
-        `).all(job.url, job.key).map((row) => row.key);
+        `).all(job.url, job.key));
       }
 
       for (const legacyAltKey of legacyAltKeys) {

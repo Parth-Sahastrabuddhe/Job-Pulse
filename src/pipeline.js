@@ -116,6 +116,14 @@ export function buildCollectorRegistry(config = {}, logger = noop, options = {})
   };
 
   for (const company of COMPANIES) {
+    // A disabled company keeps its registry entry (so its urlPattern still
+    // resolves links we already delivered) but is not collected. Without this,
+    // a board that has moved or shut down burns a request every cycle and logs
+    // an error forever, which trains the operator to ignore collector errors.
+    if (company.disabled) {
+      logger(`[${company.key}] skipped: ${company.disabled}`);
+      continue;
+    }
     if (company.ats !== "solo" && atsCollectors[company.ats]) {
       parameterized(company.key, atsCollectors[company.ats], company.lane);
     }
