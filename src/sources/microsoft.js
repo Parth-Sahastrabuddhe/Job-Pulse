@@ -12,6 +12,18 @@ const MICROSOFT_BASE_URL = "https://apply.careers.microsoft.com";
 const MICROSOFT_API_URL =
   "https://apply.careers.microsoft.com/api/pcsx/search?domain=microsoft.com&query=&location=&start=0&sort_by=Most+recent&filter_profession=software+engineering&pg_size=20";
 
+export function parseRetryAfterMs(value, nowMs = Date.now()) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+
+  const seconds = Number.parseFloat(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+
+  const retryAt = Date.parse(raw);
+  if (!Number.isFinite(retryAt)) return null;
+  return Math.max(0, retryAt - nowMs);
+}
+
 function parseMicrosoftJob(raw, config) {
   const title = raw.name?.trim();
   if (!title || !isTargetRole(title)) {
@@ -74,7 +86,13 @@ export async function collectMicrosoftJobs(_browserUnused, config, log) {
 
     if (!response.ok) {
       log(`Microsoft API returned status ${response.status}`);
-      throw new Error(`HTTP ${response.status}`);
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      if (response.status === 429) {
+        const retryAfterMs = parseRetryAfterMs(response.headers?.get?.("retry-after"));
+        if (retryAfterMs !== null) error.retryAfterMs = retryAfterMs;
+      }
+      throw error;
     }
 
     const data = await response.json();

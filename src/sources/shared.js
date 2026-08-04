@@ -533,6 +533,13 @@ export class CollectorError extends Error {
     this.name = "CollectorError";
     this.code = "COLLECTOR_FAILED";
     this.sourceKey = sourceKey;
+    // Preserve structured transport metadata so schedulers can respond to an
+    // upstream rate limit without parsing an error message. The original cause
+    // remains attached for diagnostics.
+    if (Number.isInteger(cause?.status)) this.status = cause.status;
+    if (Number.isFinite(cause?.retryAfterMs) && cause.retryAfterMs >= 0) {
+      this.retryAfterMs = cause.retryAfterMs;
+    }
     if (cause instanceof Error && !this.cause) this.cause = cause;
   }
 }

@@ -65,6 +65,40 @@ function logCollectionFailures(collection, label) {
   log(`[${label}] ${collection.errorCount}/${collection.totalCount} collector attempts failed${suffix}`);
 }
 
+const FAST_RATE_LIMIT_BACKOFF_MIN_MS = 60_000;
+const FAST_RATE_LIMIT_BACKOFF_MAX_MS = 60 * 60_000;
+
+function rateLimitMetadata(error) {
+  let current = error;
+  for (let depth = 0; current && depth < 5; depth += 1) {
+    if (Number(current.status) === 429) {
+      const retryAfterMs = Number(current.retryAfterMs);
+      return {
+        retryAfterMs: Number.isFinite(retryAfterMs) && retryAfterMs >= 0
+          ? retryAfterMs
+          : 0,
+      };
+    }
+    current = current.cause;
+  }
+  return null;
+}
+
+function nextFastRateLimitBackoff(previousAttempts, fastTrackIntervalMs, retryAfterMs) {
+  const attempts = Math.max(0, Number(previousAttempts) || 0) + 1;
+  // A one-interval retry would preserve the request rate that triggered the
+  // limit. Start at twice the normal interval, then double on consecutive 429s.
+  const baseMs = Math.max(FAST_RATE_LIMIT_BACKOFF_MIN_MS, fastTrackIntervalMs * 2);
+  const exponentialMs = Math.min(
+    FAST_RATE_LIMIT_BACKOFF_MAX_MS,
+    baseMs * (2 ** Math.min(attempts - 1, 10)),
+  );
+  // Retry-After is authoritative when it asks us to wait longer than the local
+  // exponential schedule. Fixed Microsoft endpoints are trusted input here.
+  const delayMs = Math.max(exponentialMs, retryAfterMs || 0);
+  return { attempts, delayMs };
+}
+
 // --- Notifications ---
 
 export async function sendNotifications(config, jobs, filteredResults, options = {}) {
@@ -385,6 +419,7 @@ export async function runBatchLoop(config, flags, registry, runtimeOptions = {})
   const normalRotationHealth = createCollectorHealthWindow();
   let fastCollectorsUnhealthy = false;
   let fastCollectorFailureMessage = "";
+  const fastRateLimitBackoffs = new Map();
   let normalCollectorsUnhealthy = false;
   let normalCollectorFailureMessage = "";
   let slowCollectorsUnhealthy = false;
@@ -433,17 +468,53 @@ export async function runBatchLoop(config, flags, registry, runtimeOptions = {})
     try {
       // --- Fast lane: runs on its own short interval ---
       if (fastEntries.length > 0 && (lastFastRun === 0 || (Date.now() - lastFastRun) >= fastTrackIntervalMs)) {
-        lastFastRun = Date.now();
+        const fastRunAt = Date.now();
+        lastFastRun = fastRunAt;
+        const eligibleFastEntries = fastEntries.filter((entry) => {
+          const backoff = fastRateLimitBackoffs.get(entry.key);
+          return !backoff || backoff.retryAt <= fastRunAt;
+        });
+        const deferredFastEntries = fastEntries.length - eligibleFastEntries.length;
+        if (deferredFastEntries > 0) {
+          log(`[fast lane] Deferred ${deferredFastEntries} rate-limited source(s); running ${eligibleFastEntries.length}.`);
+        }
         try {
-          const fastResult = await services.collectBatch(config, fastEntries, { logger: log });
-          logCollectionFailures(fastResult, "fast lane");
-          if (fastResult.totalCount > 0) {
-            fastCollectorsUnhealthy = allWindowCollectorsFailed(fastResult);
-            fastCollectorFailureMessage = fastCollectorsUnhealthy
-              ? collectorFailureReason(fastResult, "fast lane")
-              : "";
+          if (eligibleFastEntries.length > 0) {
+            const fastResult = await services.collectBatch(config, eligibleFastEntries, { logger: log });
+            const failedKeys = new Set();
+            for (const failure of fastResult.errors || []) {
+              failedKeys.add(failure.key);
+              const rateLimit = rateLimitMetadata(failure.error);
+              if (!rateLimit) {
+                fastRateLimitBackoffs.delete(failure.key);
+                continue;
+              }
+
+              const previous = fastRateLimitBackoffs.get(failure.key);
+              const backoff = nextFastRateLimitBackoff(
+                previous?.attempts,
+                fastTrackIntervalMs,
+                rateLimit.retryAfterMs,
+              );
+              const retryAt = Date.now() + backoff.delayMs;
+              fastRateLimitBackoffs.set(failure.key, { ...backoff, retryAt });
+              log(
+                `[fast:${failure.key}] HTTP 429; backing off for ${Math.ceil(backoff.delayMs / 1000)}s ` +
+                `(attempt ${backoff.attempts}).`,
+              );
+            }
+            for (const entry of eligibleFastEntries) {
+              if (!failedKeys.has(entry.key)) fastRateLimitBackoffs.delete(entry.key);
+            }
+            logCollectionFailures(fastResult, "fast lane");
+            if (fastResult.totalCount > 0) {
+              fastCollectorsUnhealthy = allWindowCollectorsFailed(fastResult);
+              fastCollectorFailureMessage = fastCollectorsUnhealthy
+                ? collectorFailureReason(fastResult, "fast lane")
+                : "";
+            }
+            await services.processBatchResults(config, flags, fastResult.jobs, "fast");
           }
-          await services.processBatchResults(config, flags, fastResult.jobs, "fast");
         } catch (fastError) {
           cycleFailureReason ||= `fast lane: ${fastError.message}`;
           if (isSqliteBusy(fastError)) {

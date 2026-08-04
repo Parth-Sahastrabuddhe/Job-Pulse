@@ -152,6 +152,94 @@ describe("batch-loop collector health", () => {
     expect(runtime.ping).toHaveBeenCalledOnce();
     expect(runtime.pingFail).not.toHaveBeenCalled();
   });
+
+  it("backs off only a rate-limited fast source while continuing the others", async () => {
+    const logs = [];
+    vi.spyOn(console, "log").mockImplementation((message) => logs.push(String(message)));
+    let now = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+
+    const attempts = { microsoft: 0, amazon: 0 };
+    const rateLimit = new Error("HTTP 429");
+    rateLimit.status = 429;
+    rateLimit.retryAfterMs = 5 * 60_000;
+    const registry = [
+      { key: "healthy-normal", lane: "normal", collect: async () => [] },
+      {
+        key: "microsoft",
+        lane: "fast",
+        async collect() {
+          attempts.microsoft++;
+          throw rateLimit;
+        },
+      },
+      {
+        key: "amazon",
+        lane: "fast",
+        async collect() {
+          attempts.amazon++;
+          return [];
+        },
+      },
+    ];
+    const runtime = services({
+      delay: vi.fn(async () => { now += 60_000; }),
+    });
+
+    await runBatchLoop(config({
+      batchSize: 20,
+      fastTrackIntervalSeconds: 0,
+    }), flags(), registry, {
+      maxCycles: 3,
+      services: runtime,
+    });
+
+    expect(attempts).toEqual({ microsoft: 1, amazon: 3 });
+    expect(runtime.ping).toHaveBeenCalledTimes(3);
+    expect(runtime.pingFail).not.toHaveBeenCalled();
+    expect(logs.some((line) => line.includes("[fast:microsoft] HTTP 429; backing off for 300s")))
+      .toBe(true);
+    expect(logs.some((line) => line.includes("Deferred 1 rate-limited source"))).toBe(true);
+  });
+
+  it("doubles consecutive 429 backoff and resets it after recovery", async () => {
+    const logs = [];
+    vi.spyOn(console, "log").mockImplementation((message) => logs.push(String(message)));
+    let now = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+
+    let microsoftAttempts = 0;
+    const rateLimit = new Error("HTTP 429");
+    rateLimit.status = 429;
+    const registry = [
+      { key: "healthy-normal", lane: "normal", collect: async () => [] },
+      {
+        key: "microsoft",
+        lane: "fast",
+        async collect() {
+          microsoftAttempts++;
+          if ([1, 2, 4].includes(microsoftAttempts)) throw rateLimit;
+          return [];
+        },
+      },
+      { key: "amazon", lane: "fast", collect: async () => [] },
+    ];
+    const runtime = services({
+      delay: vi.fn(async () => { now += 60_000; }),
+    });
+
+    await runBatchLoop(config({
+      batchSize: 20,
+      fastTrackIntervalSeconds: 0,
+    }), flags(), registry, {
+      maxCycles: 5,
+      services: runtime,
+    });
+
+    expect(microsoftAttempts).toBe(4);
+    expect(logs.some((line) => line.includes("backing off for 120s (attempt 2)"))).toBe(true);
+    expect(logs.filter((line) => line.includes("backing off for 60s (attempt 1)"))).toHaveLength(2);
+  });
 });
 
 describe("micro-bot entrypoint detection", () => {
