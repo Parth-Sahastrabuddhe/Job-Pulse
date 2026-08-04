@@ -52,7 +52,9 @@ export const COMPANIES = [
   { key: "salesforce", label: "Salesforce", ats: "workday", lane: "normal", urlPattern: /salesforce\.wd12\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
   { key: "adobe", label: "Adobe", ats: "workday", lane: "normal", urlPattern: /adobe\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
   { key: "cisco", label: "Cisco", ats: "workday", lane: "normal", urlPattern: /cisco\.wd5\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
-  { key: "netflix", label: "Netflix", ats: "workday", lane: "normal", disabled: "Workday CXS returns HTTP 422 for every known site name (probed 2026-08-04); Netflix appears to have left this tenant.", urlPattern: /netflix\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
+  // Left Workday (CXS answers 422 for every site name). Now Eightfold AI on
+  // explore.jobs.netflix.net — see src/sources/netflix.js.
+  { key: "netflix", label: "Netflix", ats: "solo", lane: "normal", urlPattern: /explore\.jobs\.netflix\.net\/careers\/job\/(\d+)/i },
   { key: "snap", label: "Snap", ats: "workday", lane: "normal", urlPattern: /snapchat\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
   { key: "intel", label: "Intel", ats: "workday", lane: "normal", urlPattern: /intel\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
   { key: "paypal", label: "PayPal", ats: "workday", lane: "normal", urlPattern: /paypal\.wd1\.myworkdayjobs\.com\/.*?\/job\/[^/]*\/([^/\s?]+)/i },
@@ -185,7 +187,9 @@ export const COMPANIES = [
   { key: "wiz", label: "Wiz", ats: "greenhouse", lane: "normal", board: "wizinc", urlPattern: /(?:wiz\.io|(?:boards|job-boards)\.greenhouse\.io\/wizinc).*?(?:gh_jid=|jobs\/)(\d+)/i },
   { key: "klaviyo", label: "Klaviyo", ats: "greenhouse", lane: "normal", board: "klaviyo", urlPattern: /(?:klaviyo\.com|(?:boards|job-boards)\.greenhouse\.io\/klaviyo).*?(?:gh_jid=|jobs\/)(\d+)/i },
   { key: "affirm", label: "Affirm", ats: "greenhouse", lane: "normal", board: "affirm", urlPattern: /(?:affirm\.com|(?:boards|job-boards)\.greenhouse\.io\/affirm).*?(?:gh_jid=|jobs\/)(\d+)/i },
-  { key: "aurora", label: "Aurora", ats: "greenhouse", lane: "normal", disabled: "Greenhouse board 404s; no Greenhouse/Ashby/Lever slug found (probed 2026-08-04).", board: "aurorainnovation", urlPattern: /(?:aurora\.tech|(?:boards|job-boards)\.greenhouse\.io\/aurorainnovation).*?(?:gh_jid=|jobs\/)(\d+)/i },
+  // Greenhouse board is gone; Aurora runs Ashby behind a private board and
+  // publishes a first-party JSON index — see src/sources/aurora.js.
+  { key: "aurora", label: "Aurora", ats: "solo", lane: "normal", urlPattern: /aurora\.tech\/careers\?ashby_jid=([a-f0-9-]+)/i },
   { key: "drw", label: "DRW", ats: "greenhouse", lane: "normal", board: "drweng", urlPattern: /(?:drw\.com|(?:boards|job-boards)\.greenhouse\.io\/drweng).*?(?:gh_jid=|jobs\/)(\d+)/i },
   { key: "gitlab", label: "GitLab", ats: "greenhouse", lane: "normal", board: "gitlab", urlPattern: /(?:gitlab\.com|(?:boards|job-boards)\.greenhouse\.io\/gitlab).*?(?:gh_jid=|jobs\/)(\d+)/i },
   { key: "ripple", label: "Ripple", ats: "greenhouse", lane: "normal", board: "ripple", urlPattern: /(?:ripple\.com|(?:boards|job-boards)\.greenhouse\.io\/ripple).*?(?:gh_jid=|jobs\/)(\d+)/i },

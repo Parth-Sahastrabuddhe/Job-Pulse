@@ -30,6 +30,8 @@ import { collectMercedesBenzJobs } from "./sources/mercedesbenz.js";
 import { collectHexawareJobs } from "./sources/hexaware.js";
 import { collectExlJobs } from "./sources/exl.js";
 import { collectDynatraceJobs } from "./sources/dynatrace.js";
+import { collectNetflixJobs } from "./sources/netflix.js";
+import { collectAuroraJobs } from "./sources/aurora.js";
 import { COMPANIES } from "./companies.js";
 import {
   dedupeJobs,
@@ -99,6 +101,8 @@ export function buildCollectorRegistry(config = {}, logger = noop, options = {})
   solo("hexaware", collectHexawareJobs, "normal");
   solo("exl", collectExlJobs, "normal");
   solo("dynatrace", collectDynatraceJobs, "normal");
+  solo("netflix", collectNetflixJobs, "normal");
+  solo("aurora", collectAuroraJobs, "normal");
 
   solo("apple", collectAppleJobs, "slow");
   solo("uber", collectUberJobs, "slow", { usesPlaywright: true });
