@@ -26,7 +26,6 @@ interview-prep/
 schema-review.md
 Discord Posting.png
 .npmrc
-extension/
 
 # Non-project images at repo root
 autobot.jpg
@@ -43,3 +42,5 @@ scripts/debug-missing.js
 # Local release-audit and private-companion migration notes
 audit-remaining-findings.md
 personal-tracker-private-migration.md
+Books/
+extension/
