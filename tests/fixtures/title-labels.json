@@ -1,137 +1,1108 @@
 {
   "comment": "Labeled regression corpus for the role/level classifiers. Titles are real postings sampled from seen_jobs plus synthetic coverage for banks, language-prefixed, management, and finance titles. 'categories' asserts containment; 'level' asserts exact detectSeniority(title, source). Extend with every classifier change; tests/title-corpus.test.js enforces 100% on this file.",
   "entries": [
-    { "title": "Software Engineer, Developer Experience", "source": "figma", "level": "entry_mid", "categories": ["software_engineer"] },
-    { "title": "Software Engineer (Simulation)", "source": "cisco", "level": "entry_mid", "categories": ["software_engineer"] },
-    { "title": "Senior Software Engineer - Infrastructure and Tools", "source": "nvidia", "level": "senior", "categories": ["software_engineer"] },
-    { "title": "Senior Software Engineer, Autonomy Visualization", "source": "nuro", "level": "senior", "categories": ["software_engineer"] },
-    { "title": "Front End Engineer, Prime MG Tech - Customer Experience Engineering", "source": "amazon", "level": "mid", "categories": ["frontend"] },
-    { "title": "(USA) Senior Distinguished I, Data Scientist", "source": "walmartglobaltech", "level": "staff", "categories": ["data_scientist"] },
-    { "title": "Senior Machine Learning Engineer II, Growth Modeling", "source": "instacart", "level": "senior", "categories": ["ml_engineer"] },
-    { "title": "Principal Machine Learning Engineer", "source": "paypal", "level": "staff", "categories": ["ml_engineer"] },
-    { "title": "Data Scientist, Manufacturing Analytics", "source": "ford", "level": "mid", "categories": ["data_scientist"] },
-    { "title": "Product Manager, Safeguards Rare Harms", "source": "anthropic", "level": "mid", "categories": ["product_manager"] },
-    { "title": "Product Manager II - AI & Data Security", "source": "datadog", "level": "mid", "categories": ["product_manager"] },
-    { "title": "Sr. Engineering Program Manager - Customer Systems", "source": "apple", "level": "senior", "categories": ["program_manager", "product_manager"] },
-    { "title": "Graduate Software Engineer", "source": "", "level": "entry", "categories": ["software_engineer"] },
-    { "title": "Dotnet Developer", "source": "", "level": "mid", "categories": ["software_engineer"] },
-
-    { "title": "Software Engineering, Analyst", "source": "goldmansachs", "level": "entry_mid", "categories": ["software_engineer"] },
-    { "title": "Associate, Software Engineering", "source": "goldmansachs", "level": "mid", "categories": ["software_engineer"] },
-    { "title": "Vice President, Software Engineering", "source": "goldmansachs", "level": "senior", "categories": ["software_engineer"] },
-    { "title": "Software Engineer Summer Analyst", "source": "goldmansachs", "level": "intern", "categories": ["software_engineer"] },
-    { "title": "Technology Associate, Software Engineering", "source": "morganstanley", "level": "mid", "categories": ["software_engineer"] },
-    { "title": "Software Engineer III - Java, AWS, AI", "source": "jpmorgan", "level": "mid", "categories": ["software_engineer"] },
-    { "title": "Software Engineer I", "source": "jpmorgan", "level": "entry", "categories": ["software_engineer"] },
-    { "title": "Senior Associate, Software Engineer", "source": "jpmorgan", "level": "mid", "categories": ["software_engineer"] },
-    { "title": "Lead Software Engineer", "source": "jpmorgan", "level": "senior", "categories": ["software_engineer"] },
-    { "title": "AVP, Java Developer", "source": "citi", "level": "mid", "categories": ["software_engineer", "backend"] },
-    { "title": "VP, Software Engineer", "source": "citi", "level": "senior", "categories": ["software_engineer"] },
-
-    { "title": "Software Engineer III, Google Cloud", "source": "google", "level": "mid", "categories": ["software_engineer"] },
-    { "title": "Software Engineer II, YouTube", "source": "google", "level": "entry", "categories": ["software_engineer"] },
-    { "title": "Senior Software Engineer", "source": "google", "level": "senior", "categories": ["software_engineer"] },
-    { "title": "SDE II", "source": "amazon", "level": "mid", "categories": ["software_engineer"] },
-    { "title": "Software Development Engineer III", "source": "amazon", "level": "senior", "categories": ["software_engineer"] },
-
-    { "title": "Java Developer", "source": "", "level": "mid", "categories": ["software_engineer", "backend"] },
-    { "title": ".NET Developer", "source": "", "level": "mid", "categories": ["software_engineer"] },
-    { "title": "ASP.NET Developer", "source": "", "level": "mid", "categories": ["software_engineer"] },
-    { "title": "React Developer", "source": "", "level": "mid", "categories": ["software_engineer", "frontend"] },
-    { "title": "JavaScript Developer", "source": "", "level": "mid", "categories": ["software_engineer", "frontend"] },
-    { "title": "Kotlin Developer", "source": "", "level": "mid", "categories": ["software_engineer", "mobile"] },
-    { "title": "Go Developer", "source": "", "level": "mid", "categories": ["software_engineer", "backend"] },
-    { "title": "Python Engineer", "source": "", "level": "mid", "categories": ["software_engineer"] },
-    { "title": "C++ Software Engineer", "source": "", "level": "entry_mid", "categories": ["software_engineer"] },
-    { "title": "Ruby on Rails Developer", "source": "", "level": "mid", "categories": ["software_engineer", "backend"] },
-    { "title": "Salesforce Developer", "source": "", "level": "mid", "categories": ["software_engineer"] },
-    { "title": "Production Engineer", "source": "", "level": "mid", "categories": ["software_engineer"] },
-    { "title": "Founding Engineer", "source": "", "level": "mid", "categories": ["software_engineer"] },
-    { "title": "Programmer Analyst", "source": "", "level": "mid", "categories": ["software_engineer"] },
-
-    { "title": "Security Engineer, Identity", "source": "", "level": "mid", "categories": ["security"] },
-    { "title": "Application Security Engineer", "source": "", "level": "mid", "categories": ["security"] },
-    { "title": "Penetration Tester", "source": "", "level": "mid", "categories": ["security"] },
-    { "title": "QA Automation Engineer", "source": "", "level": "mid", "categories": ["qa_sdet"] },
-    { "title": "SDET II", "source": "", "level": "mid", "categories": ["qa_sdet"] },
-    { "title": "Software Engineer in Test", "source": "", "level": "entry_mid", "categories": ["qa_sdet", "software_engineer"] },
-    { "title": "Embedded Software Engineer", "source": "", "level": "entry_mid", "categories": ["embedded", "software_engineer"] },
-    { "title": "Firmware Engineer", "source": "", "level": "mid", "categories": ["embedded"] },
-    { "title": "Solutions Architect", "source": "", "level": "mid", "categories": ["solutions"] },
-    { "title": "Senior Solutions Engineer", "source": "", "level": "senior", "categories": ["solutions"] },
-    { "title": "Customer Engineer, Google Cloud", "source": "google", "level": "mid", "categories": ["solutions"] },
-    { "title": "Forward Deployed Engineer", "source": "", "level": "mid", "categories": ["solutions"] },
-    { "title": "Research Engineer, Pretraining", "source": "", "level": "mid", "categories": ["research_engineer"] },
-    { "title": "AI Researcher", "source": "", "level": "mid", "categories": ["research_engineer"] },
-
-    { "title": "Engineering Manager, Payments", "source": "", "level": "senior", "categories": ["engineering_manager"] },
-    { "title": "Software Development Manager", "source": "", "level": "senior", "categories": ["engineering_manager", "software_engineer"] },
-    { "title": "Technical Program Manager II", "source": "", "level": "mid", "categories": ["program_manager", "product_manager"] },
-    { "title": "Senior Product Manager", "source": "", "level": "senior", "categories": ["product_manager"] },
-    { "title": "Group Product Manager", "source": "", "level": "staff", "categories": ["product_manager"] },
-    { "title": "Associate Product Manager", "source": "", "level": "entry", "categories": ["product_manager"] },
-    { "title": "Project Manager, Infrastructure", "source": "", "level": "mid", "categories": ["project_manager"] },
-    { "title": "Scrum Master", "source": "", "level": "mid", "categories": ["project_manager"] },
-    { "title": "Product Owner", "source": "", "level": "mid", "categories": ["product_manager"] },
-
-    { "title": "Quantitative Researcher", "source": "", "level": "mid", "categories": ["quant"] },
-    { "title": "Quantitative Developer", "source": "", "level": "mid", "categories": ["quant", "software_engineer"] },
-    { "title": "Financial Analyst", "source": "", "level": "mid", "categories": ["financial_analyst"] },
-    { "title": "Senior Financial Analyst", "source": "", "level": "senior", "categories": ["financial_analyst"] },
-    { "title": "Investment Banking Analyst", "source": "goldmansachs", "level": "entry_mid", "categories": ["financial_analyst"] },
-    { "title": "FP&A Analyst", "source": "", "level": "mid", "categories": ["financial_analyst"] },
-    { "title": "Treasury Analyst", "source": "", "level": "mid", "categories": ["financial_analyst"] },
-    { "title": "Risk Analyst", "source": "", "level": "mid", "categories": ["risk"] },
-    { "title": "Market Risk Associate", "source": "goldmansachs", "level": "mid", "categories": ["risk"] },
-    { "title": "Staff Accountant", "source": "", "level": "mid", "categories": ["fpa_accounting"] },
-    { "title": "Internal Auditor", "source": "", "level": "mid", "categories": ["fpa_accounting"] },
-    { "title": "Tax Analyst", "source": "", "level": "mid", "categories": ["fpa_accounting"] },
-    { "title": "Accounts Payable Specialist", "source": "", "level": "mid", "categories": ["fpa_accounting"] },
-
-    { "title": "Data Modeler", "source": "", "level": "mid", "categories": ["data_engineer"] },
-    { "title": "Database Administrator", "source": "", "level": "mid", "categories": ["data_engineer"] },
-    { "title": "Analytics Engineer", "source": "", "level": "mid", "categories": ["data_engineer"] },
-    { "title": "Business Intelligence Analyst", "source": "", "level": "mid", "categories": ["data_analyst"] },
-
-    { "title": "Product Designer", "source": "", "level": "mid", "categories": ["product_design"] },
-    { "title": "Senior UX Designer", "source": "", "level": "senior", "categories": ["product_design"] },
-    { "title": "Graphic Designer", "source": "", "level": "mid", "categories": ["product_design"] },
-    { "title": "UX Researcher", "source": "", "level": "mid", "categories": ["ux_research"] },
-    { "title": "Technical Writer", "source": "", "level": "mid", "categories": ["technical_writing"] },
-    { "title": "Hardware Engineer", "source": "", "level": "mid", "categories": ["hardware_asic"] },
-    { "title": "ASIC Design Engineer", "source": "", "level": "mid", "categories": ["hardware_asic"] },
-    { "title": "Design Verification Engineer", "source": "", "level": "mid", "categories": ["hardware_asic"] },
-    { "title": "Senior Electrical Engineer", "source": "", "level": "senior", "categories": ["electrical_engineer"] },
-    { "title": "RF Engineer", "source": "", "level": "mid", "categories": ["electrical_engineer"] },
-    { "title": "Mechanical Design Engineer", "source": "", "level": "mid", "categories": ["mechanical_engineer"] },
-    { "title": "Thermal Engineer", "source": "", "level": "mid", "categories": ["mechanical_engineer"] },
-    { "title": "Manufacturing Engineer", "source": "", "level": "mid", "categories": ["manufacturing_industrial"] },
-    { "title": "Quality Engineer", "source": "", "level": "mid", "categories": ["manufacturing_industrial"] },
-    { "title": "IT Support Specialist", "source": "", "level": "mid", "categories": ["it_support"] },
-    { "title": "Help Desk Technician", "source": "", "level": "mid", "categories": ["it_support"] },
-    { "title": "Network Engineer", "source": "", "level": "mid", "categories": ["network_sysadmin"] },
-    { "title": "Systems Administrator", "source": "", "level": "mid", "categories": ["network_sysadmin"] },
-    { "title": "Technical Support Engineer", "source": "", "level": "mid", "categories": ["support_engineer"] },
-    { "title": "Technical Account Manager", "source": "", "level": "mid", "categories": ["support_engineer"] },
-    { "title": "Business Operations Analyst", "source": "", "level": "mid", "categories": ["operations_bizops"] },
-    { "title": "Supply Chain Analyst", "source": "", "level": "mid", "categories": ["supply_chain"] },
-    { "title": "Procurement Specialist", "source": "", "level": "mid", "categories": ["supply_chain"] },
-    { "title": "Management Consultant", "source": "", "level": "mid", "categories": ["consulting_strategy"] },
-    { "title": "Strategy Analyst", "source": "", "level": "mid", "categories": ["consulting_strategy"] },
-    { "title": "Account Executive, Enterprise", "source": "", "level": "mid", "categories": ["sales"] },
-    { "title": "Sales Development Representative", "source": "", "level": "mid", "categories": ["sales"] },
-    { "title": "Business Development Manager", "source": "", "level": "mid", "categories": ["sales"] },
-    { "title": "Product Marketing Manager", "source": "", "level": "mid", "categories": ["marketing"] },
-    { "title": "Marketing Analyst", "source": "", "level": "mid", "categories": ["marketing"] },
-    { "title": "Content Writer", "source": "", "level": "mid", "categories": ["marketing"] },
-    { "title": "Customer Success Manager", "source": "", "level": "mid", "categories": ["customer_success"] },
-    { "title": "Clinical Research Associate", "source": "", "level": "mid", "categories": ["biotech_science"] },
-    { "title": "Senior Biostatistician", "source": "", "level": "senior", "categories": ["biotech_science"] },
-    { "title": "Bioinformatics Scientist", "source": "", "level": "mid", "categories": ["biotech_science"] }
+    {
+      "title": "Software Engineer, Developer Experience",
+      "source": "figma",
+      "level": "entry_mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Software Engineer (Simulation)",
+      "source": "cisco",
+      "level": "entry_mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Senior Software Engineer - Infrastructure and Tools",
+      "source": "nvidia",
+      "level": "senior",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Senior Software Engineer, Autonomy Visualization",
+      "source": "nuro",
+      "level": "senior",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Front End Engineer, Prime MG Tech - Customer Experience Engineering",
+      "source": "amazon",
+      "level": "mid",
+      "categories": [
+        "frontend"
+      ]
+    },
+    {
+      "title": "(USA) Senior Distinguished I, Data Scientist",
+      "source": "walmartglobaltech",
+      "level": "staff",
+      "categories": [
+        "data_scientist"
+      ]
+    },
+    {
+      "title": "Senior Machine Learning Engineer II, Growth Modeling",
+      "source": "instacart",
+      "level": "senior",
+      "categories": [
+        "ml_engineer"
+      ]
+    },
+    {
+      "title": "Principal Machine Learning Engineer",
+      "source": "paypal",
+      "level": "staff",
+      "categories": [
+        "ml_engineer"
+      ]
+    },
+    {
+      "title": "Data Scientist, Manufacturing Analytics",
+      "source": "ford",
+      "level": "mid",
+      "categories": [
+        "data_scientist"
+      ]
+    },
+    {
+      "title": "Product Manager, Safeguards Rare Harms",
+      "source": "anthropic",
+      "level": "mid",
+      "categories": [
+        "product_manager"
+      ]
+    },
+    {
+      "title": "Product Manager II - AI & Data Security",
+      "source": "datadog",
+      "level": "mid",
+      "categories": [
+        "product_manager"
+      ]
+    },
+    {
+      "title": "Sr. Engineering Program Manager - Customer Systems",
+      "source": "apple",
+      "level": "senior",
+      "categories": [
+        "program_manager",
+        "product_manager"
+      ]
+    },
+    {
+      "title": "Graduate Software Engineer",
+      "source": "",
+      "level": "entry",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Dotnet Developer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Software Engineering, Analyst",
+      "source": "goldmansachs",
+      "level": "entry_mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Associate, Software Engineering",
+      "source": "goldmansachs",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Vice President, Software Engineering",
+      "source": "goldmansachs",
+      "level": "senior",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Software Engineer Summer Analyst",
+      "source": "goldmansachs",
+      "level": "intern",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Technology Associate, Software Engineering",
+      "source": "morganstanley",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Software Engineer III - Java, AWS, AI",
+      "source": "jpmorgan",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Software Engineer I",
+      "source": "jpmorgan",
+      "level": "entry",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Senior Associate, Software Engineer",
+      "source": "jpmorgan",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Lead Software Engineer",
+      "source": "jpmorgan",
+      "level": "senior",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "AVP, Java Developer",
+      "source": "citi",
+      "level": "mid",
+      "categories": [
+        "software_engineer",
+        "backend"
+      ]
+    },
+    {
+      "title": "VP, Software Engineer",
+      "source": "citi",
+      "level": "senior",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Software Engineer III, Google Cloud",
+      "source": "google",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Software Engineer II, YouTube",
+      "source": "google",
+      "level": "entry",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Senior Software Engineer",
+      "source": "google",
+      "level": "senior",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "SDE II",
+      "source": "amazon",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Software Development Engineer III",
+      "source": "amazon",
+      "level": "senior",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Java Developer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer",
+        "backend"
+      ]
+    },
+    {
+      "title": ".NET Developer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "ASP.NET Developer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "React Developer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer",
+        "frontend"
+      ]
+    },
+    {
+      "title": "JavaScript Developer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer",
+        "frontend"
+      ]
+    },
+    {
+      "title": "Kotlin Developer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer",
+        "mobile"
+      ]
+    },
+    {
+      "title": "Go Developer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer",
+        "backend"
+      ]
+    },
+    {
+      "title": "Python Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "C++ Software Engineer",
+      "source": "",
+      "level": "entry_mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Ruby on Rails Developer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer",
+        "backend"
+      ]
+    },
+    {
+      "title": "Salesforce Developer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Production Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Founding Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Programmer Analyst",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Security Engineer, Identity",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "security"
+      ]
+    },
+    {
+      "title": "Application Security Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "security"
+      ]
+    },
+    {
+      "title": "Penetration Tester",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "security"
+      ]
+    },
+    {
+      "title": "QA Automation Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "qa_sdet"
+      ]
+    },
+    {
+      "title": "SDET II",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "qa_sdet"
+      ]
+    },
+    {
+      "title": "Software Engineer in Test",
+      "source": "",
+      "level": "entry_mid",
+      "categories": [
+        "qa_sdet",
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Embedded Software Engineer",
+      "source": "",
+      "level": "entry_mid",
+      "categories": [
+        "embedded",
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Firmware Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "embedded"
+      ]
+    },
+    {
+      "title": "Solutions Architect",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "solutions"
+      ]
+    },
+    {
+      "title": "Senior Solutions Engineer",
+      "source": "",
+      "level": "senior",
+      "categories": [
+        "solutions"
+      ]
+    },
+    {
+      "title": "Customer Engineer, Google Cloud",
+      "source": "google",
+      "level": "mid",
+      "categories": [
+        "solutions"
+      ]
+    },
+    {
+      "title": "Forward Deployed Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "solutions"
+      ]
+    },
+    {
+      "title": "Research Engineer, Pretraining",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "research_engineer"
+      ]
+    },
+    {
+      "title": "AI Researcher",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "research_engineer"
+      ]
+    },
+    {
+      "title": "Engineering Manager, Payments",
+      "source": "",
+      "level": "senior",
+      "categories": [
+        "engineering_manager"
+      ]
+    },
+    {
+      "title": "Software Development Manager",
+      "source": "",
+      "level": "senior",
+      "categories": [
+        "engineering_manager",
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Technical Program Manager II",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "program_manager",
+        "product_manager"
+      ]
+    },
+    {
+      "title": "Senior Product Manager",
+      "source": "",
+      "level": "senior",
+      "categories": [
+        "product_manager"
+      ]
+    },
+    {
+      "title": "Group Product Manager",
+      "source": "",
+      "level": "staff",
+      "categories": [
+        "product_manager"
+      ]
+    },
+    {
+      "title": "Associate Product Manager",
+      "source": "",
+      "level": "entry",
+      "categories": [
+        "product_manager"
+      ]
+    },
+    {
+      "title": "Project Manager, Infrastructure",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "project_manager"
+      ]
+    },
+    {
+      "title": "Scrum Master",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "project_manager"
+      ]
+    },
+    {
+      "title": "Product Owner",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "product_manager"
+      ]
+    },
+    {
+      "title": "Quantitative Researcher",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "quant"
+      ]
+    },
+    {
+      "title": "Quantitative Developer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "quant",
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Financial Analyst",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "financial_analyst"
+      ]
+    },
+    {
+      "title": "Senior Financial Analyst",
+      "source": "",
+      "level": "senior",
+      "categories": [
+        "financial_analyst"
+      ]
+    },
+    {
+      "title": "Investment Banking Analyst",
+      "source": "goldmansachs",
+      "level": "entry_mid",
+      "categories": [
+        "financial_analyst"
+      ]
+    },
+    {
+      "title": "FP&A Analyst",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "financial_analyst"
+      ]
+    },
+    {
+      "title": "Treasury Analyst",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "financial_analyst"
+      ]
+    },
+    {
+      "title": "Risk Analyst",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "risk"
+      ]
+    },
+    {
+      "title": "Market Risk Associate",
+      "source": "goldmansachs",
+      "level": "mid",
+      "categories": [
+        "risk"
+      ]
+    },
+    {
+      "title": "Staff Accountant",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "fpa_accounting"
+      ]
+    },
+    {
+      "title": "Internal Auditor",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "fpa_accounting"
+      ]
+    },
+    {
+      "title": "Tax Analyst",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "fpa_accounting"
+      ]
+    },
+    {
+      "title": "Accounts Payable Specialist",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "fpa_accounting"
+      ]
+    },
+    {
+      "title": "Data Modeler",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "data_engineer"
+      ]
+    },
+    {
+      "title": "Database Administrator",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "data_engineer"
+      ]
+    },
+    {
+      "title": "Analytics Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "data_engineer"
+      ]
+    },
+    {
+      "title": "Business Intelligence Analyst",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "data_analyst"
+      ]
+    },
+    {
+      "title": "Product Designer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "product_design"
+      ]
+    },
+    {
+      "title": "Senior UX Designer",
+      "source": "",
+      "level": "senior",
+      "categories": [
+        "product_design"
+      ]
+    },
+    {
+      "title": "Graphic Designer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "product_design"
+      ]
+    },
+    {
+      "title": "UX Researcher",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "ux_research"
+      ]
+    },
+    {
+      "title": "Technical Writer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "technical_writing"
+      ]
+    },
+    {
+      "title": "Hardware Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "hardware_asic"
+      ]
+    },
+    {
+      "title": "ASIC Design Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "hardware_asic"
+      ]
+    },
+    {
+      "title": "Design Verification Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "hardware_asic"
+      ]
+    },
+    {
+      "title": "Senior Electrical Engineer",
+      "source": "",
+      "level": "senior",
+      "categories": [
+        "electrical_engineer"
+      ]
+    },
+    {
+      "title": "RF Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "electrical_engineer"
+      ]
+    },
+    {
+      "title": "Mechanical Design Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "mechanical_engineer"
+      ]
+    },
+    {
+      "title": "Thermal Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "mechanical_engineer"
+      ]
+    },
+    {
+      "title": "Manufacturing Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "manufacturing_industrial"
+      ]
+    },
+    {
+      "title": "Quality Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "manufacturing_industrial"
+      ]
+    },
+    {
+      "title": "IT Support Specialist",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "it_support"
+      ]
+    },
+    {
+      "title": "Help Desk Technician",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "it_support"
+      ]
+    },
+    {
+      "title": "Network Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "network_sysadmin"
+      ]
+    },
+    {
+      "title": "Systems Administrator",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "network_sysadmin"
+      ]
+    },
+    {
+      "title": "Technical Support Engineer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "support_engineer"
+      ]
+    },
+    {
+      "title": "Technical Account Manager",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "support_engineer"
+      ]
+    },
+    {
+      "title": "Business Operations Analyst",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "operations_bizops"
+      ]
+    },
+    {
+      "title": "Supply Chain Analyst",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "supply_chain"
+      ]
+    },
+    {
+      "title": "Procurement Specialist",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "supply_chain"
+      ]
+    },
+    {
+      "title": "Management Consultant",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "consulting_strategy"
+      ]
+    },
+    {
+      "title": "Strategy Analyst",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "consulting_strategy"
+      ]
+    },
+    {
+      "title": "Account Executive, Enterprise",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "sales"
+      ]
+    },
+    {
+      "title": "Sales Development Representative",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "sales"
+      ]
+    },
+    {
+      "title": "Business Development Manager",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "sales"
+      ]
+    },
+    {
+      "title": "Product Marketing Manager",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "marketing"
+      ]
+    },
+    {
+      "title": "Marketing Analyst",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "marketing"
+      ]
+    },
+    {
+      "title": "Content Writer",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "marketing"
+      ]
+    },
+    {
+      "title": "Customer Success Manager",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "customer_success"
+      ]
+    },
+    {
+      "title": "Clinical Research Associate",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "biotech_science"
+      ]
+    },
+    {
+      "title": "Senior Biostatistician",
+      "source": "",
+      "level": "senior",
+      "categories": [
+        "biotech_science"
+      ]
+    },
+    {
+      "title": "Bioinformatics Scientist",
+      "source": "",
+      "level": "mid",
+      "categories": [
+        "biotech_science"
+      ]
+    },
+    {
+      "title": "Manager, Systems Engineering",
+      "source": "servicenow",
+      "level": "senior",
+      "categories": [
+        "engineering_manager",
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Manager of Software Engineering",
+      "source": "jpmorgan",
+      "level": "senior",
+      "categories": [
+        "engineering_manager",
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Manager Software Engineering",
+      "source": "nvidia",
+      "level": "senior",
+      "categories": [
+        "engineering_manager",
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Manager of Engineering",
+      "source": "stripe",
+      "level": "senior",
+      "categories": [
+        "engineering_manager"
+      ]
+    },
+    {
+      "title": "Manager, Systems Software Engineering - NV Cloud Functions",
+      "source": "nvidia",
+      "level": "senior",
+      "categories": [
+        "engineering_manager",
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Site Reliability Engineering (SRE) Manager, Apple Maps",
+      "source": "apple",
+      "level": "senior",
+      "categories": [
+        "engineering_manager",
+        "devops_sre"
+      ]
+    },
+    {
+      "title": "Group Software Engineer Manager",
+      "source": "microsoft",
+      "level": "senior",
+      "categories": [
+        "engineering_manager",
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Software Development Snr Manager",
+      "source": "oracle",
+      "level": "senior",
+      "categories": [
+        "engineering_manager",
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Manager - Software Development Engineer in Test",
+      "source": "salesforce",
+      "level": "senior",
+      "categories": [
+        "engineering_manager",
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Manager, Sales Development",
+      "source": "stripe",
+      "level": "mid",
+      "categories": [
+        "sales"
+      ]
+    },
+    {
+      "title": "Product Operations Manager",
+      "source": "stripe",
+      "level": "mid",
+      "categories": [
+        "operations_bizops"
+      ]
+    },
+    {
+      "title": "Software Development Engineer, Ads Data Manager",
+      "source": "amazon",
+      "level": "entry_mid",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Head of Software Engineering",
+      "source": "stripe",
+      "level": "director",
+      "categories": [
+        "software_engineer"
+      ]
+    },
+    {
+      "title": "Head of Data Engineering",
+      "source": "stripe",
+      "level": "director",
+      "categories": [
+        "data_engineer"
+      ]
+    },
+    {
+      "title": "Software Engineer - Bethesda, MD",
+      "source": "boeing",
+      "level": "entry_mid",
+      "categories": [
+        "software_engineer"
+      ]
+    }
   ],
   "notCollected": [
-    "Recruiter", "Office Manager", "HR Business Partner",
-    "Legal Counsel", "Executive Assistant", "Facilities Coordinator",
-    "Paralegal", "Talent Acquisition Partner"
+    "Recruiter",
+    "Office Manager",
+    "HR Business Partner",
+    "Legal Counsel",
+    "Executive Assistant",
+    "Facilities Coordinator",
+    "Paralegal",
+    "Talent Acquisition Partner"
   ]
 }

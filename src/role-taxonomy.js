@@ -30,6 +30,25 @@ const LANG_BACKEND = "\\bjava\\b|\\bnode(?:\\.?js)?|\\bgolang|\\bgo|\\bruby|\\br
 const LANG_MOBILE = "\\bswift|\\bkotlin";
 const DEV_NOUN = "developer|engineer|programmer";
 
+// Building blocks for the engineering_manager pattern below. Kept as named
+// parts because the single-line form is unreadable and was previously wrong in
+// a way nobody could see: it required either "<discipline> manager" or
+// "manager, <discipline>" against two DIFFERENT hardcoded discipline lists, so
+// "Manager, Software Engineering" was caught and "Manager, Systems Engineering"
+// was not. Those misses fell through to plain software_engineer, and because
+// detectSeniority derives manager seniority solely from this pattern they were
+// graded entry/mid and delivered to new grads.
+const EM_ENG = "(?:software|engineering|engineer|development|developer|dev|platform|infrastructure|systems?|SRE|site\\s+reliability|devops|data|machine\\s+learning|ML|security|QA|quality\\s+assurance|test|technology)";
+// Manager families with their own category and their own seniority ladder.
+const EM_NOT_OWN_LADDER =
+  "(?!.*\\b(?:product|program|project|account|marketing|finance|accounting|audit|tax|treasury|payroll|procurement|category|brand|content|event|field|community|facilities|office|partner|success|hiring|recruiting|people|talent)\\s+managers?\\b)"
+  + "(?!.*\\bproduct\\s+owner\\b)(?!.*\\bTPM\\b)"
+  + "(?!.*\\b(?:sales|business)\\s+development\\b)(?!.*\\bsales\\s+managers?\\b)";
+const EM_NOT_SALES = "(?!.*\\b(?:sales|business)\\s+development\\b)(?!.*\\bsales\\s+managers?\\b)";
+// IC roles whose PRODUCT happens to be called a manager:
+// "Software Development Engineer, Ads Data Manager", "SWE - Mission Manager".
+const EM_NOT_IC_PRODUCT = "(?!.*\\b(?:engineers?|developers?|scientists?)\\s*[,\\-\u2013\u2014]\\s.*\\bmanagers?\\b)";
+
 export const ROLE_CATEGORY_PATTERNS = {
   software_engineer: new RegExp(
     "(?:(?:software|backend|back[\\s-]?end|full[\\s-]?stack|systems|cloud|production|founding)\\s+(?:engineer|develop)" +
@@ -52,9 +71,31 @@ export const ROLE_CATEGORY_PATTERNS = {
   solutions: /(?:\bsolutions?\s+(?:architect|engineer|consultant)\b|\bsales\s+engineer\b|\bforward\s+deployed\s+(?:software\s+)?engineer\b|\bpre[\s-]?sales\s+engineer\b|\bcustomer\s+engineer\b)/i,
   product_manager: /(?:product\s+manager|product\s+owner|program\s+manager|\bTPM\b|technical\s+program)/i,
   program_manager: /(?:\b(?:technical\s+|engineering\s+)?program\s+manager\b|\bTPM\b)/i,
-  // The "Manager, X" comma form excludes project/program/product prefixes so
-  // "Project Manager, Infrastructure" stays a PjM, not a people-manager.
-  engineering_manager: /(?:\b(?:engineering|software\s+engineering|software\s+development|technology|platform|infrastructure|data\s+engineering|machine\s+learning|ML|security|QA|test)\s+manager\b|(?<!(?:project|program|product)\s)\bmanager\s*,\s*(?:software|engineering|machine\s+learning|data|platform|infrastructure|security)\b|\bdev\s+manager\b)/i,
+  // Co-occurrence, NOT word order. The previous form required either
+  // "<discipline> manager" or "manager, <discipline>" against two different
+  // hardcoded discipline lists, so classification hinged on one word's
+  // position: "Manager, Software Engineering" was caught but "Manager, Systems
+  // Engineering" was not (systems was in neither list), nor was the comma-less
+  // "Manager Software Engineering" or "Manager of Engineering". Those fell
+  // through to plain software_engineer, and because detectSeniority derives
+  // manager seniority solely from THIS pattern they were graded entry/mid and
+  // delivered to new grads.
+  //
+  // So: require "manager" plus any engineering token anywhere in the title,
+  // then subtract the manager families that own their own category and ladder
+  // (product/program/project, sales, marketing, finance, account, success...).
+  // The engineer-comma exclusion keeps IC titles whose product name happens to
+  // contain "Manager" ("Software Development Engineer, Ads Data Manager").
+  engineering_manager: new RegExp(
+    // Alternative 1: the title LEADS with Manager, so it is a people-manager
+    // whatever follows ("Manager, Engineering Program Manager" manages TPMs).
+    "(?:^(?:(?:sr\\.?|senior|snr\\.?|group|global)\\s+)?managers?\\b" + EM_NOT_SALES + EM_NOT_IC_PRODUCT + "(?=.*\\b" + EM_ENG + "\\b).*)"
+    + "|"
+    // Alternative 2: manager co-occurring with engineering vocabulary anywhere,
+    // minus the manager families that own their own category and ladder.
+    + "(?:^(?=.*\\bmanagers?\\b)" + EM_NOT_OWN_LADDER + EM_NOT_IC_PRODUCT + "(?=.*\\b" + EM_ENG + "\\b).*)",
+    "i",
+  ),
   project_manager: /(?:\b(?:technical\s+|IT\s+)?project\s+manager\b|\bscrum\s+master\b|\bdelivery\s+manager\b|\bagile\s+coach\b)/i,
   product_design: /(?:\b(?:product|UX|UI|UX\/UI|interaction|visual|graphic|brand|motion)\s+designer\b|\bdesign\s+(?:lead|technologist)\b)/i,
   ux_research: /(?:\b(?:UX|user|design)\s+research(?:er)?\b)/i,
@@ -393,8 +434,10 @@ export function detectSeniority(title, sourceKey = "") {
   const ruled = resolveLevel(t, sourceKey, { generic: false });
   if (ruled) return ruled.level;
 
-  // Senior keywords
-  if (/\b(senior|sr\.?)\b/i.test(t)) return "senior";
+  // Senior keywords. "snr" is a common ATS abbreviation ("Software Development
+  // Snr Manager") that matched neither this rule nor the manager pattern, so
+  // such titles fell through to entry/mid on both gates at once.
+  if (/\b(senior|sr\.?|snr\.?)\b/i.test(t)) return "senior";
   if (/\blead\w*\b/i.test(t)) return "senior";
   if (/\bvice\s+president\b|\bVP\b/i.test(t)) return "senior";
   if (/\bAVP\b/.test(t)) return "senior";
