@@ -103,7 +103,7 @@ export default async function Home() {
 
   return (
     <div className="overflow-hidden">
-      <section className="grid min-h-[calc(100vh-8rem)] grid-cols-1 items-center gap-12 py-10 lg:grid-cols-[1.02fr_0.98fr] lg:gap-16 lg:py-16">
+      <section className="grid grid-cols-1 items-center gap-12 pt-2 pb-12 lg:grid-cols-[1.02fr_0.98fr] lg:gap-16 lg:pt-4 lg:pb-16">
         <div className="min-w-0 animate-fade-in-up">
           <div className="mb-7 inline-flex items-center gap-2.5 rounded-full border border-line bg-surface/80 px-3.5 py-2 text-xs font-semibold text-muted shadow-lg">
             <span className="relative flex h-2 w-2">
