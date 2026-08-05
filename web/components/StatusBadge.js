@@ -1,11 +1,11 @@
 const STATUS_STYLES = {
-  notified: "bg-[rgba(124,127,147,0.12)] text-muted",
-  saved: "bg-[rgba(59,130,246,0.15)] text-info",
-  applied: "bg-[rgba(34,197,94,0.15)] text-pulse",
-  skipped: "bg-[rgba(78,81,102,0.15)] text-faint",
-  interviewing: "bg-[rgba(59,130,246,0.15)] text-info",
-  offer: "bg-[rgba(245,158,11,0.15)] text-warn",
-  rejected: "bg-[rgba(239,68,68,0.15)] text-danger",
+  notified: "border-line bg-white/[0.04] text-muted",
+  saved: "border-info/25 bg-info/10 text-info",
+  applied: "border-pulse/25 bg-pulse/10 text-pulse",
+  skipped: "border-line bg-white/[0.03] text-faint",
+  interviewing: "border-info/25 bg-info/10 text-info",
+  offer: "border-warn/25 bg-warn/10 text-warn",
+  rejected: "border-danger/25 bg-danger/10 text-danger",
 };
 
 const STATUS_LABELS = {
@@ -19,11 +19,11 @@ const STATUS_LABELS = {
 };
 
 export default function StatusBadge({ status }) {
-  const style = STATUS_STYLES[status] || "bg-[rgba(124,127,147,0.12)] text-muted";
+  const style = STATUS_STYLES[status] || "border-line bg-white/[0.04] text-muted";
   const label = STATUS_LABELS[status] || status;
 
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${style}`}>
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${style}`}>
       {label}
     </span>
   );

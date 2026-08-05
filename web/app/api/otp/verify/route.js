@@ -1,15 +1,34 @@
 import bcrypt from "bcryptjs";
-import { getSession, createSession } from "@/lib/session";
-import { verifyOtp, createUserProfile, getUserProfile, getUserProfileByEmail, setNotificationChannelId } from "@/lib/db";
+import { clearOAuthHandoff, createSession, getOAuthHandoff, getSession } from "@/lib/session";
+import {
+  consumeRateLimit,
+  createUserProfile,
+  getUserProfile,
+  getUserProfileByEmail,
+  resetRateLimit,
+  setNotificationChannelId,
+  verifyOtp,
+} from "@/lib/db";
 import { addUserToGuildWithRole, createUserChannel } from "@/lib/discord-admin";
-import { requireSameOrigin } from "@/lib/security";
+import {
+  bcryptPasswordProblem,
+  getTrustedClientIp,
+  jsonBodyError,
+  normalizeEmail,
+  opaqueRateLimitKey,
+  readJsonBody,
+  requireSameOrigin,
+} from "@/lib/security";
 
-// Brute-force guard for OTP verification: a 6-digit code is only ~1e6 wide, so
-// cap failed attempts per session and lock out for a window. In-memory (per
-// process), matching the single pm2 web fork; revisit if the web scales out.
-const verifyAttempts = new Map();
 const VERIFY_MAX_ATTEMPTS = 5;
 const VERIFY_WINDOW_MS = 15 * 60 * 1000;
+
+function verificationRateLimit(retryAfterSeconds) {
+  return Response.json(
+    { error: "Too many attempts. Please request a new code and try again later." },
+    { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+  );
+}
 
 export async function POST(request) {
   const originError = requireSameOrigin(request);
@@ -22,34 +41,49 @@ export async function POST(request) {
 
   let email, code, firstName, password;
   try {
-    const body = await request.json();
+    const body = await readJsonBody(request, { maxBytes: 4 * 1024 });
     email = body.email;
     code = body.code;
     firstName = body.firstName;
     password = body.password;
-  } catch {
-    return Response.json({ error: "Invalid request body" }, { status: 400 });
+  } catch (error) {
+    return jsonBodyError(error) || Response.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  if (!email || !code || !firstName) {
-    return Response.json({ error: "email, code, and firstName are required" }, { status: 400 });
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return Response.json({ error: "A single valid email address is required" }, { status: 400 });
+  }
+  if (typeof code !== "string" || !/^\d{6}$/.test(code)) {
+    return Response.json({ error: "Code must be exactly 6 digits" }, { status: 400 });
+  }
+  const normalizedFirstName = typeof firstName === "string" ? firstName.trim() : "";
+  if (!normalizedFirstName || normalizedFirstName.length > 100 || /[\u0000-\u001f\u007f]/.test(normalizedFirstName)) {
+    return Response.json({ error: "First name must be between 1 and 100 characters" }, { status: 400 });
   }
 
-  if (!password || password.length < 6) {
-    return Response.json({ error: "Password must be at least 6 characters" }, { status: 400 });
+  const passwordProblem = bcryptPasswordProblem(password, { minCharacters: 12 });
+  if (passwordProblem) return Response.json({ error: passwordProblem }, { status: 400 });
+
+  const limitKeyHash = opaqueRateLimitKey(
+    session.discordId,
+    normalizedEmail,
+    getTrustedClientIp(request)
+  );
+  let attemptLimit;
+  try {
+    attemptLimit = consumeRateLimit({
+      scope: "otp-verify-user-email-ip",
+      keyHash: limitKeyHash,
+      limit: VERIFY_MAX_ATTEMPTS,
+      windowMs: VERIFY_WINDOW_MS,
+    });
+  } catch (error) {
+    console.error("[otp] Verification rate limiter error:", error);
+    return Response.json({ error: "Email verification is temporarily unavailable" }, { status: 503 });
   }
-
-  const normalizedEmail = email.toLowerCase().trim();
-
-  // Enforce the brute-force lockout before checking the code.
-  const attemptKey = session.discordId;
-  const nowMs = Date.now();
-  const priorAttempts = verifyAttempts.get(attemptKey);
-  if (priorAttempts && priorAttempts.resetAt > nowMs && priorAttempts.count >= VERIFY_MAX_ATTEMPTS) {
-    return Response.json(
-      { error: "Too many attempts. Please request a new code and try again later." },
-      { status: 429 }
-    );
+  if (!attemptLimit.allowed) {
+    return verificationRateLimit(attemptLimit.retryAfterSeconds);
   }
 
   let valid = false;
@@ -61,17 +95,16 @@ export async function POST(request) {
   }
 
   if (!valid) {
-    // Count the failed attempt toward the lockout.
-    if (!priorAttempts || priorAttempts.resetAt <= nowMs) {
-      verifyAttempts.set(attemptKey, { count: 1, resetAt: nowMs + VERIFY_WINDOW_MS });
-    } else {
-      priorAttempts.count++;
-    }
     return Response.json({ error: "Invalid or expired code" }, { status: 400 });
   }
 
-  // Verified. Clear the attempt counter for this session.
-  verifyAttempts.delete(attemptKey);
+  try {
+    resetRateLimit("otp-verify-user-email-ip", limitKeyHash);
+  } catch (error) {
+    // The OTP is already consumed. A cleanup failure must not make the user
+    // submit that one-time code again.
+    console.warn("[otp] Failed to clear verification rate limit:", error);
+  }
 
   // Check if this Discord account is already registered
   const existingByDiscord = getUserProfile(session.discordId);
@@ -93,7 +126,7 @@ export async function POST(request) {
     createUserProfile({
       discordId: session.discordId,
       discordUsername: session.username,
-      firstName: firstName.trim(),
+      firstName: normalizedFirstName,
       email: normalizedEmail,
       passwordHash,
     });
@@ -108,11 +141,12 @@ export async function POST(request) {
   const guildId = process.env.DISCORD_GUILD_ID;
   const roleId = process.env.DISCORD_BOT_ROLE_ID;
   const botToken = process.env.MULTI_USER_BOT_TOKEN;
-  const accessToken = session.discordAccessToken;
+  const handoff = await getOAuthHandoff();
+  const accessToken = handoff?.discordId === session.discordId ? handoff.accessToken : null;
   if (!guildId || !roleId || !botToken) {
     console.warn("[discord-join] skipped: missing DISCORD_GUILD_ID, DISCORD_BOT_ROLE_ID, or MULTI_USER_BOT_TOKEN");
   } else if (!accessToken) {
-    console.warn("[discord-join] skipped: no discordAccessToken on session");
+    console.warn("[discord-join] skipped: no valid short-lived OAuth handoff");
   } else {
     try {
       await addUserToGuildWithRole({
@@ -138,7 +172,7 @@ export async function POST(request) {
           categoryId,
           jobpulseMemberRoleId: roleId,
           userId: session.discordId,
-          firstName: firstName.trim(),
+          firstName: normalizedFirstName,
           botToken,
         });
         setNotificationChannelId(session.discordId, channelId);
@@ -148,12 +182,13 @@ export async function POST(request) {
     }
   }
 
-  // Update session. Drop discordAccessToken — it's single-use and no longer needed.
-  const { discordAccessToken: _discard, ...rest } = session;
+  // Update the identity-only session and erase the one-time OAuth handoff.
   await createSession({
-    ...rest,
+    ...session,
     profileComplete: true,
+    sessionVersion: 0,
   });
+  await clearOAuthHandoff();
 
-  return Response.json({ verified: true });
+  return Response.json({ verified: true }, { headers: { "Cache-Control": "no-store" } });
 }

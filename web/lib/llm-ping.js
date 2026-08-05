@@ -5,13 +5,21 @@
  * fail at setup time instead of at first click. SSRF protection and the
  * provider registry are the shared modules in src/ (see spec decision 10).
  */
-import { assertSafeUrl } from "../../src/ssrf-guard.js";
+import { safeFetch } from "../../src/ssrf-guard.js";
 import { PROVIDERS } from "../../src/llm-providers.js";
 
 const PING_TIMEOUT_MS = 10000;
+const PING_MAX_RESPONSE_BYTES = 64 * 1024;
 
-async function ping(url, options) {
-  const response = await fetch(url, { ...options, redirect: "error", signal: AbortSignal.timeout(PING_TIMEOUT_MS) });
+async function ping(url, options, { fetchImpl = fetch, policy } = {}) {
+  const requestOptions = {
+    ...options,
+    redirect: policy ? "follow" : "error",
+    signal: AbortSignal.timeout(PING_TIMEOUT_MS),
+  };
+  const response = policy
+    ? await fetchImpl(url, requestOptions, policy)
+    : await fetchImpl(url, requestOptions);
   if (!response.ok) {
     let detail = "";
     try { detail = (await response.text()).slice(0, 200); } catch {}
@@ -19,7 +27,10 @@ async function ping(url, options) {
   }
 }
 
-export async function validateProviderConfig({ provider, apiKey, baseUrl, model }) {
+export async function validateProviderConfig(
+  { provider, apiKey, baseUrl, model },
+  { customFetch = safeFetch } = {},
+) {
   try {
     const meta = PROVIDERS[provider];
     if (!meta) return { ok: false, error: `Unknown provider: ${provider}` };
@@ -48,15 +59,39 @@ export async function validateProviderConfig({ provider, apiKey, baseUrl, model 
     let base = meta.baseUrl;
     if (provider === "custom") {
       if (!baseUrl) return { ok: false, error: "An endpoint URL is required for the custom provider" };
-      await assertSafeUrl(baseUrl);
-      base = baseUrl;
+      let parsed;
+      try {
+        parsed = new URL(baseUrl);
+      } catch {
+        return { ok: false, error: "The custom endpoint must be a valid HTTPS URL" };
+      }
+      if (parsed.protocol !== "https:") {
+        return { ok: false, error: "The custom endpoint must use HTTPS" };
+      }
+      base = parsed.toString();
     }
     const body = { model: resolvedModel, messages: [{ role: "user", content: "ping" }] };
     if (resolvedModel.startsWith("gpt-5")) body.max_completion_tokens = 1;
     else body.max_tokens = 1;
     const headers = { "Content-Type": "application/json" };
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-    await ping(`${base.replace(/\/+$/, "")}/chat/completions`, { method: "POST", headers, body: JSON.stringify(body) });
+    const endpoint = `${base.replace(/\/+$/, "")}/chat/completions`;
+    if (provider === "custom") {
+      // Validation and transport must be one operation: resolving first and
+      // then calling ordinary fetch leaves a DNS-rebinding/redirect TOCTOU gap.
+      await ping(endpoint, { method: "POST", headers, body: JSON.stringify(body) }, {
+        fetchImpl: customFetch,
+        policy: {
+          requireHttps: true,
+          allowedContentTypes: ["application/json", "text/plain"],
+          maxResponseBytes: PING_MAX_RESPONSE_BYTES,
+          timeoutMs: PING_TIMEOUT_MS,
+          maxRedirects: 2,
+        },
+      });
+    } else {
+      await ping(endpoint, { method: "POST", headers, body: JSON.stringify(body) });
+    }
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.blocked ? "Your endpoint is unreachable or not allowed" : err.message };

@@ -1,27 +1,48 @@
 import crypto from "node:crypto";
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { discordRedirectUri, publicBaseUrl } from "@/lib/security";
 
-export async function GET() {
+export async function GET(request) {
   const clientId = process.env.DISCORD_CLIENT_ID;
-  const redirectUri = encodeURIComponent(
-    process.env.DISCORD_REDIRECT_URI ||
-      `${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/auth/callback`
-  );
+  if (!clientId) {
+    return NextResponse.json(
+      { error: "Discord OAuth is not configured: DISCORD_CLIENT_ID is missing" },
+      { status: 503 }
+    );
+  }
+
+  let redirectUri;
+  let baseUrl;
+  try {
+    redirectUri = discordRedirectUri(request);
+    baseUrl = publicBaseUrl(request);
+  } catch (error) {
+    console.error("[oauth] Invalid public URL configuration:", error.message);
+    return NextResponse.json({ error: error.message }, { status: 503 });
+  }
 
   const scopes = process.env.DISCORD_GUILD_ID
-    ? "identify%20email%20guilds.join"
-    : "identify%20email";
+    ? "identify email guilds.join"
+    : "identify email";
   const state = crypto.randomBytes(16).toString("hex");
-  const cookieStore = await cookies();
-  cookieStore.set("jobpulse_oauth_state", state, {
+
+  const discordAuthUrl = new URL("https://discord.com/api/oauth2/authorize");
+  discordAuthUrl.search = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: scopes,
+    state,
+  }).toString();
+
+  const response = NextResponse.redirect(discordAuthUrl);
+  response.cookies.set("jobpulse_oauth_state", state, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: new URL(baseUrl).protocol === "https:",
     sameSite: "lax",
     maxAge: 10 * 60,
     path: "/",
   });
-
-  const discordAuthUrl = `https://discord.com/api/oauth2/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scopes}&state=${state}`;
-  return NextResponse.redirect(discordAuthUrl);
+  response.headers.set("Cache-Control", "no-store");
+  return response;
 }

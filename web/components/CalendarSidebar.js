@@ -89,9 +89,9 @@ export default function CalendarSidebar() {
   const selectedTotal = selectedDate ? (calendarData.totals[selectedDate] || 0) : 0;
 
   return (
-    <div className="w-[280px] flex-shrink-0">
-      <div className="sticky top-24">
-        <div className="bg-surface rounded-xl border border-line p-4">
+    <div className="w-full flex-shrink-0 lg:w-[292px]">
+      <div className="lg:sticky lg:top-24">
+        <div className="surface-card rounded-2xl p-4">
           {/* Month header with navigation */}
           <div className="flex items-center justify-between mb-3">
             <button
@@ -103,7 +103,10 @@ export default function CalendarSidebar() {
                 <path d="M10 4L6 8L10 12" />
               </svg>
             </button>
-            <span className="text-sm font-semibold text-foreground font-display">{monthLabel}</span>
+            <div className="text-center">
+              <div className="section-kicker">Activity</div>
+              <span className="mt-0.5 block text-sm font-semibold text-foreground font-display">{monthLabel}</span>
+            </div>
             <button
               onClick={nextMonth}
               className="text-muted hover:text-foreground transition-colors p-1 rounded hover:bg-surface-hover"
@@ -131,7 +134,7 @@ export default function CalendarSidebar() {
               const isToday = cell.dateStr === todayStr;
               const isSelected = cell.dateStr === selectedDate;
               const hasApps = cell.count > 0;
-              const intensity = cell.count >= 3 ? "bg-[rgba(34,197,94,0.3)]" : cell.count > 0 ? "bg-[rgba(34,197,94,0.15)]" : "";
+              const intensity = cell.count >= 3 ? "bg-[rgba(215,255,112,0.24)]" : cell.count > 0 ? "bg-[rgba(215,255,112,0.11)]" : "";
 
               return (
                 <button
@@ -161,7 +164,7 @@ export default function CalendarSidebar() {
 
         {/* Selected date detail panel */}
         {selectedDate && (
-          <div className="bg-surface rounded-xl border border-line p-4 mt-3">
+          <div className="surface-card mt-3 rounded-2xl p-4">
             <div className="text-sm font-semibold text-pulse mb-2">
               {formatDateHeader(selectedDate)} &mdash; {selectedTotal} applied
             </div>

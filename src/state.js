@@ -298,6 +298,9 @@ function initializeSchema() {
   if (userCols.length > 0 && !userCols.includes("notification_channel_id")) {
     db.exec("ALTER TABLE user_profiles ADD COLUMN notification_channel_id TEXT DEFAULT NULL");
   }
+  if (userCols.length > 0 && !userCols.includes("session_version")) {
+    db.exec("ALTER TABLE user_profiles ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0");
+  }
 
   // Add applied_at column to user_seen_jobs (idempotent)
   const usjCols = db.pragma("table_info(user_seen_jobs)").map((c) => c.name);
@@ -371,6 +374,7 @@ function initializeSchema() {
       is_active BOOLEAN DEFAULT 1,
       role TEXT DEFAULT 'user',
       password_hash TEXT DEFAULT NULL,
+      session_version INTEGER NOT NULL DEFAULT 0,
       education_level TEXT DEFAULT '',
       notification_channel_id TEXT DEFAULT NULL,
       resume_text TEXT DEFAULT NULL,
@@ -412,6 +416,15 @@ function initializeSchema() {
     CREATE TABLE IF NOT EXISTS otp_codes (
       email TEXT NOT NULL,
       code TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used BOOLEAN DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS password_reset_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       used BOOLEAN DEFAULT 0,
       created_at TEXT NOT NULL
@@ -489,6 +502,7 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_delivery_claims_user_status_job ON delivery_claims(user_id, status, job_key);
     CREATE INDEX IF NOT EXISTS idx_job_key_aliases_canonical ON job_key_aliases(canonical_key);
     CREATE INDEX IF NOT EXISTS idx_otp_email ON otp_codes(email);
+    CREATE INDEX IF NOT EXISTS idx_password_reset_email ON password_reset_codes(email, created_at);
 
     -- Indexes for the pruneState() scans (range deletes + the seen_jobs orphan
     -- check) and getRepostCount(). The existing dm_log/user_seen_jobs indexes are
@@ -498,6 +512,7 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_user_seen_jobs_notified_at ON user_seen_jobs(notified_at);
     CREATE INDEX IF NOT EXISTS idx_user_seen_jobs_job_key ON user_seen_jobs(job_key);
     CREATE INDEX IF NOT EXISTS idx_seen_source_label ON seen_jobs(source_label, first_seen_at);
+    CREATE INDEX IF NOT EXISTS idx_error_log_occurred_at ON error_log(occurred_at DESC);
 
     CREATE TABLE IF NOT EXISTS company_research (
       company_key TEXT PRIMARY KEY,
@@ -516,6 +531,21 @@ function initializeSchema() {
   const deliveryClaimCols = db.pragma("table_info(delivery_claims)").map((c) => c.name);
   if (!deliveryClaimCols.includes("claim_token")) {
     db.exec("ALTER TABLE delivery_claims ADD COLUMN claim_token TEXT DEFAULT NULL");
+  }
+
+  // Keep operational errors useful enough to diagnose from the admin UI.
+  // Additive migrations preserve the existing production error history.
+  const errorLogCols = db.pragma("table_info(error_log)").map((c) => c.name);
+  const errorLogMigrations = [
+    ["severity", "TEXT DEFAULT 'error'"],
+    ["category", "TEXT DEFAULT 'unclassified'"],
+    ["error_code", "TEXT"],
+    ["stack", "TEXT"],
+    ["context_json", "TEXT"],
+    ["process_name", "TEXT"],
+  ];
+  for (const [column, definition] of errorLogMigrations) {
+    if (!errorLogCols.includes(column)) db.exec(`ALTER TABLE error_log ADD COLUMN ${column} ${definition}`);
   }
   // Old pre-send leases need an owner generation before token-checked workers
   // can safely recover or complete them. Terminal rows do not need a token.

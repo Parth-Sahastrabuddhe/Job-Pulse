@@ -1,6 +1,6 @@
 import { getSession } from "@/lib/session";
 import { listFeatureFlags, setFeatureFlag } from "@/lib/db";
-import { requireSameOrigin } from "@/lib/security";
+import { jsonBodyError, readJsonBody, requireSameOrigin } from "@/lib/security";
 
 export async function GET() {
   const session = await getSession();
@@ -25,9 +25,9 @@ export async function PUT(request) {
   }
   let body;
   try {
-    body = await request.json();
-  } catch {
-    return Response.json({ error: "Invalid request body" }, { status: 400 });
+    body = await readJsonBody(request, { maxBytes: 2 * 1024 });
+  } catch (error) {
+    return jsonBodyError(error) || Response.json({ error: "Invalid request body" }, { status: 400 });
   }
   if (!body || typeof body !== "object" || typeof body.key !== "string" || typeof body.enabled !== "boolean") {
     return Response.json({ error: "Expected { key: string, enabled: boolean }" }, { status: 400 });

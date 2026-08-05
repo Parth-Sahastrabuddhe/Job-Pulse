@@ -33,7 +33,7 @@ export default function CompanySelector({ groups, selected, onChange }) {
 
   return (
     <div className="space-y-3">
-      <label className="flex items-center gap-2 text-sm font-medium text-foreground/80 cursor-pointer">
+      <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-line bg-background/55 px-3 py-2.5 text-sm font-semibold text-foreground/80">
         <input
           type="checkbox"
           checked={isAllSelected}
@@ -48,10 +48,11 @@ export default function CompanySelector({ groups, selected, onChange }) {
         placeholder="Search companies..."
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        className="w-full bg-surface border border-line rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-faint focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)]"
+        maxLength={100}
+        className="field-control px-3.5 py-2.5 text-sm placeholder:text-faint"
       />
 
-      <div className="space-y-2 max-h-80 overflow-y-auto border border-line rounded-lg p-3 bg-background">
+      <div className="max-h-80 space-y-2 overflow-y-auto rounded-xl border border-line bg-background/70 p-3">
         {Object.entries(groups).map(([groupName, companies]) => {
           const filtered = companies.filter((c) =>
             c.label.toLowerCase().includes(searchLower)
@@ -63,7 +64,7 @@ export default function CompanySelector({ groups, selected, onChange }) {
                 <span className="group-open:rotate-90 transition-transform inline-block text-faint">›</span>
                 {groupName} ({filtered.length})
               </summary>
-              <div className="mt-1 ml-4 grid grid-cols-2 sm:grid-cols-3 gap-1">
+              <div className="ml-4 mt-1 grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-3">
                 {filtered.map((company) => (
                   <label
                     key={company.key}

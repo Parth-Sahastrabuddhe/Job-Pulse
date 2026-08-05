@@ -11,8 +11,12 @@ export async function GET(request) {
   const month = searchParams.get("month");
 
   // Validate month format: YYYY-MM
-  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+  if (!month || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
     return Response.json({ error: "Invalid month format. Use YYYY-MM." }, { status: 400 });
+  }
+  const year = Number(month.slice(0, 4));
+  if (year < 2000 || year > 2100) {
+    return Response.json({ error: "Month is outside the supported range" }, { status: 400 });
   }
 
   try {
