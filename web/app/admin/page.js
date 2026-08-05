@@ -34,9 +34,9 @@ function StatCard({ label, value, color = "pulse" }) {
     indigo: "text-info",
   };
   return (
-    <div className="bg-surface rounded-xl border border-line p-4">
-      <div className={`text-2xl font-bold ${colorMap[color] || colorMap.pulse}`}>{value ?? "\u2014"}</div>
-      <div className="text-sm text-muted mt-0.5">{label}</div>
+    <div className="surface-card rounded-[1.35rem] p-5">
+      <div className={`font-display text-3xl font-semibold ${colorMap[color] || colorMap.pulse}`}>{value ?? "\u2014"}</div>
+      <div className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted">{label}</div>
     </div>
   );
 }
@@ -111,39 +111,109 @@ function OverviewTab() {
       </div>
 
       <div>
-        <h2 className="text-base font-semibold text-foreground mb-3">Recent Errors</h2>
+        <div className="mb-3">
+          <h2 className="text-base font-semibold text-foreground">Recent operational errors</h2>
+          <p className="mt-1 text-xs text-muted">Repeated identical errors are grouped. Open an item for the original message and stack.</p>
+        </div>
         {health.recentErrors.length === 0 ? (
           <div className="text-sm text-muted bg-surface rounded-xl border border-line p-6 text-center">
             No recent errors — system is healthy.
           </div>
         ) : (
-          <div className="bg-surface rounded-xl border border-line overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-line bg-elevated">
-                    <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Source</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider">Error</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wider whitespace-nowrap">Time</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line">
-                  {health.recentErrors.map((err) => (
-                    <tr key={err.id} className="hover:bg-surface-hover transition-colors">
-                      <td className="px-4 py-3 text-foreground whitespace-nowrap">{err.source_key || "\u2014"}</td>
-                      <td className="px-4 py-3 text-danger max-w-sm truncate">{err.error_message}</td>
-                      <td className="px-4 py-3 text-muted whitespace-nowrap">{formatDateTime(err.occurred_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          <div className="space-y-3">
+            {health.recentErrors.map((err) => (
+              <details key={err.id} className="group surface-card rounded-xl p-4">
+                <summary className="cursor-pointer list-none">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                          err.severity === "critical" || err.severity === "error"
+                            ? "bg-[rgba(255,114,123,0.12)] text-danger"
+                            : "bg-[rgba(255,199,102,0.12)] text-warn"
+                        }`}>{err.severity}</span>
+                        <span className="text-xs font-semibold text-foreground">{err.category}</span>
+                        <span className="font-mono text-[11px] text-faint">{err.source_key || "unknown source"}</span>
+                        {err.occurrences > 1 && <span className="text-[11px] text-warn">{err.occurrences} occurrences</span>}
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-foreground">{err.summary}</p>
+                      <p className="mt-1 text-xs leading-5 text-muted"><span className="font-semibold text-pulse">Next:</span> {err.suggestedAction}</p>
+                    </div>
+                    <span className="shrink-0 text-xs text-muted">{formatDateTime(err.lastSeen || err.occurred_at)}</span>
+                  </div>
+                </summary>
+                <div className="mt-4 border-t border-line pt-4">
+                  <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-faint">Technical details</div>
+                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-background p-3 font-mono text-[11px] leading-5 text-muted">{err.stack || err.technicalDetails}</pre>
+                  {err.stack && err.technicalDetails !== err.stack && <p className="mt-2 font-mono text-[11px] text-muted">{err.technicalDetails}</p>}
+                </div>
+              </details>
+            ))}
           </div>
         )}
       </div>
 
+      <RuntimeLogsCard />
       <FeatureFlagsCard />
     </div>
+  );
+}
+
+function RuntimeLogsCard() {
+  const [service, setService] = useState("web");
+  const [logs, setLogs] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadLogs = useCallback(async (selected) => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/logs?service=${encodeURIComponent(selected)}`, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load runtime logs");
+      setLogs(data);
+    } catch (err) {
+      setError(err.message || "Failed to load runtime logs");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadLogs(service); }, [service, loadLogs]);
+
+  return (
+    <section className="surface-card rounded-xl p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Runtime logs</h2>
+          <p className="mt-1 text-xs text-muted">Latest PM2 output, available only to admins. Known secret formats are redacted.</p>
+        </div>
+        <button type="button" onClick={() => loadLogs(service)} disabled={loading} className="secondary-button px-3 py-2 text-xs disabled:opacity-50">
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {[["web", "Web"], ["alerts", "Alert bot"], ["collectors", "Collectors"]].map(([value, label]) => (
+          <button key={value} type="button" onClick={() => setService(value)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${service === value ? "bg-pulse text-black" : "border border-line text-muted hover:text-foreground"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {error && <p className="mt-4 text-sm text-danger">{error}</p>}
+      {logs && !error && (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          <div>
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-danger">Errors / stacks</div>
+            <pre className="h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-background p-3 font-mono text-[11px] leading-5 text-muted">{logs.errorLog || "No recent error output."}</pre>
+          </div>
+          <div>
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-pulse">Standard output</div>
+            <pre className="h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-background p-3 font-mono text-[11px] leading-5 text-muted">{logs.outputLog || "No recent standard output."}</pre>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -204,12 +274,15 @@ function UsersTab() {
     setActionPending(discordId);
     try {
       const res = await fetch(`/api/admin/users/${encodeURIComponent(discordId)}`, { method: "DELETE" });
+      const data = await res.json();
       if (!res.ok) {
-        const d = await res.json();
-        alert(d.error || "Failed to delete user");
+        alert(data.error || "Failed to delete user");
         return;
       }
       setUsers((prev) => prev.filter((u) => u.discord_id !== discordId));
+      if (data.discordCleanupPending) {
+        alert("The account was deleted, but its Discord channel or membership needs manual cleanup.");
+      }
     } catch {
       alert("Network error");
     } finally {
@@ -415,6 +488,7 @@ function TicketsTab() {
                   placeholder="Response (optional)..."
                   value={responseText[ticket.id] || ""}
                   onChange={(e) => setResponseText((prev) => ({ ...prev, [ticket.id]: e.target.value }))}
+                  maxLength={4000}
                   rows={2}
                   className="flex-1 bg-surface border border-line rounded px-3 py-2 text-sm text-foreground placeholder:text-faint focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)] resize-none"
                 />
@@ -681,21 +755,28 @@ export default function AdminPage() {
   }
 
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground font-display">Admin Panel</h1>
-        <p className="text-muted text-sm mt-0.5">Manage users, tickets, and system health.</p>
+    <div className="mx-auto max-w-7xl pb-12">
+      <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div>
+          <p className="section-kicker">Operations</p>
+          <h1 className="mt-3 font-display text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">Admin lookout</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">Monitor delivery health, support members, and keep the opportunity feed moving.</p>
+        </div>
+        <div className="inline-flex w-fit items-center gap-2 rounded-full border border-pulse/20 bg-pulse/10 px-3 py-2 text-xs font-semibold text-pulse">
+          <span className="h-2 w-2 rounded-full bg-pulse shadow-[0_0_12px_rgba(215,255,112,0.7)]" />
+          Admin access
+        </div>
       </div>
 
-      <div className="flex gap-1 border-b border-line mb-6">
+      <div className="mb-7 flex max-w-full gap-1 overflow-x-auto rounded-2xl border border-line bg-surface/70 p-1.5">
         {TABS.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
               activeTab === tab
-                ? "border-pulse text-pulse"
-                : "border-transparent text-faint hover:text-muted"
+                ? "bg-pulse text-ink shadow-[0_8px_24px_rgba(215,255,112,0.12)]"
+                : "text-faint hover:bg-white/[0.04] hover:text-foreground"
             }`}
           >
             {tab}

@@ -799,8 +799,7 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
   } catch (err) {
-    console.error(`[multi-user] Interaction error: ${err.message}`);
-    safeLogError("multi-user-interaction", err.message);
+    safeLogError("multi-user-interaction", err, { category: "discord-interaction" });
     try {
       const reply = { content: "An error occurred. Please try again.", ephemeral: true };
       if (!interaction.replied && !interaction.deferred) {
@@ -838,7 +837,7 @@ async function checkSavedJobExpiry() {
         markRemindersSent(jobs.map((j) => ({ user_id: j.user_id, job_key: j.job_key })));
         console.log(`[expiry] Sent reminder to user ${userId} for ${jobs.length} jobs`);
       } catch (err) {
-        console.error(`[expiry] Failed to send reminder to user ${userId}: ${err.message}`);
+        safeLogError("expiry-reminder", err, { category: "discord-delivery", context: { userId } });
       }
     }
 
@@ -848,8 +847,7 @@ async function checkSavedJobExpiry() {
       console.log(`[expiry] Expired ${expired} saved jobs`);
     }
   } catch (err) {
-    console.error(`[expiry] Error in saved job expiry check: ${err.message}`);
-    safeLogError("expiry-check", err.message);
+    safeLogError("expiry-check", err, { category: "scheduled-task" });
   }
 }
 
@@ -959,8 +957,7 @@ async function pollLoop() {
       void ping(getConfig().heartbeat.mu);
       touchMuHeartbeat();
     } catch (err) {
-      console.error(`[multi-user] Poll cycle error: ${err.message}`);
-      safeLogError("multi-user-poll", err.message);
+      safeLogError("multi-user-poll", err, { category: "collector-cycle" });
       void pingFail(getConfig().heartbeat.mu, `pollCycle: ${err.message}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 10_000));
@@ -1145,8 +1142,7 @@ async function runPollCycle() {
       });
       userTz = user.quiet_hours_tz || "America/New_York";
     } catch (err) {
-      console.error(`[multi-user] Setup error for user ${user.id}: ${err.message}`);
-      safeLogError("multi-user-poll-user", `user=${user.id} ${err.message}`);
+      safeLogError("multi-user-poll-user", err, { category: "user-setup", context: { userId: user.id } });
       for (const job of freshJobs) holdCursorAt(job);
       continue;
     }
@@ -1307,8 +1303,7 @@ async function runPollCycle() {
           }
         }
         holdCursorAt(job);
-        console.error(`[multi-user] Error on job ${job.key} for user ${user.id}: ${err.message}`);
-        safeLogError("multi-user-poll-job", `user=${user.id} job=${job.key} ${err.message}`);
+        safeLogError("multi-user-poll-job", err, { category: "job-delivery", context: { userId: user.id, jobKey: job.key } });
       }
     }
   }
@@ -1333,8 +1328,7 @@ async function digestLoop() {
         await checkSavedJobExpiry();
       }
     } catch (err) {
-      console.error(`[multi-user] Digest cycle error: ${err.message}`);
-      safeLogError("multi-user-digest", err.message);
+      safeLogError("multi-user-digest", err, { category: "digest-cycle" });
       void pingFail(getConfig().heartbeat.mu, `digestCycle: ${err.message}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 60_000));
@@ -1664,8 +1658,7 @@ async function runDigestCycle() {
           } catch {}
         }
       }
-      console.error(`[multi-user] Digest error for user ${user.id}: ${err.message}`);
-      safeLogError("multi-user-digest-user", `user=${user.id} ${err.message}`);
+      safeLogError("multi-user-digest-user", err, { category: "digest-delivery", context: { userId: user.id } });
     }
   }
 }
@@ -1744,12 +1737,12 @@ function flushBufferOnCrash() {
   }
 }
 process.on("uncaughtException", (err) => {
-  console.error(`[multi-user] uncaughtException: ${err?.message}`);
+  console.error(`[multi-user] uncaughtException: ${err?.stack || err?.message}`);
   flushBufferOnCrash();
   pingFail(muHeartbeatUrl(), `uncaughtException: ${err?.message}`).finally(() => process.exit(1));
 });
 process.on("unhandledRejection", (reason) => {
-  console.error(`[multi-user] unhandledRejection: ${reason?.message ?? reason}`);
+  console.error(`[multi-user] unhandledRejection: ${reason?.stack || reason?.message || reason}`);
   flushBufferOnCrash();
   pingFail(muHeartbeatUrl(), `unhandledRejection: ${reason?.message ?? reason}`).finally(() => process.exit(1));
 });

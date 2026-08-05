@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { BrandWordmark } from "@/components/Brand";
 
 export default function VerifyPage() {
   const router = useRouter();
@@ -33,7 +34,7 @@ export default function VerifyPage() {
   async function handleVerify(e) {
     e.preventDefault();
     setError("");
-    if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
+    if (password.length < 12) { setError("Password must be at least 12 characters."); return; }
     setLoading(true);
     try {
       const res = await fetch("/api/otp/verify", {
@@ -48,29 +49,31 @@ export default function VerifyPage() {
     finally { setLoading(false); }
   }
 
-  const inputClass = "w-full bg-surface border border-line rounded-lg px-3 py-2.5 text-sm text-foreground placeholder:text-faint focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)]";
+  const inputClass = "field-control px-3.5 py-3 text-sm placeholder:text-faint";
 
   return (
-    <div className="flex flex-col items-center justify-center py-16 animate-fade-in-up">
-      <div className="bg-surface rounded-xl border border-line p-8 w-full max-w-md">
+    <div className="flex min-h-[calc(100vh-9rem)] items-center justify-center py-6 animate-fade-in-up">
+      <div className="surface-card w-full max-w-lg rounded-[26px] p-6 sm:p-9">
+        <div className="mb-8 flex justify-center"><BrandWordmark href="/" /></div>
         {/* Step indicator */}
-        <div className="flex items-center gap-3 mb-6">
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${step >= 1 ? "bg-pulse text-black" : "bg-elevated text-faint"}`}>1</div>
-          <div className={`flex-1 h-px ${step >= 2 ? "bg-pulse" : "bg-line"}`} />
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${step >= 2 ? "bg-pulse text-black" : "bg-elevated text-faint"}`}>2</div>
+        <div className="mb-7 flex items-center gap-3">
+          <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-bold ${step >= 1 ? "bg-pulse text-[#07100c]" : "bg-elevated text-faint"}`}>1</div>
+          <div className={`h-px flex-1 ${step >= 2 ? "bg-pulse" : "bg-line"}`} />
+          <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-bold ${step >= 2 ? "bg-pulse text-[#07100c]" : "bg-elevated text-faint"}`}>2</div>
         </div>
 
-        <h1 className="text-xl font-bold text-foreground mb-2 font-display">
-          Complete Registration
+        <div className="section-kicker">Secure your account</div>
+        <h1 className="mt-2 font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+          Complete your registration
         </h1>
-        <p className="text-muted text-sm mb-6">
+        <p className="mb-7 mt-2 text-sm leading-6 text-muted">
           {step === 1
             ? "Enter your name and email to receive a verification code."
             : `We sent a 6-digit code to ${email}.`}
         </p>
 
         {error && (
-          <div className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-danger text-sm px-4 py-3 rounded-lg mb-4">
+          <div className="mb-4 rounded-xl border border-[rgba(255,114,123,0.24)] bg-[rgba(255,114,123,0.08)] px-4 py-3 text-sm text-danger" role="alert">
             {error}
           </div>
         )}
@@ -78,40 +81,40 @@ export default function VerifyPage() {
         {step === 1 ? (
           <form onSubmit={handleSendCode} className="space-y-4">
             <div>
-              <label htmlFor="firstName" className="block text-sm font-medium text-foreground/80 mb-1">First name</label>
+              <label htmlFor="firstName" className="mb-1.5 block text-sm font-semibold text-foreground/80">First name</label>
               <input id="firstName" type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)}
-                placeholder="Alex" required className={inputClass} />
+                placeholder="Alex" required maxLength={100} autoComplete="given-name" className={inputClass} />
             </div>
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-foreground/80 mb-1">Email address</label>
+              <label htmlFor="email" className="mb-1.5 block text-sm font-semibold text-foreground/80">Email address</label>
               <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com" required className={inputClass} />
+                placeholder="you@example.com" required maxLength={254} autoComplete="email" className={inputClass} />
             </div>
             <button type="submit" disabled={loading}
-              className="w-full bg-pulse hover:bg-pulse-hover disabled:opacity-50 text-black font-semibold py-2.5 rounded-lg transition-colors">
-              {loading ? "Sending..." : "Send Verification Code"}
+              className="primary-button w-full px-5 py-3">
+              {loading ? "Sending…" : "Send verification code"}
             </button>
           </form>
         ) : (
           <form onSubmit={handleVerify} className="space-y-4">
             <div>
-              <label htmlFor="code" className="block text-sm font-medium text-foreground/80 mb-1">Verification code</label>
+              <label htmlFor="code" className="mb-1.5 block text-sm font-semibold text-foreground/80">Verification code</label>
               <input id="code" type="text" maxLength={6} value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
                 placeholder="000000" autoComplete="one-time-code"
-                className="w-full bg-surface border border-line rounded-lg px-4 py-3 text-center tracking-[0.3em] text-2xl font-mono text-foreground focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)]" />
+                className="field-control px-4 py-3 text-center font-mono text-2xl tracking-[0.3em]" />
             </div>
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-foreground/80 mb-1">Set a password</label>
+              <label htmlFor="password" className="mb-1.5 block text-sm font-semibold text-foreground/80">Set a password</label>
               <input id="password" type="password" value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 6 characters" autoComplete="new-password"
+                placeholder="At least 12 characters" minLength={12} maxLength={1024} autoComplete="new-password"
                 className={inputClass} />
-              <p className="text-xs text-faint mt-1">You&apos;ll use this to log in next time.</p>
+              <p className="mt-1.5 text-xs text-faint">Use 12+ characters. You&apos;ll use this to log in next time.</p>
             </div>
-            <button type="submit" disabled={loading || code.length < 6 || password.length < 6}
-              className="w-full bg-pulse hover:bg-pulse-hover disabled:opacity-50 text-black font-semibold py-2.5 rounded-lg transition-colors">
-              {loading ? "Verifying..." : "Complete Registration"}
+            <button type="submit" disabled={loading || code.length < 6 || password.length < 12}
+              className="primary-button w-full px-5 py-3">
+              {loading ? "Verifying…" : "Complete registration"}
             </button>
             <button type="button" onClick={() => { setStep(1); setCode(""); setPassword(""); setError(""); }}
               className="w-full text-sm text-faint hover:text-muted transition-colors">

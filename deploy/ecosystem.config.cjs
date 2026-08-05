@@ -13,6 +13,7 @@ module.exports = {
       exp_backoff_restart_delay: 10000,
       kill_timeout: 10000,
       max_memory_restart: "350M",
+      time: true,
       env: { NODE_ENV: "production" }
     },
     {
@@ -26,12 +27,13 @@ module.exports = {
       exp_backoff_restart_delay: 10000,
       kill_timeout: 10000,
       max_memory_restart: "350M",
+      time: true,
       env: { NODE_ENV: "production" }
     },
     {
       name: "jobpulse-web",
       script: "node_modules/.bin/next",
-      args: "start",
+      args: "start --hostname 127.0.0.1 --port 3000",
       cwd: "/home/ubuntu/Job-Pulse/web",
       instances: 1,
       exec_mode: "fork",
@@ -40,7 +42,8 @@ module.exports = {
       exp_backoff_restart_delay: 10000,
       kill_timeout: 10000,
       max_memory_restart: "450M",
-      env: { NODE_ENV: "production", PORT: "3000" }
+      time: true,
+      env: { NODE_ENV: "production", TRUST_PROXY: "nginx" }
     }
   ]
 };

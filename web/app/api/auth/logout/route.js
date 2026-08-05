@@ -7,10 +7,14 @@ export async function POST(request) {
   if (originError) return originError;
 
   await clearSession();
-  return NextResponse.redirect(new URL("/", publicBaseUrl(request)));
+  const response = NextResponse.redirect(new URL("/", publicBaseUrl(request)), 303);
+  response.headers.set("Cache-Control", "no-store");
+  return response;
 }
 
-export async function GET(request) {
-  await clearSession();
-  return NextResponse.redirect(new URL("/", publicBaseUrl(request)));
+export async function GET() {
+  return NextResponse.json(
+    { error: "Method not allowed; use POST to log out" },
+    { status: 405, headers: { Allow: "POST" } }
+  );
 }

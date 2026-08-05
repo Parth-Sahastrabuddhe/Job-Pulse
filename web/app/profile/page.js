@@ -93,6 +93,11 @@ export default function ProfilePage() {
       });
       const data = await res.json();
       if (!res.ok) { setPwMsg(data.error || "Failed to set password."); return; }
+      if (data.reauthRequired) {
+        setPwMsg("Password saved. Redirecting you to sign in again…");
+        setTimeout(() => { window.location.href = "/auth"; }, 900);
+        return;
+      }
       setPwMsg("Password saved.");
       setNewPassword("");
       setProfile((p) => ({ ...p, hasPassword: true }));
@@ -125,16 +130,16 @@ export default function ProfilePage() {
   if (loading) return <div className="flex justify-center py-16"><div className="text-muted text-sm">Loading profile...</div></div>;
   if (!profile) return <div className="flex justify-center py-16"><div className="text-danger text-sm">{error || "Profile not found."}</div></div>;
 
-  const inputClass = "bg-surface border border-line rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-pulse focus:ring-1 focus:ring-[rgba(34,197,94,0.2)]";
+  const inputClass = "field-control px-3.5 py-2.5 text-sm";
 
   return (
     <>
       {/* Success popup — fixed to viewport */}
       {success && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgba(0,0,0,0.6)] backdrop-blur-sm">
-          <div className="bg-surface border border-line rounded-xl p-8 max-w-sm w-full mx-4 text-center animate-fade-in-up">
-            <div className="w-12 h-12 rounded-full bg-[rgba(34,197,94,0.15)] flex items-center justify-center mx-auto mb-4">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgba(0,0,0,0.7)] px-4 backdrop-blur-sm">
+          <div className="surface-card w-full max-w-sm rounded-[24px] p-8 text-center animate-fade-in-up">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[rgba(215,255,112,0.12)] text-pulse">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
@@ -142,7 +147,7 @@ export default function ProfilePage() {
             <p className="text-muted text-sm mb-6">Your preferences have been updated.</p>
             <button
               onClick={() => setSuccess(false)}
-              className="bg-pulse hover:bg-pulse-hover text-black font-semibold py-2.5 px-8 rounded-lg transition-colors"
+              className="primary-button px-8 py-2.5"
             >
               OK
             </button>
@@ -150,31 +155,33 @@ export default function ProfilePage() {
         </div>
       )}
 
-      <div className="animate-fade-in-up">
-        <div className="flex items-center justify-between mb-6">
+      <div className="mx-auto max-w-6xl animate-fade-in-up">
+        <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
-            <h1 className="text-2xl font-bold text-foreground font-display">Profile Settings</h1>
-            <p className="text-muted text-sm mt-0.5">Customize your job alert preferences.</p>
+            <div className="section-kicker">Tune your signal</div>
+            <h1 className="mt-2 font-display text-3xl font-bold tracking-[-0.045em] text-foreground sm:text-4xl">Lookout preferences</h1>
+            <p className="mt-2 text-sm text-muted">Tell JobLookout which opportunities are worth interrupting you for.</p>
           </div>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="bg-pulse hover:bg-pulse-hover disabled:opacity-50 text-black font-semibold py-2.5 px-6 rounded-lg transition-colors"
+            className="primary-button px-6 py-3"
           >
             {saving ? "Saving..." : "Save Profile"}
           </button>
         </div>
 
         {error && (
-          <div className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-danger text-sm px-4 py-3 rounded-lg mb-6">{error}</div>
+          <div className="mb-6 rounded-xl border border-[rgba(255,114,123,0.24)] bg-[rgba(255,114,123,0.08)] px-4 py-3 text-sm text-danger" role="alert">{error}</div>
         )}
 
-        <form onSubmit={handleSave} className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <form onSubmit={handleSave} className="grid grid-cols-1 gap-5 xl:grid-cols-2">
           {/* ---- Left Column ---- */}
           <div className="space-y-5">
             {/* Role Categories, grouped by section */}
-            <section className="bg-surface rounded-xl border border-line p-5">
-              <h2 className="text-sm font-semibold text-foreground mb-3 font-display uppercase tracking-wider">Role Categories</h2>
+            <section className="surface-card rounded-2xl p-5 sm:p-6">
+              <div className="section-kicker">01 · Target roles</div>
+              <h2 className="mb-4 mt-1 font-display text-lg font-bold text-foreground">Role categories</h2>
               <div className="space-y-4">
                 {Object.entries(ROLE_SECTIONS).map(([sectionKey, section]) => {
                   const values = section.categories.map((c) => c.value);
@@ -194,7 +201,7 @@ export default function ProfilePage() {
                           {allSelected ? "Clear all" : "Select all"}
                         </button>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         {section.categories.map((role) => (
                           <label key={role.value} className="flex items-center gap-2 text-sm text-muted cursor-pointer hover:text-foreground transition-colors">
                             <input type="checkbox" checked={profile.roleCategories.includes(role.value)}
@@ -211,8 +218,8 @@ export default function ProfilePage() {
             </section>
 
             {/* Seniority */}
-            <section className="bg-surface rounded-xl border border-line p-5">
-              <h2 className="text-sm font-semibold text-foreground mb-3 font-display uppercase tracking-wider">Seniority Level</h2>
+            <section className="surface-card rounded-2xl p-5 sm:p-6">
+              <h2 className="mb-3 font-display text-base font-bold text-foreground">Seniority level</h2>
               <div className="flex flex-wrap gap-3">
                 {SENIORITY_LEVELS.map((s) => (
                   <label key={s.value} className="flex items-center gap-2 text-sm text-muted cursor-pointer hover:text-foreground transition-colors">
@@ -226,8 +233,8 @@ export default function ProfilePage() {
             </section>
 
             {/* Education */}
-            <section className="bg-surface rounded-xl border border-line p-5">
-              <h2 className="text-sm font-semibold text-foreground mb-3 font-display uppercase tracking-wider">Education</h2>
+            <section className="surface-card rounded-2xl p-5 sm:p-6">
+              <h2 className="mb-3 font-display text-base font-bold text-foreground">Education</h2>
               <p className="text-xs text-muted mb-3">Used to pick the right experience tier when a job lists requirements like &ldquo;Bachelor&rsquo;s + 5 years OR Master&rsquo;s + 3 years&rdquo;.</p>
               <div className="flex flex-wrap gap-3">
                 {EDUCATION_LEVELS.map((e) => (
@@ -250,8 +257,8 @@ export default function ProfilePage() {
             </section>
 
             {/* Country + Sponsorship */}
-            <section className="bg-surface rounded-xl border border-line p-5 space-y-3">
-              <h2 className="text-sm font-semibold text-foreground font-display uppercase tracking-wider">Location & Visa</h2>
+            <section className="surface-card space-y-3 rounded-2xl p-5 sm:p-6">
+              <h2 className="font-display text-base font-bold text-foreground">Location & visa</h2>
               <div>
                 <label className="block text-sm font-medium text-foreground/80 mb-1">Countries</label>
                 <div className="space-y-2">
@@ -287,13 +294,13 @@ export default function ProfilePage() {
                 <input type="checkbox" checked={profile.requiresSponsorship}
                   onChange={(e) => setProfile((p) => ({ ...p, requiresSponsorship: e.target.checked }))}
                   className="w-4 h-4 rounded border-line bg-background accent-pulse" />
-                I require H1B / work visa sponsorship
+                I need work-visa sponsorship (H-1B or similar)
               </label>
             </section>
 
             {/* Notification Mode */}
-            <section className="bg-surface rounded-xl border border-line p-5">
-              <h2 className="text-sm font-semibold text-foreground mb-3 font-display uppercase tracking-wider">Notification Mode</h2>
+            <section className="surface-card rounded-2xl p-5 sm:p-6">
+              <h2 className="mb-3 font-display text-base font-bold text-foreground">Notification rhythm</h2>
               <div className="space-y-2">
                 {NOTIFICATION_MODES.map((mode) => (
                   <label key={mode.value} className="flex items-start gap-3 cursor-pointer group">
@@ -314,17 +321,23 @@ export default function ProfilePage() {
           {/* ---- Right Column ---- */}
           <div className="space-y-5">
             {/* Companies */}
-            <section className="bg-surface rounded-xl border border-line p-5">
-              <h2 className="text-sm font-semibold text-foreground mb-3 font-display uppercase tracking-wider">Companies to Watch</h2>
+            <section className="surface-card rounded-2xl p-5 sm:p-6">
+              <div className="section-kicker">02 · Watchlist</div>
+              <h2 className="mb-4 mt-1 font-display text-lg font-bold text-foreground">Companies to watch</h2>
               <CompanySelector groups={groups} selected={profile.companySelections}
                 onChange={(val) => setProfile((p) => ({ ...p, companySelections: val }))} />
+              <p className="mt-4 text-xs text-muted">
+                Missing a company?{" "}
+                <a href="/suggest-company" className="font-semibold text-pulse hover:underline">Suggest it</a>
+                {" "}and we&apos;ll review it for the watchlist.
+              </p>
             </section>
 
             {/* Quiet Hours */}
-            <section className="bg-surface rounded-xl border border-line p-5 space-y-3">
-              <h2 className="text-sm font-semibold text-foreground font-display uppercase tracking-wider">Quiet Hours</h2>
+            <section className="surface-card space-y-3 rounded-2xl p-5 sm:p-6">
+              <h2 className="font-display text-base font-bold text-foreground">Quiet hours</h2>
               <p className="text-xs text-faint">No notifications during these hours.</p>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div>
                   <label className="block text-xs font-medium text-foreground/80 mb-1">Start</label>
                   <input type="time" value={profile.quietHoursStart}
@@ -349,10 +362,10 @@ export default function ProfilePage() {
             </section>
 
             {/* Active Toggle */}
-            <section className="bg-surface rounded-xl border border-line p-5">
+            <section className="surface-card rounded-2xl p-5 sm:p-6">
               <label className="flex items-center justify-between cursor-pointer">
                 <div>
-                  <div className="text-sm font-semibold text-foreground font-display uppercase tracking-wider">Active Notifications</div>
+                  <div className="font-display text-base font-bold text-foreground">Active notifications</div>
                   <div className="text-xs text-muted mt-1">Pause all alerts while keeping settings.</div>
                 </div>
                 <div className="relative"
@@ -360,16 +373,16 @@ export default function ProfilePage() {
                   <input type="checkbox" checked={profile.isActive}
                     onChange={(e) => setProfile((p) => ({ ...p, isActive: e.target.checked }))}
                     className="sr-only peer" />
-                  <div className={`w-11 h-6 rounded-full cursor-pointer transition-colors ${profile.isActive ? "bg-pulse" : "bg-elevated border border-line"}`}>
-                    <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-foreground rounded-full shadow transition-transform ${profile.isActive ? "translate-x-5" : "translate-x-0"}`} />
+                  <div className={`h-6 w-11 cursor-pointer rounded-full transition-colors ${profile.isActive ? "bg-pulse" : "border border-line bg-elevated"}`}>
+                    <div className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-foreground shadow transition-transform ${profile.isActive ? "translate-x-5 bg-[#07100c]" : "translate-x-0"}`} />
                   </div>
                 </div>
               </label>
             </section>
 
             {/* Password */}
-            <section className="bg-surface rounded-xl border border-line p-5 space-y-3">
-              <h2 className="text-sm font-semibold text-foreground font-display uppercase tracking-wider">
+            <section className="surface-card space-y-3 rounded-2xl p-5 sm:p-6">
+              <h2 className="font-display text-base font-bold text-foreground">
                 {profile.hasPassword ? "Change Password" : "Set Password"}
               </h2>
               <p className="text-xs text-faint">
@@ -379,27 +392,30 @@ export default function ProfilePage() {
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="New password (min 6 chars)"
+                placeholder="New password (12+ characters)"
+                minLength={12}
+                maxLength={1024}
                 className={`${inputClass} w-full`}
               />
               {pwMsg && (
-                <p className={`text-xs ${pwMsg === "Password saved." ? "text-pulse" : "text-danger"}`}>{pwMsg}</p>
+                <p className={`text-xs ${pwMsg.startsWith("Password saved.") ? "text-pulse" : "text-danger"}`}>{pwMsg}</p>
               )}
               <button
                 type="button"
                 onClick={handlePasswordSave}
-                disabled={pwSaving || newPassword.length < 6}
-                className="bg-elevated hover:bg-surface-hover disabled:opacity-30 text-foreground px-4 py-2 rounded-lg border border-line text-sm font-medium transition-colors"
+                disabled={pwSaving || newPassword.length < 12}
+                className="secondary-button px-4 py-2 text-sm disabled:opacity-30"
               >
                 {pwSaving ? "Saving..." : profile.hasPassword ? "Update Password" : "Set Password"}
               </button>
             </section>
 
-            {/* Fit Check (AI) */}
-            <section className="bg-surface rounded-xl border border-line p-5">
-              <h2 className="text-sm font-semibold text-foreground mb-1 font-display uppercase tracking-wider">Fit Check (AI)</h2>
+            {/* Fit Check stays unavailable to production users until its server-side flag is enabled. */}
+            {profile.fitCheckEnabled && <section className="surface-card rounded-2xl p-5 sm:p-6">
+              <div className="section-kicker">03 · Optional intelligence</div>
+              <h2 className="mb-1 mt-1 font-display text-lg font-bold text-foreground">Fit Check AI</h2>
               <p className="text-xs text-muted mb-3">
-                Bring your own LLM; JobPulse never uses your key or endpoint for anything but your own fit checks.
+                Bring your own LLM; JobLookout never uses your key or endpoint for anything but your own fit checks.
                 Gemini and Groq have free tiers; OpenAI and Anthropic spend your money. Get a free Gemini key at{" "}
                 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-pulse hover:underline">aistudio.google.com/apikey</a>.
               </p>
@@ -502,7 +518,7 @@ export default function ProfilePage() {
                   ? <span className="text-pulse">Fit Check active: the Fit Check button on your job DMs will work after saving.</span>
                   : <span className="text-muted">Fit Check inactive: add your resume and connect an LLM, then save.</span>}
               </p>
-            </section>
+            </section>}
           </div>
         </form>
       </div>

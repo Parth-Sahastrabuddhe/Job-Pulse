@@ -10,6 +10,12 @@ export async function GET(request) {
   const { searchParams } = request.nextUrl;
   const search = searchParams.get("search") || "";
   const status = searchParams.get("status") || "";
+  if (search.length > 200) {
+    return Response.json({ error: "Search query is too long" }, { status: 400 });
+  }
+  if (status && !["active", "paused"].includes(status)) {
+    return Response.json({ error: "Invalid user status" }, { status: 400 });
+  }
 
   try {
     const users = getAllUsers({ search: search || undefined, status: status || undefined });

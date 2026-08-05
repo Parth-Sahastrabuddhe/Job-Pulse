@@ -1168,13 +1168,28 @@ export function _dmLogBufferSize() {
 /**
  * Log an error from a source.
  */
-export function logError(sourceKey, errorMessage) {
+export function logError(sourceKey, errorOrMessage, details = {}) {
+  const isErrorObject = errorOrMessage instanceof Error;
+  const message = isErrorObject ? errorOrMessage.message : String(errorOrMessage ?? "Unknown error");
+  const stack = isErrorObject ? errorOrMessage.stack : details.stack;
+  const context = details.context && typeof details.context === "object" ? details.context : null;
   getDb()
     .prepare(
-      `INSERT INTO error_log (source_key, error_message, occurred_at)
-       VALUES (?, ?, ?)`
+      `INSERT INTO error_log
+         (source_key, error_message, severity, category, error_code, stack, context_json, process_name, occurred_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(sourceKey, errorMessage, new Date().toISOString());
+    .run(
+      sourceKey,
+      message.slice(0, 4000),
+      details.severity || "error",
+      details.category || "unclassified",
+      details.code || errorOrMessage?.code || null,
+      stack ? String(stack).slice(0, 16000) : null,
+      context ? JSON.stringify(context).slice(0, 8000) : null,
+      details.processName || "jobpulse-mu",
+      new Date().toISOString()
+    );
 }
 
 function isSqliteBusy(error) {
@@ -1182,12 +1197,21 @@ function isSqliteBusy(error) {
     /database is locked|SQLITE_BUSY/i.test(String(error?.message || ""));
 }
 
-export function safeLogError(sourceKey, errorMessage) {
+export function safeLogError(sourceKey, errorOrMessage, details = {}) {
   try {
-    logError(sourceKey, errorMessage);
+    logError(sourceKey, errorOrMessage, details);
+    const message = errorOrMessage instanceof Error ? errorOrMessage.stack : errorOrMessage;
+    console.error(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: details.severity || "error",
+      service: details.processName || "jobpulse-mu",
+      event: sourceKey,
+      message: String(message ?? "Unknown error"),
+      context: details.context || undefined,
+    }));
   } catch (error) {
     const prefix = isSqliteBusy(error) ? "DB busy while logging" : "Failed to log";
-    console.error(`[multi-user-state] ${prefix} ${sourceKey}: ${error.message}`);
+    console.error(`[multi-user-state] ${prefix} ${sourceKey}: ${error.stack || error.message}`);
   }
 }
 

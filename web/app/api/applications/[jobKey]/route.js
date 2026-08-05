@@ -1,6 +1,6 @@
 import { getSession } from "@/lib/session";
 import { updateApplicationStatus } from "@/lib/db";
-import { requireSameOrigin } from "@/lib/security";
+import { jsonBodyError, readJsonBody, requireSameOrigin } from "@/lib/security";
 
 const ALLOWED_STATUSES = ["notified", "saved", "applied", "skipped", "interviewing", "offer", "rejected"];
 
@@ -17,9 +17,9 @@ export async function PUT(request, { params }) {
 
   let body;
   try {
-    body = await request.json();
-  } catch {
-    return Response.json({ error: "Invalid request body" }, { status: 400 });
+    body = await readJsonBody(request, { maxBytes: 2 * 1024 });
+  } catch (error) {
+    return jsonBodyError(error) || Response.json({ error: "Invalid request body" }, { status: 400 });
   }
 
   const { status } = body;
@@ -31,7 +31,8 @@ export async function PUT(request, { params }) {
   }
 
   try {
-    updateApplicationStatus(session.discordId, jobKey, status);
+    const updated = updateApplicationStatus(session.discordId, jobKey, status);
+    if (!updated) return Response.json({ error: "Application not found" }, { status: 404 });
     return Response.json({ updated: true });
   } catch (err) {
     console.error("Application status update error:", err);

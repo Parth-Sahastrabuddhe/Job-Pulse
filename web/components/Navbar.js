@@ -1,55 +1,83 @@
 import Link from "next/link";
 import { getSession } from "@/lib/session";
+import { BrandWordmark } from "./Brand";
 import NavDropdown from "./NavDropdown";
+
+const NAV_LINKS = [
+  { href: "/dashboard", label: "Tracker" },
+  { href: "/profile", label: "Preferences" },
+  { href: "/support", label: "Support" },
+];
 
 export default async function Navbar() {
   const session = await getSession();
 
   return (
-    <nav className="bg-[rgba(15,17,23,0.85)] backdrop-blur-md border-b border-line sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {session && <NavDropdown />}
-          <Link href="/" className="flex items-center gap-0.5">
-            <span className="text-xl font-bold text-foreground font-display">Job</span>
-            <span className="text-xl font-bold text-pulse font-display animate-pulse-glow">Pulse</span>
-          </Link>
-        </div>
+    <nav className="sticky top-0 z-50 border-b border-line/80 bg-[rgba(7,16,14,0.82)] backdrop-blur-xl">
+      <div className="mx-auto flex min-h-[68px] max-w-[1440px] items-center justify-between px-4 sm:px-6 lg:px-8">
+        <BrandWordmark />
 
-        <div className="flex items-center gap-5 text-sm">
-          {session ? (
-            <>
-              <Link href="/profile" className="text-muted hover:text-foreground transition-colors">
-                Profile
-              </Link>
-              <Link href="/dashboard" className="text-muted hover:text-foreground transition-colors">
-                Dashboard
-              </Link>
-              <Link href="/support" className="text-muted hover:text-foreground transition-colors">
-                Support
-              </Link>
+        {session ? (
+          <>
+            <div className="hidden items-center gap-1 rounded-xl border border-line/80 bg-surface/70 p-1 md:flex">
+              {NAV_LINKS.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="rounded-lg px-3.5 py-2 text-sm font-medium text-muted transition-colors hover:bg-elevated hover:text-foreground"
+                >
+                  {link.label}
+                </Link>
+              ))}
               {session.role === "admin" && (
-                <Link href="/admin" className="text-muted hover:text-foreground transition-colors">
+                <Link href="/admin" className="rounded-lg px-3.5 py-2 text-sm font-medium text-muted transition-colors hover:bg-elevated hover:text-foreground">
                   Admin
                 </Link>
               )}
-              <span className="text-faint">{session.username}</span>
-              <a
-                href="/api/auth/logout"
-                className="bg-elevated hover:bg-surface-hover text-muted hover:text-foreground px-3 py-1.5 rounded-md border border-line transition-colors text-sm"
-              >
-                Logout
-              </a>
-            </>
-          ) : (
-            <Link
-              href="/auth"
-              className="bg-pulse hover:bg-pulse-hover text-black font-medium px-4 py-2 rounded-md transition-colors"
-            >
-              Get Started
-            </Link>
-          )}
-        </div>
+            </div>
+
+            <div className="hidden items-center gap-3 md:flex">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-elevated text-sm font-bold text-pulse">
+                {(session.username || "U").slice(0, 1).toUpperCase()}
+              </div>
+              <div className="hidden lg:block">
+                <div className="max-w-28 truncate text-sm font-semibold text-foreground">{session.username}</div>
+                <div className="text-[11px] text-faint">Lookout active</div>
+              </div>
+              <form action="/api/auth/logout" method="post">
+                <button type="submit" className="secondary-button px-3.5 py-2 text-sm">
+                  Log out
+                </button>
+              </form>
+            </div>
+
+            <div className="md:hidden">
+              <NavDropdown username={session.username} isAdmin={session.role === "admin"} />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="hidden items-center gap-1 md:flex">
+              {[
+                { href: "/#how-it-works", label: "How it works" },
+                { href: "/#companies", label: "Companies" },
+                { href: "/#faq", label: "FAQ" },
+              ].map((link) => (
+                <a key={link.href} href={link.href} className="rounded-lg px-3.5 py-2 text-sm font-medium text-muted transition-colors hover:bg-elevated hover:text-foreground">
+                  {link.label}
+                </a>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 sm:gap-3">
+              <Link href="/auth" className="hidden px-3 py-2 text-sm font-semibold text-muted transition-colors hover:text-foreground sm:inline-flex">
+                Log in
+              </Link>
+              <Link href="/auth?mode=register" className="primary-button px-4 py-2.5 text-sm">
+                Start your lookout
+              </Link>
+            </div>
+          </>
+        )}
       </div>
     </nav>
   );

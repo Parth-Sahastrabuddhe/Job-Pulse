@@ -945,11 +945,11 @@ async function main() {
     try { return getConfig().heartbeat.micro; } catch { return ""; }
   };
   process.on("uncaughtException", (err) => {
-    log(`[heartbeat] uncaughtException: ${err?.message}`);
+    log(`[heartbeat] uncaughtException: ${err?.stack || err?.message}`);
     pingFail(heartbeatUrl(), `uncaughtException: ${err?.message}`).finally(() => process.exit(1));
   });
   process.on("unhandledRejection", (reason) => {
-    log(`[heartbeat] unhandledRejection: ${reason?.message ?? reason}`);
+    log(`[heartbeat] unhandledRejection: ${reason?.stack || reason?.message || reason}`);
     pingFail(heartbeatUrl(), `unhandledRejection: ${reason?.message ?? reason}`).finally(() => process.exit(1));
   });
 
@@ -1047,7 +1047,7 @@ export function isEntrypoint(moduleUrl, options = {}) {
 
 if (isEntrypoint(import.meta.url)) {
   main().catch((error) => {
-    console.error(`[${timestamp()}] ${error.message}`);
+    console.error(`[${timestamp()}] ${error.stack || error.message}`);
     process.exitCode = 1;
     // Backstop: main()'s finally releases the Discord client and the DB, but a
     // stray timer or socket from a partially-initialised subsystem can still keep
